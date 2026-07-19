@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Onyx Ledger — Your Tax Operating System</title>
+<meta name="description" content="Onyx Ledger, powered by ONYX Intelligence: a complete tax operating system — Overview command centre, Tax Health, Opportunities, Documents vault, Tax Planner, Insights, and a context-aware Copilot." />
+<style>
+  :root{
+    --bg:#0A0908;--bg-1:#0F0C09;--bg-2:#141009;--bg-3:#1A160F;--bg-4:#231D14;--bg-glass:rgba(15,12,9,.82);
+    --line:rgba(233,214,183,.12);--line-2:rgba(233,214,183,.22);
+    --ink:#F2EBDF;--ink-2:#A79C8B;--ink-3:#726858;
+    --accent:#E3BE86;--accent-2:#C68A4E;--accent-hi:#F7E6C6;--accent-ink:#0C0A08;
+    --pos:#67B893;--info:#87ABD4;--warn:#D6A25A;--crit:#D77B63;--grain:.045;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
+    --r:14px;--r-lg:18px;--nav:262px;
+  }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#EFEAE0;--bg-1:#F4EFE6;--bg-2:#FBF8F1;--bg-3:#FFFFFF;--bg-4:#F1EADD;--bg-glass:rgba(244,239,230,.85);
+      --line:rgba(50,36,16,.13);--line-2:rgba(50,36,16,.24);--ink:#1C1710;--ink-2:#5B5245;--ink-3:#8C8273;
+      --accent:#9A6A2A;--accent-2:#B98A45;--accent-hi:#7E551E;--accent-ink:#FFFFFF;
+      --pos:#3F8A66;--info:#3E6EA6;--warn:#B27C2E;--crit:#BC5B41;--grain:.03;}
+  }
+  :root[data-theme="light"]{--bg:#EFEAE0;--bg-1:#F4EFE6;--bg-2:#FBF8F1;--bg-3:#FFFFFF;--bg-4:#F1EADD;--bg-glass:rgba(244,239,230,.85);
+    --line:rgba(50,36,16,.13);--line-2:rgba(50,36,16,.24);--ink:#1C1710;--ink-2:#5B5245;--ink-3:#8C8273;
+    --accent:#9A6A2A;--accent-2:#B98A45;--accent-hi:#7E551E;--accent-ink:#FFFFFF;
+    --pos:#3F8A66;--info:#3E6EA6;--warn:#B27C2E;--crit:#BC5B41;--grain:.03;}
+  :root[data-theme="dark"]{--bg:#0A0908;--bg-1:#0F0C09;--bg-2:#141009;--bg-3:#1A160F;--bg-4:#231D14;--bg-glass:rgba(15,12,9,.82);
+    --line:rgba(233,214,183,.12);--line-2:rgba(233,214,183,.22);--ink:#F2EBDF;--ink-2:#A79C8B;--ink-3:#726858;
+    --accent:#E3BE86;--accent-2:#C68A4E;--accent-hi:#F7E6C6;--accent-ink:#0C0A08;
+    --pos:#67B893;--info:#87ABD4;--warn:#D6A25A;--crit:#D77B63;--grain:.045;}
+
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  svg{display:block}button{font:inherit;color:inherit;cursor:pointer}a{color:inherit;text-decoration:none}
+  h1,h2,h3,h4,p{margin:0}::selection{background:var(--accent);color:var(--accent-ink)}
+  .mono{font-family:var(--mono)}.serif{font-family:var(--serif)}.tnum{font-variant-numeric:tabular-nums}
+  body::after{content:"";position:fixed;inset:0;z-index:200;pointer-events:none;opacity:var(--grain);mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")}
+  ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:99px;border:3px solid transparent;background-clip:content-box}
+
+  /* ================= SHELL ================= */
+  .shell{display:grid;grid-template-columns:var(--nav) 1fr;min-height:100vh}
+  @media (max-width:900px){.shell{grid-template-columns:1fr}}
+
+  .sidebar{border-right:1px solid var(--line);background:var(--bg-1);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:.2rem;padding:1.1rem .8rem;overflow-y:auto}
+  @media (max-width:900px){.sidebar{position:sticky;top:0;height:auto;flex-direction:column;padding:.7rem}}
+  .logo{display:flex;flex-direction:column;padding:.4rem .6rem 1rem}
+  .logo .l1{display:flex;align-items:baseline;gap:.5ch;font-family:var(--serif);font-size:1.32rem;font-weight:600;letter-spacing:.01em}
+  .logo .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);align-self:center;box-shadow:0 0 12px var(--accent)}
+  .logo .l2{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase;margin-top:.35rem;padding-left:.1rem}
+  .navlist{display:flex;flex-direction:column;gap:.15rem}
+  @media (max-width:900px){.navlist{flex-direction:row;overflow-x:auto;gap:.3rem;padding-bottom:.3rem}}
+  .navitem{display:flex;align-items:center;gap:.75rem;padding:.6rem .7rem;border-radius:10px;color:var(--ink-2);font-size:.9rem;font-weight:500;border:1px solid transparent;white-space:nowrap;transition:.15s;position:relative}
+  .navitem svg{width:18px;height:18px;flex:none;opacity:.85}
+  .navitem:hover{background:var(--bg-3);color:var(--ink)}
+  .navitem.active{background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--ink);border-color:color-mix(in oklab,var(--accent) 35%,transparent)}
+  .navitem.active svg{color:var(--accent);opacity:1}
+  .navitem .pill{margin-left:auto;font-family:var(--mono);font-size:.6rem;padding:.15em .45em;border-radius:99px;background:var(--accent);color:var(--accent-ink);font-weight:700}
+  .navitem .pill.warn{background:var(--warn)}
+  @media (max-width:900px){.navitem .pill{display:none}}
+  .navspacer{flex:1}
+  @media (max-width:900px){.navspacer{display:none}}
+  .userchip{display:flex;align-items:center;gap:.6rem;padding:.6rem;border-radius:10px;border:1px solid var(--line);margin-top:.5rem}
+  @media (max-width:900px){.userchip,.logo .l2{display:none}}
+  .userchip .av{width:30px;height:30px;border-radius:50%;background:radial-gradient(circle at 35% 30%,var(--accent-hi),var(--accent-2));flex:none}
+  .userchip .un{font-size:.82rem;font-weight:600;line-height:1.2}
+  .userchip .uy{font-family:var(--mono);font-size:.64rem;color:var(--ink-3)}
+
+  /* ================= MAIN ================= */
+  .main{min-width:0;display:flex;flex-direction:column}
+  .topbar{position:sticky;top:0;z-index:20;background:var(--bg-glass);backdrop-filter:blur(14px) saturate(1.2);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:1rem;padding:.85rem clamp(1rem,3vw,2rem)}
+  .topbar .crumb{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+  .topbar h1{font-family:var(--serif);font-size:1.35rem;font-weight:600;letter-spacing:-.01em;margin-top:.1rem}
+  .topbar .ttl{min-width:0}
+  .topbar .actions{margin-left:auto;display:flex;align-items:center;gap:.7rem}
+  .yearsel{font-family:var(--mono);font-size:.74rem;padding:.45em .8em;border:1px solid var(--line-2);border-radius:99px;color:var(--ink-2);background:var(--bg-2)}
+  .askbtn{display:inline-flex;align-items:center;gap:.5ch;padding:.5em 1em;border-radius:99px;border:0;font-weight:600;font-size:.84rem;
+    background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:var(--accent-ink);box-shadow:0 8px 22px -12px rgba(227,190,134,.6)}
+  .askbtn:hover{transform:translateY(-1px)}.askbtn svg{width:16px;height:16px}
+
+  .content{padding:clamp(1rem,3vw,2rem);max-width:1180px;width:100%}
+  .view{display:none;animation:fade .4s cubic-bezier(.2,.7,.2,1)}
+  .view.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+  /* generic */
+  .grid{display:grid;gap:1rem}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+  @media (max-width:820px){.g2,.g3{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg-2);overflow:hidden}
+  .card.glow{background:radial-gradient(120% 90% at 100% 0%,rgba(227,190,134,.1),transparent 55%),linear-gradient(180deg,var(--bg-3),var(--bg-2));border-color:var(--line-2)}
+  .card-h{padding:.9rem 1.15rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6ch;font-weight:600;font-size:.92rem}
+  .card-h svg{width:17px;height:17px;color:var(--accent)}
+  .card-h .badge{margin-left:auto;font-family:var(--mono);font-size:.66rem;letter-spacing:.04em;color:var(--ink-3);font-weight:400}
+  .card-b{padding:1.15rem}
+  .eyebrow{font-family:var(--mono);font-size:.64rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+  .k{font-family:var(--mono);font-size:.64rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .sectitle{font-family:var(--serif);font-size:1.2rem;font-weight:600;margin:1.8rem 0 .9rem;letter-spacing:-.01em}
+  .lead{color:var(--ink-2);max-width:60ch}
+
+  /* refund block */
+  .refund-n{font-family:var(--serif);font-weight:600;font-size:clamp(2.4rem,1.8rem + 2.6vw,3.2rem);line-height:1;letter-spacing:-.02em}
+  .refund-n .cur{color:var(--accent);font-size:.5em;vertical-align:.24em;margin-right:.05ch}
+  .conf{display:inline-flex;align-items:center;gap:.5ch;font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;padding:.25em .65em;border-radius:99px;
+    border:1px solid color-mix(in oklab,var(--pos) 40%,transparent);color:var(--pos);margin-top:.7rem}
+  .basedon{margin-top:1rem;display:flex;flex-direction:column;gap:.35rem}
+  .basedon .b{display:flex;align-items:center;gap:.6ch;font-size:.85rem;color:var(--ink-2)}
+  .ic-ok{color:var(--pos)}.ic-warn{color:var(--warn)}
+  .range{margin-top:1.2rem}
+  .range .track{position:relative;height:6px;border-radius:99px;background:linear-gradient(90deg,var(--line),var(--accent-2),var(--line));margin:1.4rem 0 .4rem}
+  .range .mid{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg-2)}
+  .range .ends{position:absolute;top:50%;width:9px;height:9px;border-radius:50%;background:var(--ink-3);transform:translateY(-50%)}
+  .range .lbls{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.72rem;color:var(--ink-3)}
+  .range .lbls b{color:var(--accent);font-weight:600}
+
+  /* health */
+  .health-hero{display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap}
+  .dial{position:relative;width:130px;height:130px;flex:none}
+  .dial svg{transform:rotate(-90deg)}.dial .tk{stroke:var(--line)}
+  .dial .pg{stroke:var(--accent);stroke-linecap:round;transition:stroke-dashoffset 1.3s cubic-bezier(.2,.7,.2,1)}
+  .dial .ctr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .dial .ctr .n{font-family:var(--serif);font-size:2.4rem;font-weight:600;line-height:1}
+  .dial .ctr .d{font-family:var(--mono);font-size:.62rem;color:var(--ink-3);letter-spacing:.1em}
+  .health-meta .grade{display:inline-flex;align-items:center;gap:.5ch;font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--pos);border:1px solid color-mix(in oklab,var(--pos) 40%,transparent);padding:.3em .7em;border-radius:99px}
+  .health-meta h3{font-family:var(--serif);font-size:1.3rem;font-weight:600;margin:.6rem 0 .3rem}
+  .health-meta p{color:var(--ink-2);font-size:.9rem}
+  .checklist{display:flex;flex-direction:column}
+  .cl{display:flex;align-items:center;gap:.75rem;padding:.6rem 0;border-bottom:1px dashed var(--line);font-size:.9rem}
+  .cl:last-child{border-bottom:0}
+  .cl .m{width:18px;height:18px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:.66rem;font-weight:800}
+  .cl .m.ok{background:color-mix(in oklab,var(--pos) 24%,transparent);color:var(--pos)}
+  .cl .m.warn{background:color-mix(in oklab,var(--warn) 24%,transparent);color:var(--warn)}
+  .cl .impact{margin-left:auto;font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
+
+  /* opportunity cards */
+  .opp{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r);background:var(--bg-2);padding:1.1rem 1.2rem;display:flex;gap:1rem;align-items:flex-start}
+  .opp .body{flex:1}.opp .chip{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .opp h4{font-family:var(--serif);font-size:1.08rem;font-weight:600;margin:.3rem 0 .25rem}
+  .opp p{font-size:.88rem;color:var(--ink-2)}
+  .opp .impact{font-family:var(--mono);font-size:.82rem;color:var(--pos);margin-top:.5rem}
+  .opp .act{flex:none;align-self:center}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5ch;padding:.6em 1.1em;border-radius:99px;border:1px solid transparent;font-weight:600;font-size:.84rem;line-height:1;transition:.18s;white-space:nowrap}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .btn-primary{background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:var(--accent-ink);box-shadow:0 8px 22px -12px rgba(227,190,134,.55)}
+  .btn-primary:hover{transform:translateY(-2px)}
+  .btn-ghost{border-color:var(--line-2);color:var(--ink)}.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-sm{padding:.45em .85em;font-size:.78rem}
+
+  /* action centre / progress */
+  .task{display:flex;align-items:center;gap:.75rem;padding:.7rem 0;border-bottom:1px dashed var(--line);font-size:.9rem}
+  .task:last-child{border-bottom:0}
+  .task .box{width:18px;height:18px;flex:none;border-radius:5px;border:1.5px solid var(--line-2)}
+  .task.done .box{background:var(--pos);border-color:var(--pos)}
+  .task.done .t{color:var(--ink-3);text-decoration:line-through}
+  .task .t{flex:1}.task .go{font-family:var(--mono);font-size:.72rem;color:var(--accent)}
+  .steps{display:flex;gap:.4rem;margin-top:.3rem}
+  .steps .s{flex:1;height:6px;border-radius:99px;background:var(--line)}
+  .steps .s.on{background:linear-gradient(90deg,var(--accent-2),var(--accent))}
+  .stepwrap .lbls{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.66rem;color:var(--ink-3);margin-top:.5rem}
+
+  /* found list */
+  .found{display:flex;flex-direction:column;gap:.5rem}
+  .found .f{display:flex;align-items:center;gap:.7ch;font-size:.9rem}
+  .found .f .amt{margin-left:auto;font-family:var(--mono);color:var(--ink)}
+
+  /* documents */
+  .doc-row{display:grid;grid-template-columns:40px 1fr auto;gap:1rem;padding:.9rem 1.15rem;border-bottom:1px solid var(--line);align-items:center}
+  .doc-row:last-child{border-bottom:0}
+  .doc-ic{width:40px;height:40px;border-radius:9px;background:var(--bg-4);display:grid;place-items:center;color:var(--accent);font-family:var(--mono);font-size:.62rem;font-weight:700}
+  .doc-main .t{font-weight:600;font-size:.92rem}
+  .doc-main .s{font-family:var(--mono);font-size:.72rem;color:var(--ink-3);display:flex;gap:1rem;flex-wrap:wrap;margin-top:.2rem}
+  .doc-stat{display:flex;flex-direction:column;align-items:flex-end;gap:.3rem}
+  .stat-pill{font-family:var(--mono);font-size:.66rem;letter-spacing:.04em;padding:.25em .6em;border-radius:99px;display:inline-flex;align-items:center;gap:.5ch}
+  .stat-pill.done{color:var(--pos);border:1px solid color-mix(in oklab,var(--pos) 35%,transparent)}
+  .stat-pill.review{color:var(--warn);border:1px solid color-mix(in oklab,var(--warn) 35%,transparent)}
+  .stat-pill.missing{color:var(--crit);border:1px solid color-mix(in oklab,var(--crit) 35%,transparent)}
+  .conf-mini{font-family:var(--mono);font-size:.68rem;color:var(--ink-3)}
+  .extracted{grid-column:2/4;font-family:var(--mono);font-size:.74rem;color:var(--ink-2);background:var(--bg-1);border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem;margin-top:.2rem;display:none}
+  .extracted.open{display:block}
+  .dropzone{border:1.5px dashed var(--line-2);border-radius:var(--r);padding:1.4rem;text-align:center;transition:.2s;margin-bottom:1rem}
+  .dropzone.hot{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 8%,transparent)}
+  .dropzone svg{width:28px;height:28px;color:var(--accent);margin:0 auto .4rem}
+  .secbadge{display:inline-flex;align-items:center;gap:.6ch;font-size:.8rem;color:var(--ink-2);margin-top:.7rem}
+  .secbadge svg{width:15px;height:15px;color:var(--pos)}
+
+  /* tax return tabs */
+  .subtabs{display:flex;gap:.3rem;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:1.2rem;padding-bottom:0}
+  .subtab{padding:.6em .9em;font-size:.84rem;color:var(--ink-2);border-bottom:2px solid transparent;white-space:nowrap;font-weight:500}
+  .subtab.active{color:var(--ink);border-bottom-color:var(--accent)}
+  .subtab:hover{color:var(--ink)}
+  .ret-row{display:flex;align-items:center;gap:1rem;padding:.7rem 0;border-bottom:1px dashed var(--line);font-size:.9rem}
+  .ret-row:last-child{border-bottom:0}
+  .ret-row .rl{flex:1}.ret-row .src{font-family:var(--mono);font-size:.66rem;color:var(--ink-3);background:var(--bg-4);padding:.15em .5em;border-radius:5px}
+  .ret-row .rv{font-family:var(--mono);color:var(--ink)}
+  .ret-total{display:flex;justify-content:space-between;padding:.9rem 0 0;margin-top:.4rem;border-top:1px solid var(--line-2);font-weight:600}
+  .ret-total .rv{font-family:var(--mono);color:var(--accent)}
+
+  /* planner / simulator */
+  .sim-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;align-items:center}
+  @media (max-width:720px){.sim-grid{grid-template-columns:1fr}}
+  .sim-out{text-align:center;padding:1.2rem;border:1px solid var(--line-2);border-radius:var(--r);background:var(--bg-3)}
+  .sim-out .row2{display:flex;justify-content:space-around;gap:1rem;margin-bottom:1rem}
+  .sim-out .col .k{margin-bottom:.3rem}
+  .sim-out .col .v{font-family:var(--serif);font-size:1.6rem;font-weight:600}
+  .sim-diff{font-family:var(--serif);font-size:2.4rem;font-weight:700;color:var(--pos);letter-spacing:-.02em}
+  input[type=range]{width:100%;accent-color:var(--accent);height:28px}
+  .sliderval{font-family:var(--serif);font-size:1.8rem;font-weight:600}
+  .scenarios{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}
+  .scenario{font-family:var(--mono);font-size:.76rem;padding:.5em .8em;border-radius:99px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink-2);transition:.18s}
+  .scenario:hover,.scenario.active{border-color:var(--accent);color:var(--accent)}
+  .disc{font-size:.78rem;color:var(--ink-3);margin-top:1rem;line-height:1.5}
+
+  /* timeline */
+  .timeline{display:grid;grid-template-columns:repeat(6,1fr);gap:.8rem;overflow-x:auto}
+  @media (max-width:820px){.timeline{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:520px){.timeline{grid-template-columns:repeat(2,1fr)}}
+  .tl{border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2);padding:.9rem;position:relative}
+  .tl.now{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 8%,transparent)}
+  .tl .mo{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  .tl .ev{font-size:.8rem;color:var(--ink-2);margin-top:.5rem;display:flex;gap:.5ch;line-height:1.35}
+  .tl .ev::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--ink-3);margin-top:.5em;flex:none}
+  .tl.now .mo{color:var(--accent)}
+
+  /* insights */
+  .stat{border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2);padding:1.1rem}
+  .stat .k{margin-bottom:.4rem}
+  .stat .v{font-family:var(--serif);font-size:1.9rem;font-weight:600;letter-spacing:-.01em}
+  .stat .sub{font-size:.78rem;margin-top:.2rem}.up{color:var(--pos)}.down{color:var(--crit)}
+  .bars{display:flex;align-items:flex-end;gap:1rem;height:150px;padding-top:1rem}
+  .bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:.5rem;height:100%;justify-content:flex-end}
+  .bar .col{width:100%;max-width:52px;border-radius:8px 8px 0 0;background:linear-gradient(180deg,var(--accent),var(--accent-2));position:relative;transition:height 1s cubic-bezier(.2,.7,.2,1)}
+  .bar.cur .col{background:linear-gradient(180deg,var(--accent-hi),var(--accent))}
+  .bar .yv{font-family:var(--mono);font-size:.72rem;color:var(--ink-2)}
+  .bar .yl{font-family:var(--mono);font-size:.66rem;color:var(--ink-3)}
+
+  /* security */
+  .sec-hero{font-family:var(--serif);font-size:clamp(1.5rem,1.2rem + 1.4vw,2rem);font-weight:500;letter-spacing:-.01em;max-width:22ch;text-wrap:balance}
+  .sec-item{border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2);padding:1.1rem}
+  .sec-item svg{width:22px;height:22px;color:var(--accent);margin-bottom:.6rem}
+  .sec-item h4{font-family:var(--serif);font-size:1.05rem;font-weight:600;margin-bottom:.3rem}
+  .sec-item p{font-size:.86rem;color:var(--ink-2)}
+
+  /* copilot page + dock shared */
+  .prompts{display:flex;flex-wrap:wrap;gap:.5rem}
+  .prompt{font-size:.82rem;text-align:left;padding:.55em .8em;border-radius:10px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink-2);transition:.18s}
+  .prompt:hover{border-color:var(--accent);color:var(--accent)}
+  .convo{display:flex;flex-direction:column;gap:.7rem;margin-top:1.2rem;min-height:120px}
+  .msg{max-width:80%;padding:.7rem .9rem;border-radius:14px;font-size:.9rem;line-height:1.5}
+  .msg.bot{align-self:flex-start;background:var(--bg-3);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .msg.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px}
+  .msg b{color:var(--accent)}.msg.me b{color:var(--accent-ink)}
+  .typing{align-self:flex-start;display:inline-flex;gap:4px;padding:.7rem .9rem;background:var(--bg-3);border:1px solid var(--line);border-radius:14px}
+  .typing i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);animation:td 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes td{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+  /* copilot dock */
+  .dock{position:fixed;right:18px;bottom:18px;z-index:120;width:min(370px,calc(100vw - 36px));height:min(540px,calc(100vh - 36px));display:none;flex-direction:column;
+    border:1px solid var(--line-2);border-radius:var(--r-lg);overflow:hidden;background:var(--bg-2);box-shadow:0 40px 90px -40px rgba(0,0,0,.85)}
+  .dock.open{display:flex}
+  .dock-h{padding:.85rem 1rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6ch;background:var(--bg-3)}
+  .dock-h .av{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,var(--accent-hi),var(--accent-2));box-shadow:0 0 12px -2px var(--accent)}
+  .dock-h .ti{font-weight:600;font-size:.9rem;line-height:1.1}
+  .dock-h .ctx{font-family:var(--mono);font-size:.58rem;letter-spacing:.06em;color:var(--accent);text-transform:uppercase;margin-top:.15rem}
+  .dock-h .x{margin-left:auto;background:none;border:0;color:var(--ink-3);font-size:1.3rem;line-height:1;padding:0 .3rem}.dock-h .x:hover{color:var(--ink)}
+  .dock-body{flex:1;overflow-y:auto;padding:.9rem;display:flex;flex-direction:column;gap:.6rem}
+  .dock-body .msg{max-width:86%;font-size:.85rem}
+  .dock-prompts{padding:.6rem .8rem;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.35rem;background:var(--bg-3)}
+  .dock-prompts .prompt{font-size:.74rem;padding:.4em .6em}
+  .docktrigger{position:fixed;right:18px;bottom:18px;z-index:110;border-radius:99px;padding:.75em 1.15em;border:0;font-weight:600;font-size:.86rem;
+    background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:var(--accent-ink);box-shadow:0 14px 34px -14px rgba(227,190,134,.7);display:inline-flex;align-items:center;gap:.5ch}
+  .docktrigger:hover{transform:translateY(-2px)}.docktrigger svg{width:17px;height:17px}
+
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="l1"><span class="dot" aria-hidden="true"></span>Onyx&nbsp;Ledger</span>
+      <span class="l2">Powered by ONYX Intelligence</span>
+    </div>
+    <nav class="navlist" id="nav" aria-label="Primary">
+      <button class="navitem active" data-view="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/></svg>Overview</button>
+      <button class="navitem" data-view="return"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l3 3v15H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Tax Return</button>
+      <button class="navitem" data-view="documents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h6l2 2h8v12H4z"/></svg>Documents<span class="pill warn">2</span></button>
+      <button class="navitem" data-view="health"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21C7 18 4 14.5 4 9.5A4.5 4.5 0 0 1 12 6a4.5 4.5 0 0 1 8 3.5c0 5-3 8.5-8 11.5Z"/><path d="M8 12h2l1.5-2.5L13 14l1-2h2"/></svg>Tax Health<span class="pill">82</span></button>
+      <button class="navitem" data-view="planner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V4M4 20h16M8 16v-4M12 16V7M16 16v-6"/></svg>Tax Planner</button>
+      <button class="navitem" data-view="insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19V5M4 19h16M7 15l3-4 3 2 4-6"/></svg>Insights</button>
+      <button class="navitem" data-view="copilot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12Z"/></svg>Copilot</button>
+      <button class="navitem" data-view="security"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>Security</button>
+      <button class="navitem" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.3l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2.3-1.3L13.8 2h-3.6l-.4 2.4a7 7 0 0 0-2.3 1.3l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.3l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2.3 1.3l.4 2.4h3.6l.4-2.4a7 7 0 0 0 2.3-1.3l2.3.9 2-3.4-2-1.5A7 7 0 0 0 19 12Z"/></svg>Settings</button>
+    </nav>
+    <div class="navspacer"></div>
+    <a class="userchip" href="index.html" title="Back to website">
+      <span class="av" aria-hidden="true"></span>
+      <span><span class="un">Alex Chen</span><br><span class="uy">Tax year 2025 · Ontario</span></span>
+    </a>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <div class="main">
+    <header class="topbar">
+      <div class="ttl">
+        <div class="crumb" id="crumb">Onyx Ledger</div>
+        <h1 id="pageTitle">Overview</h1>
+      </div>
+      <div class="actions">
+        <span class="yearsel">Tax year 2025 ▾</span>
+        <button class="askbtn" id="askTop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12Z"/></svg>Ask ONYX</button>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- ============ OVERVIEW ============ -->
+      <section class="view active" data-view="overview">
+        <div class="grid g2">
+          <div class="card glow"><div class="card-b">
+            <div class="k">Estimated refund</div>
+            <div class="refund-n" style="margin-top:.3rem"><span class="cur">$</span>2,431</div>
+            <span class="conf"><span class="ic-ok">●</span> Confidence: High</span>
+            <div class="basedon">
+              <div class="b"><span class="ic-ok">✓</span> 3 income documents</div>
+              <div class="b"><span class="ic-ok">✓</span> 2 tax credits</div>
+              <div class="b"><span class="ic-ok">✓</span> 1 deduction</div>
+              <div class="b"><span class="ic-warn">⚠</span> 2 documents not yet reviewed</div>
+            </div>
+            <div class="range">
+              <div class="k">Potential range</div>
+              <div class="track"><span class="ends" style="left:0"></span><span class="mid"></span><span class="ends" style="right:0"></span></div>
+              <div class="lbls"><span>$2,180</span><b>$2,431</b><span>$2,670</span></div>
+            </div>
+          </div></div>
+
+          <div class="card"><div class="card-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21C7 18 4 14.5 4 9.5A4.5 4.5 0 0 1 12 6a4.5 4.5 0 0 1 8 3.5c0 5-3 8.5-8 11.5Z"/></svg>Your Tax Health<span class="badge">updated today</span></div>
+          <div class="card-b"><div class="health-hero">
+            <div class="dial"><svg width="130" height="130" viewBox="0 0 130 130"><circle class="tk" cx="65" cy="65" r="54" fill="none" stroke-width="10"/><circle class="pg" data-score="82" cx="65" cy="65" r="54" fill="none" stroke-width="10" stroke-dasharray="339.3" stroke-dashoffset="339.3"/></svg><div class="ctr"><span class="n" data-count="82">0</span><span class="d">/ 100</span></div></div>
+            <div class="health-meta">
+              <span class="grade">● Good</span>
+              <h3>Solid position</h3>
+              <p>You have completed <b>7 of 9</b> recommended actions. Two items still need review.</p>
+              <button class="btn btn-ghost btn-sm" data-goto="health" style="margin-top:.8rem">Open Tax Health →</button>
+            </div>
+          </div></div></div>
+        </div>
+
+        <!-- What ONYX found -->
+        <h2 class="sectitle">What ONYX found</h2>
+        <div class="card"><div class="card-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>ONYX Analysis Complete<span class="badge">6 documents reviewed</span></div>
+        <div class="card-b">
+          <div class="found">
+            <div class="f"><span class="ic-ok">✓</span> Employment income <span class="amt">$62,000</span></div>
+            <div class="f"><span class="ic-ok">✓</span> Tax already paid <span class="amt">$4,200</span></div>
+            <div class="f"><span class="ic-ok">✓</span> RRSP contributions <span class="amt">$1,500</span></div>
+            <div class="f"><span class="ic-ok">✓</span> Potential tuition credit <span class="amt">detected</span></div>
+            <div class="f"><span class="ic-warn">⚠</span> Investment information may be missing <span class="amt">review</span></div>
+            <div class="f"><span class="ic-warn">⚠</span> No donation receipts detected <span class="amt">optional</span></div>
+          </div>
+          <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line);display:flex;align-items:center;gap:.7ch">
+            <span class="k" style="letter-spacing:.1em">Potential tax opportunities</span>
+            <span class="mono" style="color:var(--accent);font-size:1.3rem;font-weight:700">3</span>
+            <button class="btn btn-ghost btn-sm" data-goto="health" style="margin-left:auto">Review opportunities →</button>
+          </div>
+        </div></div>
+
+        <div class="grid g2" style="margin-top:1rem">
+          <!-- Action centre -->
+          <div class="card"><div class="card-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Action Centre</div>
+          <div class="card-b">
+            <div class="task done"><span class="box"></span><span class="t">Upload income slips (T4, T5)</span></div>
+            <div class="task done"><span class="box"></span><span class="t">Confirm personal information</span></div>
+            <div class="task"><span class="box"></span><span class="t">Review medical expenses</span><span class="go">Do it →</span></div>
+            <div class="task"><span class="box"></span><span class="t">Add investment transactions</span><span class="go">Do it →</span></div>
+            <div class="task"><span class="box"></span><span class="t">Review &amp; file your return</span><span class="go">Do it →</span></div>
+          </div></div>
+
+          <!-- Filing progress + AI recs -->
+          <div class="grid" style="gap:1rem">
+            <div class="card"><div class="card-b stepwrap">
+              <div class="k">Filing progress</div>
+              <div class="steps" style="margin-top:.6rem"><span class="s on"></span><span class="s on"></span><span class="s on"></span><span class="s"></span><span class="s"></span></div>
+              <div class="lbls"><span>Collect</span><span>Analyse</span><span>Optimise</span><span>Review</span><span>File</span></div>
+            </div></div>
+            <div class="opp"><div class="body"><span class="chip">AI recommendation</span><h4>Additional medical expenses</h4><p>You may be eligible to claim additional medical expenses.</p><div class="impact">Estimated impact: +$420</div></div><span class="act"><button class="btn btn-primary btn-sm" data-goto="health">Review</button></span></div>
+          </div>
+        </div>
+
+        <!-- Tax Timeline -->
+        <h2 class="sectitle">Your Tax Timeline <span class="k" style="font-family:var(--mono)">· year-round</span></h2>
+        <div class="timeline">
+          <div class="tl"><div class="mo">January</div><div class="ev">Tax documents begin arriving</div></div>
+          <div class="tl now"><div class="mo">February · now</div><div class="ev">T4 uploaded</div><div class="ev">RRSP deadline approaching</div></div>
+          <div class="tl"><div class="mo">March</div><div class="ev">Deduction review</div></div>
+          <div class="tl"><div class="mo">April</div><div class="ev">Filing deadline</div></div>
+          <div class="tl"><div class="mo">May</div><div class="ev">Refund received</div></div>
+          <div class="tl"><div class="mo">June</div><div class="ev">Tax planning review</div></div>
+          <div class="tl"><div class="mo">September</div><div class="ev">Instalment check-in</div></div>
+          <div class="tl"><div class="mo">November</div><div class="ev">FHSA / TFSA review</div></div>
+          <div class="tl"><div class="mo">December</div><div class="ev">Year-end tax moves</div></div>
+        </div>
+      </section>
+
+      <!-- ============ TAX RETURN ============ -->
+      <section class="view" data-view="return">
+        <p class="lead" style="margin-bottom:1rem">See exactly how your return is being constructed, section by section.</p>
+        <div class="subtabs" id="retTabs">
+          <button class="subtab active" data-tab="personal">Personal Information</button>
+          <button class="subtab" data-tab="income">Income</button>
+          <button class="subtab" data-tab="deductions">Deductions</button>
+          <button class="subtab" data-tab="credits">Tax Credits</button>
+          <button class="subtab" data-tab="investments">Investments</button>
+          <button class="subtab" data-tab="benefits">Benefits</button>
+          <button class="subtab" data-tab="review">Review</button>
+          <button class="subtab" data-tab="export">Export / File</button>
+        </div>
+        <div class="card"><div class="card-b" id="retBody"></div></div>
+      </section>
+
+      <!-- ============ DOCUMENTS ============ -->
+      <section class="view" data-view="documents">
+        <div class="dropzone" id="dropzone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4m0 0 4 4m-4-4-4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+          <p style="font-weight:600">Drop tax documents here</p>
+          <p style="font-size:.84rem;color:var(--ink-2)">PDF, image, or CSV · ONYX reads and verifies each one</p>
+          <div class="secbadge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg> Your documents are encrypted and securely processed.</div>
+        </div>
+        <div class="card"><div class="card-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5h6l2 2h8v12H4z"/></svg>Document Vault<span class="badge" id="vaultCount">6 documents · 2025</span></div>
+        <div id="vault"></div></div>
+      </section>
+
+      <!-- ============ TAX HEALTH ============ -->
+      <section class="view" data-view="health">
+        <div class="card glow"><div class="card-b"><div class="health-hero">
+          <div class="dial"><svg width="130" height="130" viewBox="0 0 130 130"><circle class="tk" cx="65" cy="65" r="54" fill="none" stroke-width="10"/><circle class="pg" data-score="82" cx="65" cy="65" r="54" fill="none" stroke-width="10" stroke-dasharray="339.3" stroke-dashoffset="339.3"/></svg><div class="ctr"><span class="n" data-count="82">0</span><span class="d">/ 100</span></div></div>
+          <div class="health-meta">
+            <span class="grade">● Good</span>
+            <h3>Your Tax Health is 82 / 100</h3>
+            <p>You have completed <b>7 of 9</b> recommended actions. Complete the last two to strengthen your return.</p>
+          </div>
+        </div></div></div>
+
+        <div class="grid g2" style="margin-top:1rem">
+          <div class="card"><div class="card-h">Recommended actions</div><div class="card-b checklist">
+            <div class="cl"><span class="m ok">✓</span> Employment income verified</div>
+            <div class="cl"><span class="m ok">✓</span> RRSP contribution reviewed</div>
+            <div class="cl"><span class="m ok">✓</span> Tax credits applied</div>
+            <div class="cl"><span class="m ok">✓</span> Tuition amounts captured</div>
+            <div class="cl"><span class="m ok">✓</span> Filing status confirmed</div>
+            <div class="cl"><span class="m ok">✓</span> Personal information complete</div>
+            <div class="cl"><span class="m ok">✓</span> Income totals reconciled</div>
+            <div class="cl"><span class="m warn">⚠</span> Medical expenses not reviewed</div>
+            <div class="cl"><span class="m warn">⚠</span> Investment transactions missing</div>
+          </div></div>
+
+          <div class="grid" style="gap:1rem;align-content:start">
+            <h3 class="k" style="margin:0">Potential opportunities</h3>
+            <div class="opp"><div class="body"><span class="chip">Opportunity</span><h4>Additional medical expenses</h4><p>You may be eligible to claim additional medical expenses.</p><div class="impact">Estimated impact: +$420</div></div><span class="act"><button class="btn btn-primary btn-sm">Review</button></span></div>
+            <div class="opp"><div class="body"><span class="chip">Optimization</span><h4>RRSP Optimization</h4><p>Based on your current tax position, a contribution of approximately <b>$2,000</b> could potentially reduce your taxable income.</p></div><span class="act"><button class="btn btn-primary btn-sm" data-goto="planner">Explore Scenario</button></span></div>
+            <div class="opp" style="border-left-color:var(--info)"><div class="body"><span class="chip" style="color:var(--info)">Opportunity</span><h4>Work-from-home deduction</h4><p>You may qualify for home-office expenses based on your employment.</p><div class="impact">Estimated impact: +$180</div></div><span class="act"><button class="btn btn-ghost btn-sm">Review</button></span></div>
+          </div>
+        </div>
+
+        <h2 class="sectitle">Missing information &amp; risk checks</h2>
+        <div class="grid g2">
+          <div class="card"><div class="card-h">Missing information</div><div class="card-b checklist">
+            <div class="cl"><span class="m warn">⚠</span> Investment transactions (T5008)<span class="impact">not uploaded</span></div>
+            <div class="cl"><span class="m warn">⚠</span> Medical receipts total<span class="impact">needs review</span></div>
+          </div></div>
+          <div class="card"><div class="card-h">Risk checks</div><div class="card-b checklist">
+            <div class="cl"><span class="m ok">✓</span> Every figure traces to a slip<span class="impact">passed</span></div>
+            <div class="cl"><span class="m ok">✓</span> Credits within legal limits<span class="impact">passed</span></div>
+            <div class="cl"><span class="m ok">✓</span> No arithmetic errors<span class="impact">passed</span></div>
+          </div></div>
+        </div>
+      </section>
+
+      <!-- ============ TAX PLANNER ============ -->
+      <section class="view" data-view="planner">
+        <p class="lead" style="margin-bottom:1rem">Test a decision before you make it. ONYX estimates the impact on your refund — an estimate, never a promise.</p>
+        <div class="card glow"><div class="card-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20V4M4 20h16M8 16v-4M12 16V7M16 16v-6"/></svg>Tax Decision Simulator<span class="badge" id="simTitle">RRSP contribution</span></div>
+        <div class="card-b">
+          <div class="sim-grid">
+            <div>
+              <div class="k">What if I contribute</div>
+              <div class="sliderval"><span class="cur" style="color:var(--accent)">$</span><span id="simAmt">5,000</span> to my RRSP?</div>
+              <input type="range" id="simSlider" min="0" max="15000" step="500" value="5000" aria-label="RRSP contribution amount" />
+              <div class="k" style="display:flex;justify-content:space-between"><span>$0</span><span>$15,000</span></div>
+              <div class="scenarios" id="scenarios">
+                <button class="scenario active" data-s="rrsp">RRSP contribution</button>
+                <button class="scenario" data-s="sell">Sell my investment</button>
+                <button class="scenario" data-s="province">Move province</button>
+                <button class="scenario" data-s="wfh">Work from home</button>
+                <button class="scenario" data-s="donate">Donate $1,000</button>
+                <button class="scenario" data-s="self">Become self-employed</button>
+              </div>
+            </div>
+            <div class="sim-out">
+              <div class="row2">
+                <div class="col"><div class="k">Current refund</div><div class="v">$2,431</div></div>
+                <div class="col"><div class="k">With scenario</div><div class="v" id="simNew" style="color:var(--accent)">$3,820</div></div>
+              </div>
+              <div class="k">Estimated difference</div>
+              <div class="sim-diff" id="simDiff">+$1,389</div>
+            </div>
+          </div>
+          <p class="disc" id="simDisc">This is an estimate based on your current tax profile. The actual result may differ depending on your final income and available contribution room.</p>
+        </div></div>
+
+        <h2 class="sectitle">More planners</h2>
+        <div class="grid g3">
+          <div class="card"><div class="card-b"><div class="k">RRSP Simulator</div><h4 class="serif" style="font-size:1.1rem;margin:.4rem 0">Retirement savings</h4><p style="font-size:.86rem;color:var(--ink-2)">Model contributions against your marginal rate and contribution room.</p></div></div>
+          <div class="card"><div class="card-b"><div class="k">FHSA Simulator</div><h4 class="serif" style="font-size:1.1rem;margin:.4rem 0">First-home savings</h4><p style="font-size:.86rem;color:var(--ink-2)">See how the First Home Savings Account lowers taxable income.</p></div></div>
+          <div class="card"><div class="card-b"><div class="k">Capital Gains</div><h4 class="serif" style="font-size:1.1rem;margin:.4rem 0">Investment timing</h4><p style="font-size:.86rem;color:var(--ink-2)">Estimate the tax before you realize a gain or loss.</p></div></div>
+        </div>
+      </section>
+
+      <!-- ============ INSIGHTS ============ -->
+      <section class="view" data-view="insights">
+        <div class="grid g3">
+          <div class="stat"><div class="k">This year's refund</div><div class="v">$2,431</div><div class="sub up">▲ 10% vs 2024</div></div>
+          <div class="stat"><div class="k">Effective tax rate</div><div class="v">18.4%</div><div class="sub down">▼ 1.2 pts vs 2024</div></div>
+          <div class="stat"><div class="k">Tax efficiency</div><div class="v">82<span style="font-size:1rem;color:var(--ink-3)">/100</span></div><div class="sub up">▲ 6 pts</div></div>
+        </div>
+        <h2 class="sectitle">Refund · year over year</h2>
+        <div class="card"><div class="card-b">
+          <div class="bars" id="yoyBars">
+            <div class="bar"><div class="col" data-h="62"></div><div class="yv">$1,980</div><div class="yl">2023</div></div>
+            <div class="bar"><div class="col" data-h="70"></div><div class="yv">$2,210</div><div class="yl">2024</div></div>
+            <div class="bar cur"><div class="col" data-h="78"></div><div class="yv">$2,431</div><div class="yl">2025</div></div>
+          </div>
+        </div></div>
+        <h2 class="sectitle">Financial overview</h2>
+        <div class="grid g2">
+          <div class="card"><div class="card-b"><div class="k">Total income</div><div class="v serif" style="font-size:1.9rem;font-weight:600">$63,550</div><p style="font-size:.84rem;color:var(--ink-2);margin-top:.3rem">Employment $62,000 · Investment $1,550</p></div></div>
+          <div class="card"><div class="card-b"><div class="k">Tax-advantaged contributions</div><div class="v serif" style="font-size:1.9rem;font-weight:600">$1,500</div><p style="font-size:.84rem;color:var(--ink-2);margin-top:.3rem">RRSP to date · room remaining $9,300</p></div></div>
+        </div>
+      </section>
+
+      <!-- ============ COPILOT ============ -->
+      <section class="view" data-view="copilot">
+        <div class="card glow"><div class="card-b">
+          <div style="display:flex;align-items:center;gap:.7rem;margin-bottom:.4rem"><span class="dock-h av" style="width:32px;height:32px"></span><div><div style="font-family:var(--serif);font-size:1.2rem;font-weight:600">ONYX Copilot</div><div class="k" style="color:var(--pos)">● Online · context-aware</div></div></div>
+          <p class="lead">Ask anything about your tax return in plain language. The Copilot knows what you're looking at — the more you explore, the smarter its answers.</p>
+          <div class="k" style="margin:1.2rem 0 .6rem">Suggested prompts</div>
+          <div class="prompts" id="copilotPrompts"></div>
+          <div class="convo" id="copilotConvo"><div class="msg bot">Hi Alex — your 2025 return is looking good at a <b>$2,431</b> refund. Ask me why, what you might be missing, or what a decision would do to your taxes.</div></div>
+        </div></div>
+      </section>
+
+      <!-- ============ SECURITY ============ -->
+      <section class="view" data-view="security">
+        <div class="card glow"><div class="card-b">
+          <div class="secbadge" style="margin:0 0 .8rem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg> Security Centre</div>
+          <h2 class="sec-hero">Your financial information is yours.</h2>
+          <p class="lead" style="margin-top:.8rem">You're trusting Onyx Ledger with your T4, SIN, and financial documents. Here's exactly how that information is protected — in plain terms, without exaggerated claims.</p>
+        </div></div>
+        <div class="grid g3" style="margin-top:1rem">
+          <div class="sec-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><h4>Data encryption</h4><p>Your documents are encrypted in transit and while stored, so they can't be read in the open.</p></div>
+          <div class="sec-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/></svg><h4>Data storage</h4><p>Financial data is stored on secured infrastructure with restricted, logged access.</p></div>
+          <div class="sec-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg><h4>Data processing</h4><p>Documents are processed only to prepare your return and the insights you ask for.</p></div>
+          <div class="sec-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg><h4>Access controls</h4><p>Only you — and the systems you authorize — can reach your documents and figures.</p></div>
+          <div class="sec-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 15v2"/></svg><h4>Account security</h4><p>Sign-in protections help keep your account yours, with alerts for unusual activity.</p></div>
+          <div class="sec-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg><h4>Data deletion</h4><p>You can export or permanently delete your data at any time. We never sell it.</p></div>
+        </div>
+        <div class="card" style="margin-top:1rem"><div class="card-b"><p style="font-size:.82rem;color:var(--ink-3)">We describe our protections in plain language and avoid overstated marketing claims. Security details reflect current practices and are provided for transparency, not as a guarantee.</p></div></div>
+      </section>
+
+      <!-- ============ SETTINGS ============ -->
+      <section class="view" data-view="settings">
+        <div class="grid g2">
+          <div class="card"><div class="card-h">Profile</div><div class="card-b">
+            <div class="ret-row"><span class="rl">Name</span><span class="rv" style="font-family:var(--sans)">Alex Chen</span></div>
+            <div class="ret-row"><span class="rl">Province</span><span class="rv" style="font-family:var(--sans)">Ontario</span></div>
+            <div class="ret-row"><span class="rl">Tax year</span><span class="rv">2025</span></div>
+            <div class="ret-row"><span class="rl">Filing status</span><span class="rv" style="font-family:var(--sans)">Single</span></div>
+          </div></div>
+          <div class="card"><div class="card-h">Subscription</div><div class="card-b">
+            <div class="ret-row"><span class="rl">Current plan</span><span class="rv" style="font-family:var(--sans)">Free</span></div>
+            <div class="ret-row"><span class="rl">Premium Filing</span><span class="rv">$29.99 / return</span></div>
+            <div class="ret-row"><span class="rl">ONYX Pro</span><span class="rv">$9.99 / mo</span></div>
+            <a class="btn btn-primary btn-sm" href="index.html#pricing" style="margin-top:.8rem">Upgrade plan</a>
+          </div></div>
+          <div class="card"><div class="card-h">Privacy &amp; data controls</div><div class="card-b">
+            <div class="task done"><span class="box"></span><span class="t">Explain every recommendation in plain language</span></div>
+            <div class="task done"><span class="box"></span><span class="t">Ask before applying any optimization</span></div>
+            <div class="task done"><span class="box"></span><span class="t">Never sell my data</span></div>
+            <div class="task"><span class="box"></span><span class="t">Export all my data</span><span class="go">Export →</span></div>
+            <div class="task"><span class="box"></span><span class="t">Delete my account &amp; data</span><span class="go" style="color:var(--crit)">Delete →</span></div>
+          </div></div>
+          <div class="card"><div class="card-h">Security</div><div class="card-b">
+            <p style="font-size:.88rem;color:var(--ink-2)">Review how your financial information is protected in the Security Centre.</p>
+            <button class="btn btn-ghost btn-sm" data-goto="security" style="margin-top:.8rem">Open Security Centre →</button>
+          </div></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- ================= COPILOT DOCK ================= -->
+<button class="docktrigger" id="dockTrigger" aria-label="Open ONYX Copilot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12Z"/></svg>Ask ONYX</button>
+<section class="dock" id="dock" aria-label="ONYX Copilot">
+  <div class="dock-h"><span class="av" aria-hidden="true"></span><div><div class="ti">ONYX Copilot</div><div class="ctx" id="dockCtx">Context: Overview</div></div><button class="x" id="dockClose" aria-label="Close">&times;</button></div>
+  <div class="dock-body" id="dockBody"><div class="msg bot">I'm watching your whole tax position. Ask me anything — I'll tailor the answer to whatever you're viewing.</div></div>
+  <div class="dock-prompts" id="dockPrompts"></div>
+</section>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var T = function(ms){ return reduce?Math.min(ms,20):ms; };
+  var $ = function(s,r){ return (r||document).querySelector(s); };
+  var $$ = function(s,r){ return [].slice.call((r||document).querySelectorAll(s)); };
+
+  var TITLES = {overview:"Overview", return:"Tax Return", documents:"Documents", health:"Tax Health",
+    planner:"Tax Planner", insights:"Insights", copilot:"ONYX Copilot", security:"Security Centre", settings:"Settings"};
+
+  // ---------- view router ----------
+  var current="overview";
+  function setView(name){
+    if(!TITLES[name]) return;
+    current=name;
+    $$(".view").forEach(function(v){ v.classList.toggle("active", v.getAttribute("data-view")===name); });
+    $$(".navitem").forEach(function(n){ n.classList.toggle("active", n.getAttribute("data-view")===name); });
+    $("#pageTitle").textContent = TITLES[name];
+    $("#crumb").textContent = "Onyx Ledger" + (name!=="overview" ? " › "+TITLES[name] : "");
+    $("#dockCtx").textContent = "Context: "+TITLES[name];
+    updateDockPrompts();
+    animateView(name);
+    window.scrollTo({top:0,behavior:reduce?"auto":"smooth"});
+  }
+  $$("#nav .navitem").forEach(function(b){ b.addEventListener("click", function(){ setView(b.getAttribute("data-view")); }); });
+  document.addEventListener("click", function(e){
+    var g = e.target.closest("[data-goto]"); if(g){ setView(g.getAttribute("data-goto")); }
+  });
+
+  // ---------- animations per view ----------
+  var animated={};
+  function animateView(name){
+    var root = $('.view[data-view="'+name+'"]');
+    // dials
+    $$(".dial .pg", root).forEach(function(pg){
+      var score=+pg.getAttribute("data-score"), C=2*Math.PI*54, off=C*(1-score/100);
+      requestAnimationFrame(function(){ pg.style.strokeDashoffset=off; });
+    });
+    $$("[data-count]", root).forEach(function(el){
+      var to=+el.getAttribute("data-count");
+      if(reduce){ el.textContent=to; return; }
+      if(animated[name+el.getAttribute("data-count")]) { el.textContent=to; return; }
+      var start=null,dur=1200; function tick(ts){ if(!start)start=ts; var p=Math.min((ts-start)/dur,1);
+        el.textContent=Math.round(to*(1-Math.pow(1-p,3))); if(p<1)requestAnimationFrame(tick); }
+      requestAnimationFrame(tick);
+    });
+    // yoy bars
+    $$("#yoyBars .col", root).forEach(function(c){ requestAnimationFrame(function(){ c.style.height=c.getAttribute("data-h")+"%"; }); });
+    animated[name]=true;
+  }
+  animateView("overview");
+
+  // ---------- documents vault ----------
+  var DOCS = [
+    {tag:"T4", t:"T4 — Employer Income", issuer:"Maple Tech Inc.", stat:"done", conf:"98%", date:"2025-02-14", src:"Upload",
+     ex:"Employment income $62,000 · Income tax deducted $4,200 · CPP $3,754 · EI $1,049"},
+    {tag:"T5", t:"T5 — Investment Income", issuer:"Onyx Bank", stat:"done", conf:"95%", date:"2025-02-18", src:"Upload",
+     ex:"Eligible dividends $1,240 · Interest income $310"},
+    {tag:"RRSP", t:"RRSP Contribution Receipt", issuer:"Onyx Wealth", stat:"done", conf:"97%", date:"2025-02-20", src:"Upload",
+     ex:"Contribution amount $1,500 · Contribution period: first 60 days"},
+    {tag:"T2202", t:"T2202 — Tuition Certificate", issuer:"Toronto Metropolitan University", stat:"done", conf:"96%", date:"2025-02-22", src:"Upload",
+     ex:"Eligible tuition $4,200 · Part-time months: 4"},
+    {tag:"MED", t:"Medical Receipts", issuer:"Multiple providers", stat:"review", conf:"88%", date:"2025-02-24", src:"Upload",
+     ex:"12 receipts detected · Total $1,850 · 2 items need manual confirmation"},
+    {tag:"T5008", t:"Investment Transactions (T5008)", issuer:"Not detected", stat:"missing", conf:"—", date:"—", src:"—",
+     ex:"No securities transaction slip found. Add it if you sold investments in 2025."}
+  ];
+  function statLabel(s){ return s==="done"?"Processed":s==="review"?"Needs review":"Missing"; }
+  var vault = $("#vault");
+  DOCS.forEach(function(d,i){
+    var row=document.createElement("div"); row.className="doc-row";
+    row.innerHTML='<div class="doc-ic">'+d.tag+'</div>'+
+      '<div class="doc-main"><div class="t">'+d.t+'</div>'+
+      '<div class="s"><span>'+d.issuer+'</span><span>Tax year 2025</span><span>Source: '+d.src+'</span><span>'+d.date+'</span>'+
+      (d.stat!=="missing"?'<button class="mono" data-ex="'+i+'" style="background:none;border:0;color:var(--accent);cursor:pointer;font-size:.72rem">View fields ▾</button>':'')+'</div></div>'+
+      '<div class="doc-stat"><span class="stat-pill '+d.stat+'">'+(d.stat==="done"?"✓ ":d.stat==="review"?"⚠ ":"! ")+statLabel(d.stat)+'</span>'+
+      (d.conf!=="—"?'<span class="conf-mini">'+d.conf+' extraction confidence</span>':'')+'</div>'+
+      '<div class="extracted" id="ex-'+i+'">'+d.ex+'</div>';
+    vault.appendChild(row);
+  });
+  $$("[data-ex]").forEach(function(b){ b.addEventListener("click", function(){
+    var e=$("#ex-"+b.getAttribute("data-ex")); e.classList.toggle("open");
+    b.textContent = e.classList.contains("open")?"Hide fields ▴":"View fields ▾";
+  }); });
+  var dz=$("#dropzone");
+  ["dragenter","dragover"].forEach(function(ev){ dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.add("hot"); }); });
+  ["dragleave","drop"].forEach(function(ev){ dz.addEventListener(ev,function(e){ e.preventDefault(); dz.classList.remove("hot"); }); });
+
+  // ---------- tax return tabs ----------
+  var RET = {
+    personal:'<div class="ret-row"><span class="rl">Name</span><span class="rv" style="font-family:var(--sans)">Alex Chen</span></div>'+
+      '<div class="ret-row"><span class="rl">Province of residence</span><span class="rv" style="font-family:var(--sans)">Ontario</span></div>'+
+      '<div class="ret-row"><span class="rl">Marital status</span><span class="rv" style="font-family:var(--sans)">Single</span></div>'+
+      '<div class="ret-row"><span class="rl">Tax year</span><span class="rv">2025</span></div>'+
+      '<div class="ret-row"><span class="rl">SIN</span><span class="rv">•••&nbsp;•••&nbsp;<span style="color:var(--pos)">verified</span></span></div>',
+    income:'<div class="ret-row"><span class="rl">Employment income <span class="src">T4</span></span><span class="rv">$62,000</span></div>'+
+      '<div class="ret-row"><span class="rl">Eligible dividends <span class="src">T5</span></span><span class="rv">$1,240</span></div>'+
+      '<div class="ret-row"><span class="rl">Interest income <span class="src">T5</span></span><span class="rv">$310</span></div>'+
+      '<div class="ret-total"><span>Total income</span><span class="rv">$63,550</span></div>',
+    deductions:'<div class="ret-row"><span class="rl">RRSP deduction <span class="src">RRSP receipt</span></span><span class="rv">$1,500</span></div>'+
+      '<div class="ret-row"><span class="rl">Employment expenses</span><span class="rv" style="color:var(--warn)">under review</span></div>'+
+      '<div class="ret-total"><span>Total deductions</span><span class="rv">$1,500</span></div>',
+    credits:'<div class="ret-row"><span class="rl">Basic personal amount</span><span class="rv">$15,705</span></div>'+
+      '<div class="ret-row"><span class="rl">Canada employment amount</span><span class="rv">$1,433</span></div>'+
+      '<div class="ret-row"><span class="rl">Tuition credit <span class="src">T2202</span></span><span class="rv">$4,200</span></div>'+
+      '<div class="ret-row"><span class="rl">Medical expenses <span class="src">receipts</span></span><span class="rv" style="color:var(--warn)">pending review</span></div>',
+    investments:'<div class="ret-row"><span class="rl">Eligible dividends <span class="src">T5</span></span><span class="rv">$1,240</span></div>'+
+      '<div class="ret-row"><span class="rl">Dividend tax credit</span><span class="rv" style="color:var(--pos)">applied</span></div>'+
+      '<div class="ret-row"><span class="rl">Capital gains / losses <span class="src">T5008</span></span><span class="rv" style="color:var(--crit)">missing slip</span></div>',
+    benefits:'<div class="ret-row"><span class="rl">Canada Workers Benefit</span><span class="rv">not eligible</span></div>'+
+      '<div class="ret-row"><span class="rl">GST/HST credit</span><span class="rv" style="color:var(--pos)">auto-assessed</span></div>'+
+      '<div class="ret-row"><span class="rl">Climate action incentive</span><span class="rv" style="color:var(--pos)">auto-applied</span></div>',
+    review:'<div class="cl"><span class="m ok">✓</span> Every figure traces to a slip</div>'+
+      '<div class="cl"><span class="m ok">✓</span> Credits within legal limits</div>'+
+      '<div class="cl"><span class="m ok">✓</span> No arithmetic errors detected</div>'+
+      '<div class="cl"><span class="m warn">⚠</span> 2 documents still need review</div>',
+    export:'<p style="color:var(--ink-2);margin-bottom:1rem">Your return is optimized and nearly ready. Resolve the two review items, then file.</p>'+
+      '<div style="display:flex;gap:.7rem;flex-wrap:wrap"><a class="btn btn-primary" href="index.html#pricing">File for $29.99</a><button class="btn btn-ghost">Export PDF</button></div>'
+  };
+  var retBody=$("#retBody");
+  function setTab(t){ retBody.innerHTML = RET[t]; if(t==="review") retBody.classList.add("checklist"); else retBody.classList.remove("checklist");
+    $$("#retTabs .subtab").forEach(function(x){ x.classList.toggle("active", x.getAttribute("data-tab")===t); }); }
+  $$("#retTabs .subtab").forEach(function(b){ b.addEventListener("click", function(){ setTab(b.getAttribute("data-tab")); }); });
+  setTab("personal");
+
+  // ---------- simulator ----------
+  var slider=$("#simSlider"), simAmt=$("#simAmt"), simNew=$("#simNew"), simDiff=$("#simDiff"), simDisc=$("#simDisc"), simTitle=$("#simTitle");
+  var CURRENT=2431, RATE=0.2778;
+  var SCEN = {
+    rrsp:{title:"RRSP contribution", slider:true, disc:"This is an estimate based on your current tax profile. The actual result may differ depending on your final income and available contribution room."},
+    sell:{title:"Sell my investment", fixed:-260, disc:"Selling could realize a capital gain. Only 50% of a gain is taxable — this estimate assumes a $3,000 gain at your marginal rate."},
+    province:{title:"Move province", fixed:-140, disc:"Provincial tax rates differ. This estimate compares Ontario to a higher-rate province; your result depends on where and when you move."},
+    wfh:{title:"Work from home", fixed:180, disc:"If you're eligible for home-office expenses, this is an estimate of the credit based on a typical claim."},
+    donate:{title:"Donate $1,000", fixed:294, disc:"Donations above $200 earn a higher credit rate. This estimate combines federal and Ontario donation credits."},
+    self:{title:"Become self-employed", fixed:-320, disc:"Self-employment adds deductions but also CPP contributions and instalments. This is a rough directional estimate only."}
+  };
+  function money(n){ return (n<0?"-$":"+$")+Math.abs(Math.round(n)).toLocaleString("en-CA"); }
+  function recalc(){
+    var v=+slider.value; simAmt.textContent=v.toLocaleString("en-CA");
+    var diff=Math.round(v*RATE);
+    simNew.textContent="$"+(CURRENT+diff).toLocaleString("en-CA");
+    simDiff.textContent="+$"+diff.toLocaleString("en-CA"); simDiff.style.color="var(--pos)";
+  }
+  slider.addEventListener("input", recalc);
+  $$("#scenarios .scenario").forEach(function(b){ b.addEventListener("click", function(){
+    $$("#scenarios .scenario").forEach(function(x){x.classList.remove("active");}); b.classList.add("active");
+    var s=SCEN[b.getAttribute("data-s")]; simTitle.textContent=s.title; simDisc.textContent=s.disc;
+    if(s.slider){ slider.parentElement.style.opacity="1"; slider.disabled=false; recalc(); }
+    else{
+      slider.disabled=true; slider.parentElement.style.opacity=".4";
+      simNew.textContent="$"+(CURRENT+s.fixed).toLocaleString("en-CA");
+      simDiff.textContent=money(s.fixed); simDiff.style.color = s.fixed>=0?"var(--pos)":"var(--crit)";
+    }
+  }); });
+  recalc();
+
+  // ---------- copilot (page + dock share brain) ----------
+  var QA = [
+    {q:"Why is my refund this amount?", a:"Your <b>$2,431</b> refund comes from $4,200 already withheld on your T4, reduced by tax owed on $63,550 of income — then lowered further by your RRSP deduction, tuition credit, and the basic personal amount."},
+    {q:"What deductions could I be missing?", a:"Two stand out: <b>medical expenses</b> (I've detected ~$1,850 in receipts, worth roughly +$420) and <b>investment transactions</b> — I don't see a T5008 yet. Reviewing both could raise your refund."},
+    {q:"Explain my tax return like I'm new to Canada.", a:"You earned about $63,550. The government already took $4,200 off your paycheques. Because you have credits (school, retirement savings, a personal amount everyone gets), you overpaid — so <b>$2,431</b> comes back to you."},
+    {q:"What should I do before filing?", a:"Two things: confirm your <b>medical receipts</b> and add your <b>investment slip (T5008)</b> if you sold anything. Once those are cleared, your return passes every risk check and is ready to file."},
+    {q:"What happens if I contribute to my RRSP?", a:"At your marginal rate, roughly <b>28¢ per dollar</b> comes back. A $5,000 contribution would lift your refund to about <b>$3,820</b> — try it live in the Tax Planner."},
+    {q:"Why is my refund lower than last year?", a:"It's actually <b>higher</b> — $2,431 vs $2,210 in 2024 (+10%), mostly from your RRSP contribution and tuition credit. You can see the trend in Insights."}
+  ];
+  var CTXQ = {
+    documents:{q:"Why did ONYX flag this document?", a:"Your medical receipts came in at <b>88% confidence</b> — 2 of 12 items were hard to read, so I've asked you to confirm them. Everything else processed cleanly."},
+    health:{q:"How do I raise my Tax Health score?", a:"You're at <b>82/100</b> with 7 of 9 actions done. Reviewing medical expenses and adding your investment slip would close both open items and lift the score."},
+    planner:{q:"What if I contribute $5,000 to my RRSP?", a:"Your refund would rise from $2,431 to about <b>$3,820</b> — a difference of roughly <b>+$1,389</b>. It's an estimate based on your current profile and available room."},
+    return:{q:"How is my return being built?", a:"I've assembled it from your slips: $63,550 income, a $1,500 RRSP deduction, and credits for tuition and employment. Two sections — medical and investments — are still pending."}
+  };
+  // page copilot
+  var pPrompts=$("#copilotPrompts"), pConvo=$("#copilotConvo");
+  QA.forEach(function(item){ var b=document.createElement("button"); b.className="prompt"; b.textContent=item.q;
+    b.addEventListener("click", function(){ askInto(pConvo,item); }); pPrompts.appendChild(b); });
+  // dock
+  var dock=$("#dock"), dockBody=$("#dockBody"), dockPrompts=$("#dockPrompts");
+  function openDock(){ dock.classList.add("open"); $("#dockTrigger").style.display="none"; }
+  function closeDock(){ dock.classList.remove("open"); $("#dockTrigger").style.display="inline-flex"; }
+  $("#dockTrigger").addEventListener("click", openDock);
+  $("#askTop").addEventListener("click", openDock);
+  $("#dockClose").addEventListener("click", closeDock);
+  function updateDockPrompts(){
+    dockPrompts.innerHTML="";
+    var list = [];
+    if(CTXQ[current]) list.push(CTXQ[current]);
+    QA.slice(0,3).forEach(function(q){ if(list.indexOf(q)<0) list.push(q); });
+    list.slice(0,3).forEach(function(item){ var b=document.createElement("button"); b.className="prompt"; b.textContent=item.q;
+      b.addEventListener("click", function(){ askInto(dockBody,item); }); dockPrompts.appendChild(b); });
+  }
+  function askInto(container,item){
+    var me=document.createElement("div"); me.className="msg me"; me.textContent=item.q; container.appendChild(me);
+    var t=document.createElement("div"); t.className="typing"; t.innerHTML="<i></i><i></i><i></i>"; container.appendChild(t);
+    container.scrollTop=container.scrollHeight;
+    setTimeout(function(){ t.remove(); var bot=document.createElement("div"); bot.className="msg bot"; bot.innerHTML=item.a;
+      container.appendChild(bot); container.scrollTop=container.scrollHeight; }, T(850));
+  }
+  updateDockPrompts();
+})();
+</script>
+</body>
+</html>
