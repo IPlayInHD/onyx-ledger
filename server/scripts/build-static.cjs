@@ -40,4 +40,19 @@ for (const f of pages) {
   fs.writeFileSync(path.join(OUT, f), src);
 }
 fs.copyFileSync(path.join(SRC, 'public', 'onyx.css'), path.join(OUT, 'onyx.css'));
-console.log('static-site built:', pages.length, 'pages + app.js + onyx.css');
+
+// Security & hygiene signals (help legitimacy; served by static hosts like Netlify).
+fs.writeFileSync(path.join(OUT, 'robots.txt'), 'User-agent: *\nAllow: /\n');
+fs.writeFileSync(path.join(OUT, '_headers'),
+  '/*\n' +
+  '  X-Content-Type-Options: nosniff\n' +
+  '  X-Frame-Options: SAMEORIGIN\n' +
+  '  Referrer-Policy: no-referrer\n' +
+  '  Permissions-Policy: geolocation=(), microphone=(), camera=()\n');
+fs.mkdirSync(path.join(OUT, '.well-known'), { recursive: true });
+fs.writeFileSync(path.join(OUT, '.well-known', 'security.txt'),
+  'Contact: mailto:security@onyxledger.ca\n' +
+  'Expires: 2027-01-01T00:00:00.000Z\n' +
+  'Preferred-Languages: en\n' +
+  'Policy: https://onyxledger.ca/privacy.html\n');
+console.log('static-site built:', pages.length, 'pages + app.js + onyx.css + robots/_headers/security.txt');
