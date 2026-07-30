@@ -1,0 +1,1036 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ONYX — The AI Tax Operating System for Canada</title>
+<meta name="description" content="ONYX is an AI tax operating system for Canadians. Upload your slips, and it extracts every figure, finds every credit, and prepares a filing-ready return — each recommendation explained in plain language." />
+<style>
+  /* ============================================================
+     ONYX · Tax Operating System
+     Palette: onyx black + warm champagne (banded-stone light)
+     Type: Palatino-family serif display / neutral sans / mono data
+     ============================================================ */
+
+  /* ---- Tokens · base = onyx (dark, the signature world) ---- */
+  :root{
+    --bg:#0C0A08;
+    --bg-2:#131009;
+    --bg-3:#1A160F;
+    --bg-glass:rgba(18,14,9,.72);
+    --line:rgba(233,214,183,.12);
+    --line-2:rgba(233,214,183,.22);
+    --ink:#F2EBDF;
+    --ink-2:#A79C8B;
+    --ink-3:#726858;
+    --accent:#E3BE86;
+    --accent-2:#C68A4E;
+    --accent-hi:#F7E6C6;
+    --accent-ink:#0C0A08;      /* text on accent fills */
+    --pos:#67B893;
+    --info:#87ABD4;
+    --warn:#D6A25A;
+    --grain:.05;
+
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"Helvetica Neue",sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
+
+    --wrap:1200px;
+    --pad:clamp(1.15rem,4vw,2.5rem);
+    --sect:clamp(4.5rem,9vw,8.5rem);
+    --r:16px;
+    --r-lg:22px;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#F3EEE4;
+      --bg-2:#FBF8F1;
+      --bg-3:#FFFFFF;
+      --bg-glass:rgba(248,244,236,.78);
+      --line:rgba(50,36,16,.13);
+      --line-2:rgba(50,36,16,.24);
+      --ink:#1C1710;
+      --ink-2:#5B5245;
+      --ink-3:#8C8273;
+      --accent:#9A6A2A;
+      --accent-2:#B98A45;
+      --accent-hi:#7E551E;
+      --accent-ink:#FFFFFF;
+      --pos:#3F8A66;
+      --info:#3E6EA6;
+      --warn:#B27C2E;
+      --grain:.035;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#F3EEE4;--bg-2:#FBF8F1;--bg-3:#FFFFFF;--bg-glass:rgba(248,244,236,.78);
+    --line:rgba(50,36,16,.13);--line-2:rgba(50,36,16,.24);
+    --ink:#1C1710;--ink-2:#5B5245;--ink-3:#8C8273;
+    --accent:#9A6A2A;--accent-2:#B98A45;--accent-hi:#7E551E;--accent-ink:#FFFFFF;
+    --pos:#3F8A66;--info:#3E6EA6;--warn:#B27C2E;--grain:.035;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0C0A08;--bg-2:#131009;--bg-3:#1A160F;--bg-glass:rgba(18,14,9,.72);
+    --line:rgba(233,214,183,.12);--line-2:rgba(233,214,183,.22);
+    --ink:#F2EBDF;--ink-2:#A79C8B;--ink-3:#726858;
+    --accent:#E3BE86;--accent-2:#C68A4E;--accent-hi:#F7E6C6;--accent-ink:#0C0A08;
+    --pos:#67B893;--info:#87ABD4;--warn:#D6A25A;--grain:.05;
+  }
+
+  /* ---- reset ---- */
+  *,*::before,*::after{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0}
+  img,svg,canvas{display:block;max-width:100%}
+  button{font:inherit;color:inherit;cursor:pointer}
+  a{color:inherit;text-decoration:none}
+  h1,h2,h3,h4,p{margin:0}
+  ::selection{background:var(--accent);color:var(--accent-ink)}
+
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:clamp(1rem,.97rem + .2vw,1.075rem);
+    line-height:1.65;
+    letter-spacing:.005em;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+
+  /* film grain overlay for tactile depth */
+  body::after{
+    content:"";position:fixed;inset:0;z-index:9;pointer-events:none;
+    opacity:var(--grain);mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+
+  .wrap{max-width:var(--wrap);margin-inline:auto;padding-inline:var(--pad)}
+
+  /* ---- shared type ---- */
+  .eyebrow{
+    font-family:var(--mono);font-size:.72rem;letter-spacing:.28em;text-transform:uppercase;
+    color:var(--accent);display:inline-flex;align-items:center;gap:.7ch;
+  }
+  .eyebrow .idx{color:var(--ink-3)}
+  .display{
+    font-family:var(--serif);font-weight:500;line-height:1.04;letter-spacing:-.015em;
+    text-wrap:balance;
+  }
+  h2.display{font-size:clamp(2rem,1.3rem + 2.9vw,3.15rem)}
+  .lead{font-size:clamp(1.08rem,1.02rem + .5vw,1.3rem);color:var(--ink-2);line-height:1.55;max-width:56ch}
+  .measure{max-width:60ch}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* ---- buttons ---- */
+  .btn{
+    display:inline-flex;align-items:center;gap:.6ch;justify-content:center;
+    padding:.86em 1.4em;border-radius:999px;border:1px solid transparent;
+    font-weight:600;font-size:.96rem;letter-spacing:.01em;line-height:1;
+    transition:transform .18s ease,box-shadow .25s ease,background .2s,border-color .2s,color .2s;
+    will-change:transform;
+  }
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-hi),var(--accent));
+    color:var(--accent-ink);
+    box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 10px 30px -12px rgba(227,190,134,.55);
+  }
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 16px 40px -14px rgba(227,190,134,.7)}
+  .btn-ghost{border-color:var(--line-2);color:var(--ink);background:transparent}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-2px)}
+  .btn .arw{transition:transform .2s ease}
+  .btn:hover .arw{transform:translateX(3px)}
+
+  /* ============================================================
+     NAV
+     ============================================================ */
+  .nav{
+    position:sticky;top:0;z-index:40;
+    border-bottom:1px solid transparent;transition:background .3s,border-color .3s,backdrop-filter .3s;
+  }
+  .nav.scrolled{background:var(--bg-glass);backdrop-filter:blur(14px) saturate(1.2);border-bottom-color:var(--line)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;height:70px}
+  .brand{display:flex;align-items:baseline;gap:.55ch;font-family:var(--serif);font-size:1.32rem;font-weight:600;letter-spacing:.02em}
+  .brand .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);align-self:center;box-shadow:0 0 12px var(--accent)}
+  .brand .os{font-family:var(--mono);font-size:.66rem;letter-spacing:.24em;color:var(--ink-3);text-transform:uppercase;align-self:center;translate:0 -.05em}
+  .nav-links{display:flex;gap:2rem;align-items:center}
+  .nav-links a{font-size:.92rem;color:var(--ink-2);transition:color .2s;position:relative}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-links a::after{content:"";position:absolute;left:0;right:100%;bottom:-6px;height:1px;background:var(--accent);transition:right .25s ease}
+  .nav-links a:hover::after{right:0}
+  .nav-cta{display:flex;align-items:center;gap:.9rem}
+  @media (max-width:860px){.nav-links{display:none}}
+
+  /* ============================================================
+     HERO
+     ============================================================ */
+  .hero{position:relative;overflow:hidden;padding-top:clamp(2.5rem,6vw,5rem);padding-bottom:var(--sect)}
+  #aurora{position:absolute;inset:-10% 0 auto 0;height:120%;width:100%;z-index:0;pointer-events:none;opacity:.9}
+  .hero::before{ /* vignette to seat the light */
+    content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
+    background:radial-gradient(120% 90% at 78% 8%,transparent 40%,var(--bg) 88%);
+  }
+  .hero-in{position:relative;z-index:2;display:grid;grid-template-columns:1.02fr .98fr;gap:clamp(2rem,4vw,4rem);align-items:center}
+  @media (max-width:960px){.hero-in{grid-template-columns:1fr;gap:2.6rem}}
+  .hero-copy h1{
+    font-family:var(--serif);font-weight:500;line-height:1.02;letter-spacing:-.02em;
+    font-size:clamp(2.6rem,1.6rem + 4.6vw,4.7rem);margin:.5rem 0 .1rem;text-wrap:balance;
+  }
+  .hero-copy h1 .glow{
+    background:linear-gradient(100deg,var(--accent-hi),var(--accent) 55%,var(--accent-2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .hero-copy .lead{margin-top:1.35rem}
+  .hero-actions{display:flex;flex-wrap:wrap;gap:.9rem;margin-top:2rem}
+  .trust-line{display:flex;flex-wrap:wrap;gap:.5rem 1.35rem;margin-top:1.6rem;font-family:var(--mono);font-size:.76rem;letter-spacing:.04em;color:var(--ink-3)}
+  .trust-line span{display:inline-flex;align-items:center;gap:.6ch}
+  .trust-line .tk{color:var(--accent)}
+
+  /* ---- Product panel (the ONYX terminal) ---- */
+  .panel{
+    position:relative;border:1px solid var(--line-2);border-radius:var(--r-lg);
+    background:
+      radial-gradient(120% 80% at 100% 0%,rgba(227,190,134,.10),transparent 55%),
+      linear-gradient(180deg,var(--bg-3),var(--bg-2));
+    box-shadow:0 40px 90px -50px rgba(0,0,0,.8),0 2px 0 rgba(255,255,255,.03) inset;
+    overflow:hidden;
+  }
+  .panel-bar{display:flex;align-items:center;gap:.8ch;padding:.85rem 1.1rem;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:.72rem;color:var(--ink-3);letter-spacing:.06em}
+  .panel-bar .live{margin-left:auto;display:inline-flex;align-items:center;gap:.55ch;color:var(--accent)}
+  .panel-bar .pulse{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 var(--accent);animation:pulse 2.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(227,190,134,.55)}70%{box-shadow:0 0 0 8px rgba(227,190,134,0)}100%{box-shadow:0 0 0 0 rgba(227,190,134,0)}}
+  .panel-grid{display:grid;grid-template-columns:150px 1fr;gap:0}
+  @media (max-width:520px){.panel-grid{grid-template-columns:1fr}}
+  .docs{border-right:1px solid var(--line);padding:1rem .9rem;display:flex;flex-direction:column;gap:.15rem}
+  @media (max-width:520px){.docs{border-right:0;border-bottom:1px solid var(--line)}}
+  .docs .h{font-family:var(--mono);font-size:.64rem;letter-spacing:.2em;color:var(--ink-3);text-transform:uppercase;margin-bottom:.55rem}
+  .doc{display:flex;align-items:center;gap:.6ch;font-size:.82rem;color:var(--ink-2);padding:.28rem 0}
+  .doc .ck{width:15px;height:15px;flex:none;border-radius:4px;background:color-mix(in oklab,var(--pos) 26%,transparent);color:var(--pos);display:grid;place-items:center;font-size:.62rem;font-weight:700}
+  .stage{padding:1.15rem 1.2rem 1.25rem}
+  .stage .k{font-family:var(--mono);font-size:.64rem;letter-spacing:.2em;color:var(--ink-3);text-transform:uppercase}
+  .refund{font-family:var(--serif);font-weight:600;font-size:clamp(2.5rem,2rem + 3vw,3.4rem);line-height:1;letter-spacing:-.02em;margin:.25rem 0 .1rem;color:var(--ink)}
+  .refund .cur{color:var(--accent);font-size:.62em;vertical-align:.14em;margin-right:.06ch}
+  .score{display:flex;align-items:center;gap:.8ch;margin:.85rem 0 1rem}
+  .score .bar{flex:1;height:7px;border-radius:99px;background:var(--line);overflow:hidden}
+  .score .fill{height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--accent-2),var(--accent));transition:width 1.4s cubic-bezier(.2,.7,.2,1)}
+  .score .val{font-family:var(--mono);font-size:.8rem;color:var(--ink);letter-spacing:.02em}
+  .ded{border-top:1px solid var(--line);padding-top:.8rem;display:flex;flex-direction:column;gap:.1rem}
+  .ded .h{font-family:var(--mono);font-size:.64rem;letter-spacing:.2em;color:var(--ink-3);text-transform:uppercase;margin-bottom:.35rem;display:flex;justify-content:space-between}
+  .drow{display:flex;justify-content:space-between;align-items:center;font-size:.86rem;padding:.26rem 0;border-bottom:1px dashed var(--line)}
+  .drow:last-child{border-bottom:0}
+  .drow .amt{font-family:var(--mono);color:var(--pos);letter-spacing:.02em}
+  .panel-foot{border-top:1px solid var(--line);padding:.7rem 1.1rem;font-family:var(--mono);font-size:.7rem;color:var(--ink-3);display:flex;gap:.7ch;align-items:center;flex-wrap:wrap}
+  .panel-foot .fk{color:var(--accent)}
+
+  /* ============================================================
+     TRUST STRIP
+     ============================================================ */
+  .strip{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-2)}
+  .strip-in{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line)}
+  @media (max-width:760px){.strip-in{grid-template-columns:repeat(2,1fr)}}
+  .strip-cell{background:var(--bg-2);padding:1.5rem var(--pad);display:flex;flex-direction:column;gap:.3rem}
+  .strip-cell .mono{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+  .strip-cell .t{font-family:var(--serif);font-size:1.12rem;color:var(--ink);line-height:1.25}
+
+  /* ============================================================
+     SECTIONS
+     ============================================================ */
+  section{position:relative}
+  .band{padding-block:var(--sect)}
+  .sect-head{max-width:60ch}
+  .sect-head h2{margin-top:.9rem}
+  .sect-head .lead{margin-top:1rem}
+
+  /* The shift — editorial statement */
+  .shift{border-top:1px solid var(--line)}
+  .shift .big{
+    font-family:var(--serif);font-weight:500;line-height:1.14;letter-spacing:-.01em;
+    font-size:clamp(1.6rem,1.15rem + 2.1vw,2.6rem);max-width:20ch;text-wrap:balance;
+  }
+  .shift .big em{font-style:italic;color:var(--accent)}
+  .shift-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(2rem,5vw,4.5rem);align-items:end}
+  @media (max-width:820px){.shift-grid{grid-template-columns:1fr;gap:1.8rem}}
+  .shift p{color:var(--ink-2);max-width:46ch}
+
+  /* Feature grid */
+  .fgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:2.8rem;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  @media (max-width:940px){.fgrid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:520px){.fgrid{grid-template-columns:1fr}}
+  .feat{background:var(--bg);padding:1.5rem 1.4rem 1.7rem;display:flex;flex-direction:column;gap:.55rem;transition:background .25s}
+  .feat:hover{background:var(--bg-3)}
+  .feat .ic{width:30px;height:30px;color:var(--accent)}
+  .feat h3{font-family:var(--serif);font-size:1.16rem;font-weight:600;letter-spacing:-.01em}
+  .feat p{font-size:.92rem;color:var(--ink-2);line-height:1.55}
+
+  /* Steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(1.2rem,2.5vw,2rem);margin-top:2.8rem;counter-reset:s}
+  @media (max-width:820px){.steps{grid-template-columns:1fr}}
+  .step{position:relative;padding:1.7rem 1.5rem;border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2)}
+  .step .n{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;color:var(--accent)}
+  .step h3{font-family:var(--serif);font-size:1.3rem;font-weight:600;margin:.7rem 0 .5rem}
+  .step p{color:var(--ink-2);font-size:.95rem}
+  .step .line{position:absolute;top:2.05rem;right:-1rem;width:2rem;height:1px;background:var(--line-2)}
+  @media (max-width:820px){.step .line{display:none}}
+
+  /* Operating system — dark feature cards */
+  .os-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1.1rem;margin-top:2.8rem}
+  @media (max-width:760px){.os-grid{grid-template-columns:1fr}}
+  .oscard{border:1px solid var(--line);border-radius:var(--r);padding:1.6rem 1.5rem;background:
+    linear-gradient(180deg,var(--bg-3),var(--bg-2));transition:border-color .25s,transform .25s}
+  .oscard:hover{border-color:var(--line-2);transform:translateY(-3px)}
+  .oscard .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+  .oscard h3{font-family:var(--serif);font-size:1.32rem;font-weight:600;margin:.55rem 0 .5rem}
+  .oscard p{color:var(--ink-2);font-size:.95rem}
+
+  /* Principles — manifesto */
+  .principles{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-2)}
+  .plist{display:flex;flex-direction:column;margin-top:2.4rem}
+  .prow{display:grid;grid-template-columns:.9fr 1.1fr;gap:2rem;padding:1.7rem 0;border-top:1px solid var(--line);align-items:baseline}
+  .prow:last-child{border-bottom:1px solid var(--line)}
+  @media (max-width:720px){.prow{grid-template-columns:1fr;gap:.4rem;padding:1.3rem 0}}
+  .prow .pk{font-family:var(--serif);font-size:clamp(1.5rem,1.1rem + 1.6vw,2.1rem);font-weight:500;letter-spacing:-.01em}
+  .prow .pk .num{font-family:var(--mono);font-size:.8rem;color:var(--accent);vertical-align:super;margin-right:.7ch;letter-spacing:.1em}
+  .prow p{color:var(--ink-2);font-size:1.02rem;max-width:44ch}
+
+  /* Who it's for */
+  .who{display:grid;grid-template-columns:repeat(3,1fr);gap:1.1rem;margin-top:2.8rem}
+  @media (max-width:820px){.who{grid-template-columns:1fr}}
+  .wcard{border:1px solid var(--line);border-radius:var(--r);padding:1.7rem 1.5rem;background:var(--bg-2);display:flex;flex-direction:column;gap:.6rem}
+  .wcard .tag{font-family:var(--mono);font-size:.66rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+  .wcard h3{font-family:var(--serif);font-size:1.35rem;font-weight:600}
+  .wcard p{color:var(--ink-2);font-size:.95rem;flex:1}
+  .wcard .plan{font-size:.82rem;color:var(--ink-3);font-family:var(--mono);letter-spacing:.03em;padding-top:.7rem;border-top:1px solid var(--line)}
+  .wcard .plan b{color:var(--ink);font-weight:600}
+
+  /* ============================================================
+     PRICING
+     ============================================================ */
+  .ptoggle{display:inline-flex;align-items:center;gap:.2rem;border:1px solid var(--line-2);border-radius:999px;padding:.28rem;margin-top:1.6rem;font-family:var(--mono)}
+  .ptoggle button{border-radius:999px;padding:.5em 1.1em;font-size:.78rem;letter-spacing:.06em;color:var(--ink-2);background:transparent;transition:.2s}
+  .ptoggle button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+  .ptoggle .save{color:var(--accent);font-size:.72rem;margin-left:.6rem;letter-spacing:.04em}
+
+  .pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.1rem;margin-top:2.4rem}
+  @media (max-width:920px){.pgrid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:600px){.pgrid{grid-template-columns:1fr}}
+  .tier{position:relative;border:1px solid var(--line);border-radius:var(--r-lg);padding:1.7rem 1.5rem;background:var(--bg-2);display:flex;flex-direction:column;gap:1rem;transition:border-color .25s,transform .25s}
+  .tier:hover{border-color:var(--line-2);transform:translateY(-3px)}
+  .tier.feat{border-color:var(--accent);background:
+    radial-gradient(120% 60% at 100% 0%,rgba(227,190,134,.12),transparent 60%),var(--bg-3);
+    box-shadow:0 30px 70px -45px rgba(227,190,134,.5)}
+  .tier.feat::before{content:"MOST CHOSEN";position:absolute;top:-1px;right:1.2rem;transform:translateY(-50%);
+    font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;background:var(--accent);color:var(--accent-ink);
+    padding:.34em .8em;border-radius:999px;font-weight:700}
+  .tier .name{font-family:var(--mono);font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .tier.feat .name{color:var(--accent)}
+  .tier .price{font-family:var(--serif);font-size:2.3rem;font-weight:600;line-height:1;letter-spacing:-.02em;display:flex;align-items:baseline;gap:.35ch}
+  .tier .price .per{font-family:var(--mono);font-size:.76rem;color:var(--ink-3);letter-spacing:.03em;font-weight:400}
+  .tier .desc{font-size:.88rem;color:var(--ink-2);min-height:2.5em}
+  .tier ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:.5rem;flex:1}
+  .tier li{display:flex;gap:.7ch;font-size:.9rem;color:var(--ink-2);line-height:1.4}
+  .tier li::before{content:"";width:14px;height:14px;flex:none;margin-top:.24em;border-radius:4px;
+    background:color-mix(in oklab,var(--accent) 22%,transparent);
+    -webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M5 12l4 4L19 7' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>") center/78% no-repeat;
+    mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M5 12l4 4L19 7' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>") center/78% no-repeat;
+    background-color:var(--accent)}
+  .tier .btn{width:100%}
+  .addon{margin-top:1.1rem;border:1px dashed var(--line-2);border-radius:var(--r);padding:1.3rem 1.5rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:center;justify-content:space-between;background:var(--bg)}
+  .addon .t{font-family:var(--serif);font-size:1.15rem;font-weight:600}
+  .addon p{color:var(--ink-2);font-size:.9rem;max-width:52ch}
+  .addon .pr{font-family:var(--mono);color:var(--accent);font-size:.9rem;white-space:nowrap;letter-spacing:.03em}
+
+  /* ============================================================
+     SECURITY
+     ============================================================ */
+  .sec{border-top:1px solid var(--line);background:
+    radial-gradient(90% 120% at 100% 0%,rgba(227,190,134,.06),transparent 55%),var(--bg-2)}
+  .sec-grid{display:grid;grid-template-columns:.9fr 1.1fr;gap:clamp(2rem,5vw,4rem);align-items:center}
+  @media (max-width:820px){.sec-grid{grid-template-columns:1fr;gap:2.2rem}}
+  .sec-list{display:grid;grid-template-columns:1fr 1fr;gap:1.3rem}
+  @media (max-width:520px){.sec-list{grid-template-columns:1fr}}
+  .sec-item{display:flex;flex-direction:column;gap:.4rem}
+  .sec-item .ic{width:26px;height:26px;color:var(--accent)}
+  .sec-item h3{font-size:1.02rem;font-weight:600;font-family:var(--serif)}
+  .sec-item p{font-size:.9rem;color:var(--ink-2)}
+  .vault{border:1px solid var(--line-2);border-radius:var(--r-lg);background:linear-gradient(180deg,var(--bg-3),var(--bg-2));padding:1.8rem;box-shadow:0 30px 70px -50px rgba(0,0,0,.7)}
+  .vault .row{display:flex;align-items:center;gap:.9ch;padding:.7rem 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:.82rem;color:var(--ink-2)}
+  .vault .row:last-child{border-bottom:0}
+  .vault .row .st{margin-left:auto;color:var(--pos);font-size:.72rem;letter-spacing:.08em;display:inline-flex;align-items:center;gap:.5ch}
+  .vault .lock{width:16px;height:16px;color:var(--accent)}
+
+  /* ============================================================
+     FAQ
+     ============================================================ */
+  .faq{max-width:820px;margin-top:2.4rem}
+  details{border-top:1px solid var(--line)}
+  details:last-child{border-bottom:1px solid var(--line)}
+  summary{list-style:none;cursor:pointer;padding:1.25rem 0;display:flex;align-items:center;gap:1rem;
+    font-family:var(--serif);font-size:1.16rem;font-weight:500;letter-spacing:-.01em}
+  summary::-webkit-details-marker{display:none}
+  summary .q{flex:1}
+  summary .pm{width:20px;height:20px;flex:none;position:relative;transition:transform .3s}
+  summary .pm::before,summary .pm::after{content:"";position:absolute;background:var(--accent);border-radius:2px}
+  summary .pm::before{left:0;right:0;top:9px;height:2px}
+  summary .pm::after{top:0;bottom:0;left:9px;width:2px;transition:opacity .3s}
+  details[open] summary .pm::after{opacity:0}
+  details[open] summary .pm{transform:rotate(90deg)}
+  details .a{padding:0 0 1.35rem 0;color:var(--ink-2);max-width:68ch}
+  summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+
+  /* ============================================================
+     FINAL CTA + FOOTER
+     ============================================================ */
+  .final{position:relative;overflow:hidden;border-top:1px solid var(--line);text-align:center;
+    background:radial-gradient(80% 120% at 50% 0%,rgba(227,190,134,.12),transparent 60%),var(--bg)}
+  .final h2{font-family:var(--serif);font-weight:500;font-size:clamp(2.1rem,1.4rem + 3vw,3.6rem);line-height:1.05;letter-spacing:-.02em;text-wrap:balance;max-width:18ch;margin-inline:auto}
+  .final .lead{margin:1.2rem auto 0;text-align:center}
+  .final .hero-actions{justify-content:center}
+
+  footer{border-top:1px solid var(--line);background:var(--bg-2);padding-block:clamp(3rem,6vw,4.5rem) 2rem}
+  .foot-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:2rem}
+  @media (max-width:820px){.foot-grid{grid-template-columns:1fr 1fr}}
+  @media (max-width:480px){.foot-grid{grid-template-columns:1fr}}
+  .foot-brand p{color:var(--ink-2);font-size:.92rem;max-width:34ch;margin-top:1rem}
+  .fcol h4{font-family:var(--mono);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:1rem}
+  .fcol a{display:block;color:var(--ink-2);font-size:.92rem;padding:.3rem 0;transition:color .2s}
+  .fcol a:hover{color:var(--accent)}
+  .disclaimer{margin-top:2.5rem;padding-top:1.6rem;border-top:1px solid var(--line);color:var(--ink-3);font-size:.78rem;line-height:1.6;max-width:80ch}
+  .copyright{margin-top:1.4rem;color:var(--ink-3);font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;display:flex;justify-content:space-between;flex-wrap:wrap;gap:.6rem}
+
+  /* ---- reveal ---- */
+  .reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    .reveal{opacity:1;transform:none;transition:none}
+    .score .fill{transition:none}
+    *{animation:none!important}
+  }
+</style>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<!-- ============================ NAV ============================ -->
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="ONYX TaxOS home">
+      <span class="dot" aria-hidden="true"></span>ONYX<span class="os">TaxOS</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#copilot">Copilot</a>
+      <a href="#system">The System</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#security">Security</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="nav-links" style="display:inline;color:var(--ink-2)" href="login.html">Sign in</a>
+      <a class="btn btn-primary" href="signup.html">Start free <span class="arw" aria-hidden="true">→</span></a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============================ HERO ============================ -->
+<section class="hero">
+  <canvas id="aurora" aria-hidden="true"></canvas>
+  <div class="wrap hero-in">
+    <div class="hero-copy">
+      <span class="eyebrow"><span class="idx">CA</span> · AI Tax Operating System</span>
+      <h1>Your refund,<br><span class="glow">brought to light.</span></h1>
+      <p class="lead">ONYX is an AI tax operating system for Canadians. Upload your slips and receipts — it reads every figure, finds every credit you&rsquo;re owed, and builds a filing-ready return. Every recommendation explained in plain language.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="signup.html">Start free <span class="arw" aria-hidden="true">→</span></a>
+        <a class="btn btn-ghost" href="app.html">See it in action</a>
+      </div>
+      <div class="trust-line">
+        <span><span class="tk">✦</span> Free to start</span>
+        <span><span class="tk">✦</span> No card required</span>
+        <span><span class="tk">✦</span> Encrypted &amp; securely processed</span>
+      </div>
+    </div>
+
+    <!-- Product panel: the ONYX terminal -->
+    <div class="panel reveal" aria-label="Preview of the ONYX return workspace">
+      <div class="panel-bar">
+        <span>onyx&nbsp;/&nbsp;return&nbsp;2024</span>
+        <span class="live"><span class="pulse" aria-hidden="true"></span>OPTIMIZING</span>
+      </div>
+      <div class="panel-grid">
+        <div class="docs">
+          <div class="h">Documents</div>
+          <div class="doc"><span class="ck">✓</span> T4 · Employment</div>
+          <div class="doc"><span class="ck">✓</span> T5 · Investment</div>
+          <div class="doc"><span class="ck">✓</span> T2202 · Tuition</div>
+          <div class="doc"><span class="ck">✓</span> Donations</div>
+          <div class="doc"><span class="ck">✓</span> Medical</div>
+          <div class="doc"><span class="ck">✓</span> RRSP</div>
+        </div>
+        <div class="stage">
+          <div class="k">Estimated refund</div>
+          <div class="refund"><span class="cur">$</span><span id="refund" class="tnum" data-target="4218">0</span></div>
+          <div class="score">
+            <span class="k" style="letter-spacing:.14em">HEALTH</span>
+            <span class="bar"><span class="fill" id="scoreFill"></span></span>
+            <span class="val tnum"><span id="scoreVal">0</span>/100</span>
+          </div>
+          <div class="ded">
+            <div class="h"><span>Deductions found</span><span>Applied</span></div>
+            <div class="drow"><span>RRSP contribution</span><span class="amt tnum">$1,240</span></div>
+            <div class="drow"><span>Tuition (T2202)</span><span class="amt tnum">$600</span></div>
+            <div class="drow"><span>Charitable donations</span><span class="amt tnum">$310</span></div>
+            <div class="drow"><span>Medical expenses</span><span class="amt tnum">$845</span></div>
+            <div class="drow"><span>Digital news subscription</span><span class="amt tnum">$75</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel-foot">
+        <span><span class="fk">18</span> CRA rules applied</span>·
+        <span><span class="fk">1</span> missing slip flagged</span>·
+        <span>return ready to file</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ TRUST STRIP ============================ -->
+<section class="strip" aria-label="Why ONYX is trustworthy">
+  <div class="strip-in">
+    <div class="strip-cell"><span class="mono">Encryption</span><span class="t">Encrypted in transit &amp; at rest</span></div>
+    <div class="strip-cell"><span class="mono">Rules engine</span><span class="t">Aligned to current CRA rules</span></div>
+    <div class="strip-cell"><span class="mono">Every figure</span><span class="t">Explained in plain language</span></div>
+    <div class="strip-cell"><span class="mono">Your data</span><span class="t">Yours to export or delete</span></div>
+  </div>
+</section>
+
+<!-- ============================ THE SHIFT ============================ -->
+<section class="band shift">
+  <div class="wrap shift-grid">
+    <div class="reveal">
+      <span class="eyebrow"><span class="idx">00</span> · The shift</span>
+      <p class="big" style="margin-top:1.1rem">For most Canadians, tax season is a <em>black box</em> — forms in a language no one teaches, deductions you never knew existed.</p>
+    </div>
+    <div class="reveal">
+      <p>ONYX turns that box into something you can see through. It reads your documents, applies the same rules the CRA does, and shows you the number &mdash; and the reasoning &mdash; behind every dollar you keep.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ COPILOT ============================ -->
+<section class="band" id="copilot">
+  <div class="wrap">
+    <div class="sect-head reveal">
+      <span class="eyebrow"><span class="idx">01</span> · Copilot</span>
+      <h2 class="display">An AI copilot for your entire return.</h2>
+      <p class="lead">Upload a T4, a stack of receipts, an investment statement &mdash; anything. ONYX does the reading, the math, and the checking, then shows its work.</p>
+      <div class="hero-actions" style="margin-top:1.6rem">
+        <a class="btn btn-primary" href="app.html">Open the live product demo <span class="arw" aria-hidden="true">→</span></a>
+      </div>
+    </div>
+    <div class="fgrid reveal">
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"/><path d="M14 4v5h5M8 13h8M8 17h5"/></svg>
+        <h3>Automatic extraction</h3>
+        <p>OCR reads every slip and receipt for you &mdash; no manual data entry, no typos.</p>
+      </div>
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <h3>Every credit &amp; deduction</h3>
+        <p>Scans for each one you qualify for &mdash; including the ones people routinely miss.</p>
+      </div>
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"/></svg>
+        <h3>Live refund estimate</h3>
+        <p>A number that updates in real time as each document comes in.</p>
+      </div>
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 10h8M8 14h5"/><path d="M21 12a9 9 0 1 1-3.6-7.2L21 4"/></svg>
+        <h3>Plain-language explanations</h3>
+        <p>Every rule, in words you actually understand &mdash; not tax code jargon.</p>
+      </div>
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3Z"/><path d="M9 12l2 2 4-4"/></svg>
+        <h3>Mistake &amp; audit checker</h3>
+        <p>Flags errors and audit risks before you file, so surprises stay off the table.</p>
+      </div>
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 8v5M12 16h.01"/><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <h3>Missing-document detection</h3>
+        <p>Tells you exactly which slip is still outstanding before you submit.</p>
+      </div>
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3v18M8 7h6a3 3 0 0 1 0 6H8m0 0h7"/></svg>
+        <h3>Legal tax reduction</h3>
+        <p>Recommends moves that lower your bill &mdash; every one of them within the rules.</p>
+      </div>
+      <div class="feat">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+        <h3>Filing-ready return</h3>
+        <p>A complete, optimized return &mdash; exported and ready to submit through approved channels.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ HOW IT WORKS ============================ -->
+<section class="band" style="border-top:1px solid var(--line);background:var(--bg-2)">
+  <div class="wrap">
+    <div class="sect-head reveal">
+      <span class="eyebrow"><span class="idx">02</span> · Process</span>
+      <h2 class="display">Three steps. No forms to decode.</h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal"><span class="line" aria-hidden="true"></span>
+        <span class="n">STEP 01</span>
+        <h3>Upload</h3>
+        <p>Drop in your slips and receipts. ONYX reads them in seconds and organizes everything automatically.</p>
+      </div>
+      <div class="step reveal"><span class="line" aria-hidden="true"></span>
+        <span class="n">STEP 02</span>
+        <h3>Optimize</h3>
+        <p>It finds every credit, checks for errors, and maximizes your refund &mdash; showing the reasoning at each step.</p>
+      </div>
+      <div class="step reveal">
+        <span class="n">STEP 03</span>
+        <h3>File</h3>
+        <p>Export a complete, filing-ready return and submit it through approved channels with confidence.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ THE SYSTEM ============================ -->
+<section class="band" id="system">
+  <div class="wrap">
+    <div class="sect-head reveal">
+      <span class="eyebrow"><span class="idx">03</span> · The System</span>
+      <h2 class="display">Not a filing tool. An operating system for your money.</h2>
+      <p class="lead">Taxes are the entry point. ONYX stays with you all year &mdash; planning ahead, not just reporting back.</p>
+    </div>
+    <div class="os-grid">
+      <a class="oscard reveal" href="tax-health-score.html" style="display:block">
+        <span class="k">Tax Health Score</span>
+        <h3>One score for how optimized you are.</h3>
+        <p>A single, always-current measure of your financial position &mdash; with the specific moves that would raise it.</p>
+        <span class="tag" style="margin-top:.9rem;display:inline-flex;align-items:center;gap:.5ch;font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;color:var(--accent)">Check your score for free &rarr;</span>
+      </a>
+      <div class="oscard reveal">
+        <span class="k">Year-round planning</span>
+        <h3>Moves to make before December 31.</h3>
+        <p>Monthly tax forecasts, a personal tax calendar, and proactive nudges so nothing is left on the table.</p>
+      </div>
+      <div class="oscard reveal">
+        <span class="k">RRSP &amp; TFSA</span>
+        <h3>How much to contribute, and when.</h3>
+        <p>Contribution amounts optimized to lower your bill this year and grow tax-sheltered for the next.</p>
+      </div>
+      <div class="oscard reveal">
+        <span class="k">Investment tax</span>
+        <h3>See the tax impact before you sell.</h3>
+        <p>Model the cost of realizing a gain or loss, so every investment decision is made with eyes open.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ PRINCIPLES ============================ -->
+<section class="band principles">
+  <div class="wrap">
+    <div class="sect-head reveal">
+      <span class="eyebrow"><span class="idx">04</span> · Principles</span>
+      <h2 class="display">Built on five commitments we don&rsquo;t bend.</h2>
+    </div>
+    <div class="plist">
+      <div class="prow reveal"><div class="pk"><span class="num">i</span>Accuracy</div><p>Every figure traces back to a Canadian tax rule you can read for yourself.</p></div>
+      <div class="prow reveal"><div class="pk"><span class="num">ii</span>Transparency</div><p>No black boxes. ONYX shows its reasoning behind every recommendation, always.</p></div>
+      <div class="prow reveal"><div class="pk"><span class="num">iii</span>Security</div><p>Your documents are encrypted &mdash; and they stay yours, to export or delete anytime.</p></div>
+      <div class="prow reveal"><div class="pk"><span class="num">iv</span>Accessibility</div><p>Professional-grade tax intelligence, at a fraction of the price of an accountant.</p></div>
+      <div class="prow reveal"><div class="pk"><span class="num">v</span>Innovation</div><p>A platform that gets measurably smarter every filing season.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WHO IT'S FOR ============================ -->
+<section class="band" id="who">
+  <div class="wrap">
+    <div class="sect-head reveal">
+      <span class="eyebrow"><span class="idx">05</span> · Who it&rsquo;s for</span>
+      <h2 class="display">One platform. Every kind of taxpayer.</h2>
+    </div>
+    <div class="who">
+      <div class="wcard reveal">
+        <span class="tag">Individuals &amp; families</span>
+        <h3>Maximize your refund, skip the accountant&rsquo;s bill.</h3>
+        <p>Employees, students, and parents get a complete, optimized return &mdash; with every credit found and explained.</p>
+        <span class="plan">Free &middot; then <b>$29.99</b>/return</span>
+      </div>
+      <div class="wcard reveal">
+        <span class="tag">Freelancers &amp; contractors</span>
+        <h3>Track expenses, GST/HST, and quarterly taxes as you earn.</h3>
+        <p>Uber drivers, Shopify sellers, and consultants stay ahead of every deadline &mdash; income, deductions, and forecasts in one place.</p>
+        <span class="plan"><b>$19.99</b>/month</span>
+      </div>
+      <div class="wcard reveal">
+        <span class="tag">Small businesses</span>
+        <h3>Dashboards your accountant can collaborate in.</h3>
+        <p>Multiple users, payroll tax estimates, business planning, and advanced reporting &mdash; built for a growing team.</p>
+        <span class="plan"><b>$49.99</b>/month</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ PRICING ============================ -->
+<section class="band" id="pricing" style="border-top:1px solid var(--line);background:var(--bg-2)">
+  <div class="wrap">
+    <div class="sect-head reveal">
+      <span class="eyebrow"><span class="idx">06</span> · Pricing</span>
+      <h2 class="display">Start free. Pay only when you file.</h2>
+      <p class="lead">The free tier isn&rsquo;t a trial &mdash; it&rsquo;s a genuine home for your finances year-round. Upgrade the moment it earns its keep.</p>
+      <div class="ptoggle" role="group" aria-label="Billing period for Pro">
+        <button id="pm" aria-pressed="true">Monthly</button>
+        <button id="pa" aria-pressed="false">Annual</button>
+        <span class="save" id="saveNote">Save 26% on Pro annually</span>
+      </div>
+    </div>
+
+    <div class="pgrid">
+      <!-- Free -->
+      <div class="tier reveal">
+        <span class="name">Free</span>
+        <div class="price">$0</div>
+        <p class="desc">Everything you need to understand your taxes, all year.</p>
+        <ul>
+          <li>AI Tax Chat</li>
+          <li>Refund estimator</li>
+          <li>Tax Health Score</li>
+          <li>Basic deduction finder</li>
+          <li>Financial planning calculator</li>
+          <li>Year-round tax tips</li>
+        </ul>
+        <a class="btn btn-ghost" href="signup.html">Start free</a>
+      </div>
+
+      <!-- Premium Filing (featured) -->
+      <div class="tier feat reveal">
+        <span class="name">Premium Filing</span>
+        <div class="price">$29.99 <span class="per">/ return</span></div>
+        <p class="desc">A complete, optimized, filing-ready return &mdash; one flat price.</p>
+        <ul>
+          <li>Unlimited document uploads</li>
+          <li>OCR document scanning</li>
+          <li>AI deduction optimization</li>
+          <li>Complete return preparation</li>
+          <li>Audit checker &amp; missing-deduction detection</li>
+          <li>PDF export, filing-ready</li>
+        </ul>
+        <a class="btn btn-primary" href="signup.html">File with ONYX <span class="arw" aria-hidden="true">→</span></a>
+      </div>
+
+      <!-- Pro -->
+      <div class="tier reveal">
+        <span class="name">Pro</span>
+        <div class="price"><span id="proPrice">$9.99</span> <span class="per" id="proPer">/ month</span></div>
+        <p class="desc">Year-round intelligence for people who plan ahead.</p>
+        <ul>
+          <li>Everything in Premium Filing</li>
+          <li>Year-round tax planning</li>
+          <li>Investment tax analysis</li>
+          <li>RRSP &amp; TFSA optimization</li>
+          <li>Monthly forecasts &amp; tax calendar</li>
+          <li>Unlimited AI conversations</li>
+        </ul>
+        <a class="btn btn-ghost" href="signup.html">Go Pro</a>
+      </div>
+
+      <!-- Freelancer -->
+      <div class="tier reveal">
+        <span class="name">Freelancer</span>
+        <div class="price">$19.99 <span class="per">/ month</span></div>
+        <p class="desc">For contractors, drivers, sellers, and consultants.</p>
+        <ul>
+          <li>Expense tracking &amp; receipt categorization</li>
+          <li>Quarterly tax estimates</li>
+          <li>GST/HST tracking</li>
+          <li>Invoice management</li>
+          <li>Business deductions</li>
+          <li>Profit forecasting</li>
+        </ul>
+        <a class="btn btn-ghost" href="signup.html">Start freelancing</a>
+      </div>
+
+      <!-- Small Business -->
+      <div class="tier reveal">
+        <span class="name">Small Business</span>
+        <div class="price">$49.99 <span class="per">/ month</span></div>
+        <p class="desc">For growing teams and their accountants.</p>
+        <ul>
+          <li>Multiple users</li>
+          <li>Business tax planning</li>
+          <li>Payroll tax estimates</li>
+          <li>Financial dashboards</li>
+          <li>Accountant collaboration</li>
+          <li>Advanced reporting</li>
+        </ul>
+        <a class="btn btn-ghost" href="signup.html">Get started</a>
+      </div>
+
+      <!-- Reports add-on as a card -->
+      <div class="tier reveal" style="justify-content:space-between">
+        <span class="name">Add-on · Reports</span>
+        <div class="price">$9.99<span class="per">&ndash;19.99 each</span></div>
+        <p class="desc">On-demand AI financial reports, whenever you need one.</p>
+        <ul>
+          <li>Tax optimization report</li>
+          <li>Retirement readiness report</li>
+          <li>Investment tax report</li>
+        </ul>
+        <a class="btn btn-ghost" href="signup.html">Browse reports</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SECURITY ============================ -->
+<section class="band sec" id="security">
+  <div class="wrap sec-grid">
+    <div class="reveal">
+      <span class="eyebrow"><span class="idx">07</span> · Security</span>
+      <h2 class="display" style="margin-top:.9rem">Built to be trusted with your most sensitive numbers.</h2>
+      <p class="lead" style="margin-top:1rem">Your financial life deserves more than a checkbox. Security is a first principle here &mdash; not a page in the terms.</p>
+      <div class="sec-list" style="margin-top:2rem">
+        <div class="sec-item">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          <h3>Encrypted end to end</h3>
+          <p>Your documents are encrypted in transit and at rest, and securely processed.</p>
+        </div>
+        <div class="sec-item">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3Z"/></svg>
+          <h3>CRA-aligned engine</h3>
+          <p>Calculations follow current Canadian tax rules, updated each filing season.</p>
+        </div>
+        <div class="sec-item">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3v18M5 8l7-5 7 5M5 8v8l7 5 7-5V8"/></svg>
+          <h3>You own your data</h3>
+          <p>Export or delete it anytime. We never sell your information &mdash; full stop.</p>
+        </div>
+        <div class="sec-item">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+          <h3>Transparent by design</h3>
+          <p>Every recommendation shows its source, so you can verify before you file.</p>
+        </div>
+      </div>
+    </div>
+    <div class="vault reveal" aria-label="Illustration of encrypted document handling">
+      <div class="row"><svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> T4_2024.pdf <span class="st">● ENCRYPTED</span></div>
+      <div class="row"><svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> investment_summary.pdf <span class="st">● ENCRYPTED</span></div>
+      <div class="row"><svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> medical_receipts.zip <span class="st">● ENCRYPTED</span></div>
+      <div class="row"><svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> donation_slips.pdf <span class="st">● ENCRYPTED</span></div>
+      <div class="row" style="color:var(--ink-3)">Encrypted · you control access &amp; deletion</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FAQ ============================ -->
+<section class="band" id="faq">
+  <div class="wrap">
+    <div class="sect-head reveal">
+      <span class="eyebrow"><span class="idx">08</span> · Questions</span>
+      <h2 class="display">Answers before you upload a thing.</h2>
+    </div>
+    <div class="faq reveal">
+      <details>
+        <summary><span class="q">Is ONYX actually accurate?</span><span class="pm" aria-hidden="true"></span></summary>
+        <div class="a">Every calculation follows current Canadian tax rules, and each recommendation traces back to the specific rule behind it. A built-in audit checker flags errors and risks before you file, so you can verify the reasoning rather than take it on faith.</div>
+      </details>
+      <details>
+        <summary><span class="q">Can I really file my return with it?</span><span class="pm" aria-hidden="true"></span></summary>
+        <div class="a">ONYX prepares a complete, optimized, filing-ready return and exports it in the formats you need. You submit it through approved filing channels &mdash; and ONYX tells you exactly when it&rsquo;s ready and whether anything is still missing.</div>
+      </details>
+      <details>
+        <summary><span class="q">Is my financial data safe?</span><span class="pm" aria-hidden="true"></span></summary>
+        <div class="a">Yes. Documents are encrypted in transit and at rest, your data stays yours to export or delete at any time, and we never sell it. Security is one of our five founding principles, not an afterthought.</div>
+      </details>
+      <details>
+        <summary><span class="q">Is it genuinely free to start?</span><span class="pm" aria-hidden="true"></span></summary>
+        <div class="a">Yes &mdash; no card required. The free tier includes AI Tax Chat, a refund estimator, your Tax Health Score, and year-round tips. You only pay when you file a return ($29.99) or upgrade for year-round planning.</div>
+      </details>
+      <details>
+        <summary><span class="q">Do I still need an accountant?</span><span class="pm" aria-hidden="true"></span></summary>
+        <div class="a">For most simple-to-moderate returns, ONYX handles everything an accountant would &mdash; for a fraction of the cost. For more complex situations, it makes working with a professional far easier, and can refer you to one when it&rsquo;s the right call.</div>
+      </details>
+      <details>
+        <summary><span class="q">Which documents does it support?</span><span class="pm" aria-hidden="true"></span></summary>
+        <div class="a">T4 and T5 slips, T2202 tuition forms, donation receipts, investment statements, medical receipts and reports, income statements, and more. Upload what you have &mdash; ONYX reads it and tells you what&rsquo;s still outstanding.</div>
+      </details>
+      <details>
+        <summary><span class="q">Is ONYX affiliated with the CRA?</span><span class="pm" aria-hidden="true"></span></summary>
+        <div class="a">No. ONYX is an independent platform. Our calculations follow CRA rules, but we are not a government service and are not endorsed by the Canada Revenue Agency.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FINAL CTA ============================ -->
+<section class="band final">
+  <div class="wrap">
+    <h2 class="reveal">Your refund is waiting to be found.</h2>
+    <p class="lead reveal">Start free in minutes. Upload your slips, watch the number appear, and pay only when you file.</p>
+    <div class="hero-actions reveal">
+      <a class="btn btn-primary" href="signup.html">Start free <span class="arw" aria-hidden="true">→</span></a>
+      <a class="btn btn-ghost" href="#pricing">See pricing</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================ FOOTER ============================ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="brand" href="#top"><span class="dot" aria-hidden="true"></span>ONYX<span class="os">TaxOS</span></a>
+        <p>The AI tax operating system for Canadians &mdash; and the beginning of a lifelong financial companion.</p>
+      </div>
+      <div class="fcol">
+        <h4>Product</h4>
+        <a href="#copilot">AI Copilot</a>
+        <a href="#system">The System</a>
+        <a href="#security">Security</a>
+        <a href="#pricing">Pricing</a>
+      </div>
+      <div class="fcol">
+        <h4>For</h4>
+        <a href="#who">Individuals</a>
+        <a href="#who">Freelancers</a>
+        <a href="#who">Small business</a>
+        <a href="#pricing">Reports</a>
+      </div>
+      <div class="fcol">
+        <h4>Company</h4>
+        <a href="#top">About</a>
+        <a href="#faq">FAQ</a>
+        <a href="#top">Careers</a>
+        <a href="#top">Contact</a>
+      </div>
+    </div>
+    <p class="disclaimer">ONYX TaxOS provides tax preparation software and educational information. It is not a substitute for personalized advice from a licensed tax professional, and it is not affiliated with or endorsed by the Canada Revenue Agency. Refund figures, scores, and other numbers shown on this page are illustrative.</p>
+    <div class="copyright">
+      <span>© 2026 ONYX TaxOS</span>
+      <span>Made in Canada · Intelligence over paperwork</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---- nav scrolled state ---- */
+  var nav = document.getElementById("nav");
+  var onScroll = function(){ nav.classList.toggle("scrolled", window.scrollY > 12); };
+  onScroll(); window.addEventListener("scroll", onScroll, {passive:true});
+
+  /* ---- reveal on scroll ---- */
+  var reveals = [].slice.call(document.querySelectorAll(".reveal"));
+  if(reduce || !("IntersectionObserver" in window)){
+    reveals.forEach(function(el){ el.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, {threshold:.14, rootMargin:"0px 0px -8% 0px"});
+    reveals.forEach(function(el){ io.observe(el); });
+  }
+
+  /* ---- count-up refund + health score ---- */
+  var refundEl = document.getElementById("refund");
+  var scoreFill = document.getElementById("scoreFill");
+  var scoreVal = document.getElementById("scoreVal");
+  var refundTarget = parseInt(refundEl.getAttribute("data-target"),10);
+  var scoreTarget = 92;
+  function fmt(n){ return n.toLocaleString("en-CA"); }
+  function runCounters(){
+    if(reduce){ refundEl.textContent = fmt(refundTarget); scoreFill.style.width = scoreTarget+"%"; scoreVal.textContent = scoreTarget; return; }
+    var start=null, dur=1500;
+    function tick(ts){
+      if(!start) start=ts;
+      var p=Math.min((ts-start)/dur,1);
+      var ease=1-Math.pow(1-p,3);
+      refundEl.textContent = fmt(Math.round(refundTarget*ease));
+      scoreVal.textContent = Math.round(scoreTarget*ease);
+      if(p<1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+    requestAnimationFrame(function(){ scoreFill.style.width = scoreTarget+"%"; });
+  }
+  // kick counters once the panel is on screen
+  var panel = document.querySelector(".panel");
+  if(reduce || !("IntersectionObserver" in window)){ runCounters(); }
+  else {
+    var pio = new IntersectionObserver(function(entries){
+      if(entries[0].isIntersecting){ runCounters(); pio.disconnect(); }
+    }, {threshold:.4});
+    pio.observe(panel);
+  }
+
+  /* ---- pricing toggle (Pro only) ---- */
+  var pm=document.getElementById("pm"), pa=document.getElementById("pa");
+  var proPrice=document.getElementById("proPrice"), proPer=document.getElementById("proPer");
+  var saveNote=document.getElementById("saveNote");
+  function setBilling(annual){
+    pm.setAttribute("aria-pressed", String(!annual));
+    pa.setAttribute("aria-pressed", String(annual));
+    proPrice.textContent = annual ? "$89" : "$9.99";
+    proPer.textContent = annual ? "/ year" : "/ month";
+    saveNote.style.visibility = annual ? "hidden" : "visible";
+  }
+  pm.addEventListener("click", function(){ setBilling(false); });
+  pa.addEventListener("click", function(){ setBilling(true); });
+
+  /* ---- ambient refracted light (hero) ---- */
+  var canvas=document.getElementById("aurora");
+  if(canvas && canvas.getContext){
+    var ctx=canvas.getContext("2d"), W,H,dpr,raf,t=0;
+    function styleColor(){ return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#E3BE86"; }
+    var col=styleColor();
+    function resize(){
+      dpr=Math.min(window.devicePixelRatio||1,1.6);
+      W=canvas.clientWidth; H=canvas.clientHeight;
+      canvas.width=W*dpr; canvas.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    function blob(x,y,r,a){
+      var g=ctx.createRadialGradient(x,y,0,x,y,r);
+      g.addColorStop(0, hexA(col,a)); g.addColorStop(1, hexA(col,0));
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    }
+    function hexA(hex,a){
+      hex=hex.replace("#",""); if(hex.length===3){hex=hex.split("").map(function(c){return c+c;}).join("");}
+      var r=parseInt(hex.substr(0,2),16),g=parseInt(hex.substr(2,2),16),b=parseInt(hex.substr(4,2),16);
+      return "rgba("+r+","+g+","+b+","+a+")";
+    }
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      var cx=W*0.74, cy=H*0.16;
+      blob(cx + Math.sin(t*0.5)*W*0.05, cy + Math.cos(t*0.4)*H*0.04, Math.max(W,H)*0.34, 0.16);
+      blob(W*0.9 + Math.cos(t*0.3)*W*0.03, H*0.05, Math.max(W,H)*0.22, 0.12);
+      blob(W*0.55 + Math.sin(t*0.35)*W*0.06, H*0.02, Math.max(W,H)*0.18, 0.07);
+      t+=0.005; raf=requestAnimationFrame(draw);
+    }
+    function start(){ resize(); if(reduce){ draw(); cancelAnimationFrame(raf); } else { cancelAnimationFrame(raf); draw(); } }
+    window.addEventListener("resize", function(){ resize(); if(reduce){draw();} });
+    document.addEventListener("visibilitychange", function(){
+      if(document.hidden){ cancelAnimationFrame(raf); } else if(!reduce){ draw(); }
+    });
+    // update color if theme toggled
+    var mo=new MutationObserver(function(){ col=styleColor(); });
+    mo.observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+    start();
+  }
+})();
+</script>
+</body>
+</html>

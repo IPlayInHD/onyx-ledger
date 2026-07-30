@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Your Tax Audit — Onyx Ledger</title>
+<link rel="stylesheet" href="onyx.css" />
+<style>
+  .intro{display:flex;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin:1.6rem 0 1.2rem}
+  .intro h1{font-family:var(--serif);font-size:clamp(1.6rem,1.3rem + 1.4vw,2.1rem);font-weight:600;letter-spacing:-.01em}
+  .intro p{color:var(--ink-2);font-size:.92rem;margin-top:.3rem}
+  .intro .sp{flex:1}
+  .runstatus{font-family:var(--mono);font-size:.72rem;color:var(--ink-3)}
+  .doc-add{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem}
+  .chip-add{font-family:var(--mono);font-size:.72rem;padding:.4em .7em;border-radius:99px;border:1px solid var(--line-2);background:var(--bg-3);color:var(--ink-2);transition:.18s}
+  .chip-add:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .chip-add:disabled{opacity:.4;cursor:default}
+  .doc-row{display:flex;align-items:center;gap:.7rem;padding:.6rem 0;border-bottom:1px dashed var(--line);font-size:.86rem}
+  .doc-row:last-child{border-bottom:0}
+  .doc-row .t{flex:1;min-width:0}
+  .doc-row .t .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .doc-row .t .mt{font-family:var(--mono);font-size:.68rem;color:var(--ink-3)}
+  .doc-row .del{background:none;border:0;color:var(--ink-3);font-size:1rem;padding:.2em .4em}
+  .doc-row .del:hover{color:var(--crit)}
+  .manual{margin-top:1rem;border-top:1px solid var(--line);padding-top:1rem}
+  .manual summary{cursor:pointer;font-size:.86rem;color:var(--accent);font-family:var(--mono)}
+  .mono-fields{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.8rem}
+  @media(max-width:520px){.mono-fields{grid-template-columns:1fr}}
+
+  /* audit report */
+  .hero-pos{display:grid;grid-template-columns:1.2fr 1fr;gap:1.5rem;align-items:center}
+  @media(max-width:640px){.hero-pos{grid-template-columns:1fr}}
+  .bignum{font-family:var(--serif);font-weight:600;font-size:clamp(2.4rem,1.8rem + 3vw,3.4rem);line-height:1;letter-spacing:-.02em}
+  .bignum .cur{font-size:.5em;vertical-align:.24em;margin-right:.05ch}
+  .refund{color:var(--pos)}.owing{color:var(--crit)}
+  .chips{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}
+  .stchip{font-family:var(--mono);font-size:.72rem;border:1px solid var(--line);border-radius:99px;padding:.35em .7em;color:var(--ink-2)}
+  .stchip b{color:var(--ink)}
+  .dial{position:relative;width:128px;height:128px;flex:none;margin:0 auto}
+  .dial svg{transform:rotate(-90deg)}.dial .tk{stroke:var(--line)}
+  .dial .pg{stroke-linecap:round;transition:stroke-dashoffset 1.2s cubic-bezier(.2,.7,.2,1)}
+  .dial .ctr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .dial .ctr .n{font-family:var(--serif);font-size:2.3rem;font-weight:600;line-height:1}
+  .dial .ctr .d{font-family:var(--mono);font-size:.6rem;color:var(--ink-3);letter-spacing:.1em}
+  .band{display:inline-flex;align-items:center;gap:.5ch;font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;padding:.3em .7em;border-radius:99px;border:1px solid currentColor}
+  .meter{display:grid;grid-template-columns:150px 1fr 42px;align-items:center;gap:.8rem;padding:.45rem 0;font-size:.86rem}
+  @media(max-width:520px){.meter{grid-template-columns:110px 1fr 38px}}
+  .meter .mt{height:7px;background:var(--line);border-radius:99px;overflow:hidden}
+  .meter .mf{height:100%;border-radius:99px;transition:width 1s cubic-bezier(.2,.7,.2,1)}
+  .meter .mv{font-family:var(--mono);font-size:.8rem;text-align:right;color:var(--ink-2)}
+  .found .f{display:flex;align-items:center;gap:.6ch;padding:.4rem 0;border-bottom:1px dashed var(--line);font-size:.88rem}
+  .found .f:last-child{border-bottom:0}.found .f .v{margin-left:auto;font-family:var(--mono);color:var(--ink)}
+  .ic-ok{color:var(--pos)}.ic-warn{color:var(--warn)}
+  .opp{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r);background:var(--bg-2);padding:1.1rem 1.2rem;margin-bottom:.8rem;display:flex;gap:1rem;align-items:flex-start}
+  .opp.p1{border-left-color:var(--accent);background:radial-gradient(120% 90% at 100% 0%,rgba(227,190,134,.08),transparent 60%),var(--bg-2)}
+  .opp .body{flex:1}.opp .chip{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .opp h4{font-family:var(--serif);font-size:1.1rem;font-weight:600;margin:.3rem 0 .3rem}
+  .opp p{font-size:.88rem;color:var(--ink-2)}
+  .opp .cite{font-family:var(--mono);font-size:.68rem;color:var(--ink-3);margin-top:.6rem}
+  .opp .impact{flex:none;text-align:right;font-family:var(--mono);min-width:88px}
+  .opp .impact .n{font-size:1.05rem;color:var(--pos);font-weight:600}
+  .opp .impact .l{font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);display:block;margin-top:.2rem}
+  .advisory{font-family:var(--serif);font-size:1.15rem;line-height:1.5;color:var(--ink)}
+  .actions-list{display:flex;flex-direction:column;gap:.5rem;margin-top:1rem}
+  .actions-list .a{display:flex;gap:.7ch;align-items:center;font-size:.9rem}
+  .actions-list .a .n{font-family:var(--mono);color:var(--accent);font-size:.78rem}
+  .disc{font-size:.78rem;color:var(--ink-3);line-height:1.6;margin-top:1.2rem;border-top:1px solid var(--line);padding-top:1rem}
+  .empty{padding:2.4rem 1.5rem;text-align:center;color:var(--ink-3)}
+  .empty .serif{font-family:var(--serif);font-size:1.3rem;color:var(--ink-2);margin-bottom:.4rem}
+  .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:sp 1s linear infinite;vertical-align:-3px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+</head>
+<body>
+<header class="topbar"><div class="wrap topbar-in">
+  <a class="brand" href="index.html"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
+  <span class="sp"></span>
+  <span class="who" id="who"></span>
+  <button class="btn btn-ghost btn-sm" id="signout">Sign out</button>
+</div></header>
+
+<div class="wrap">
+  <div class="intro">
+    <div>
+      <h1>Your Tax Audit</h1>
+      <p id="introSub">Set your profile, add your documents, then run your audit.</p>
+    </div>
+    <span class="sp"></span>
+    <span class="runstatus" id="runStatus"></span>
+    <button class="btn btn-primary" id="runBtn">Run my audit</button>
+  </div>
+
+  <div class="grid g2">
+    <!-- PROFILE -->
+    <div class="card"><div class="card-h">Your profile <span class="badge">drives eligibility</span></div>
+      <div class="card-b">
+        <div class="form-grid">
+          <label class="field">Province / territory
+            <select id="province"></select>
+          </label>
+          <label class="field">Tax year
+            <select id="year"><option value="2024">2024</option></select>
+          </label>
+          <label class="field">Age
+            <input id="age" type="number" min="0" max="120" placeholder="e.g. 34" />
+          </label>
+          <label class="field">Marital status
+            <select id="maritalStatus">
+              <option value="single">Single</option>
+              <option value="married">Married</option>
+              <option value="commonlaw">Common-law</option>
+            </select>
+          </label>
+          <label class="field">Spouse net income
+            <input id="spouseNetIncome" type="number" min="0" placeholder="0" />
+          </label>
+          <label class="field">Dependants
+            <input id="dependants" type="number" min="0" placeholder="0" />
+          </label>
+          <label class="field">Known RRSP room ($)
+            <input id="rrspRoom" type="number" min="0" placeholder="optional" />
+          </label>
+          <label class="field">Known TFSA room ($)
+            <input id="tfsaRoom" type="number" min="0" placeholder="optional" />
+          </label>
+        </div>
+        <div class="grid" style="gap:.5rem;margin-top:1rem">
+          <label class="check"><input id="isStudent" type="checkbox" /> I was a student this year</label>
+          <label class="check"><input id="firstTimeHomeBuyer" type="checkbox" /> First-time home buyer</label>
+          <label class="check"><input id="ownsHome" type="checkbox" /> I already own a home</label>
+          <label class="check"><input id="disability" type="checkbox" /> Eligible for the disability tax credit</label>
+        </div>
+        <button class="btn btn-ghost btn-sm btn-block" id="saveProfile" style="margin-top:1rem">Save profile</button>
+      </div>
+    </div>
+
+    <!-- DOCUMENTS -->
+    <div class="card"><div class="card-h">Documents <span class="badge" id="docBadge">0 added</span></div>
+      <div class="card-b">
+        <p class="hint" style="margin-bottom:.7rem">Add sample slips to try it instantly, or enter your own amounts below.</p>
+        <div class="doc-add" id="docAdd"></div>
+        <div id="docList"></div>
+        <details class="manual">
+          <summary>Enter a document manually</summary>
+          <div style="margin-top:.8rem">
+            <label class="field">Document type
+              <select id="mType"></select>
+            </label>
+            <div class="mono-fields" id="mFields"></div>
+            <button class="btn btn-ghost btn-sm btn-block" id="addManual" style="margin-top:.8rem">Add document</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div id="report"></div>
+  <div style="height:3rem"></div>
+</div>
+
+<script src="app.js"></script>
+<script>
+ONYX.requireAuth();
+const $ = (id) => document.getElementById(id);
+const money = ONYX.money;
+
+let META = { provinces: {}, slipTypes: {} };
+let DOCS = [];
+
+// client-side enterable fields per slip type
+const FIELD_LABELS = {
+  T4: [['employmentIncome','Employment income (Box 14)'],['cppContrib','CPP (Box 16)'],['eiContrib','EI (Box 18)'],['taxWithheld','Tax deducted (Box 22)'],['unionDues','Union dues (Box 44)']],
+  T4A: [['pensionIncome','Pension income'],['selfEmploymentIncome','Fees for services'],['taxWithheld','Tax deducted']],
+  T5: [['eligibleDividends','Eligible dividends'],['nonEligibleDividends','Other than eligible'],['interestIncome','Interest (Box 13)']],
+  T3: [['eligibleDividends','Eligible dividends'],['capitalGains','Capital gains'],['otherIncome','Other income']],
+  T2202: [['tuition','Eligible tuition']],
+  RRSP: [['rrspDeduction','Contribution amount']],
+  FHSA: [['fhsaDeduction','Contribution amount']],
+  DONATION: [['donations','Total donations']],
+  MEDICAL: [['medicalExpenses','Total medical expenses']],
+  T5008: [['capitalGains','Net capital gain']],
+  T4E: [['otherIncome','Total benefits (Box 14)'],['taxWithheld','Tax deducted (Box 22)']],
+  CHILDCARE: [['childCare','Total child care paid']],
+};
+// one-click sample presets
+const SAMPLES = {
+  T4: { employmentIncome:68000, cppContrib:3867.5, eiContrib:1049.12, taxWithheld:11800 },
+  T5: { eligibleDividends:1240, interestIncome:310 },
+  T2202: { tuition:4200 },
+  RRSP: { rrspDeduction:3000 },
+  DONATION: { donations:500 },
+  MEDICAL: { medicalExpenses:1850 },
+};
+
+async function boot() {
+  try {
+    const me = await ONYX.api('/me'); $('who').textContent = me.user.name;
+  } catch (_) { return; }
+  META = await ONYX.api('/meta');
+  // province select
+  $('province').innerHTML = Object.entries(META.provinces).map(([c,n]) => `<option value="${c}">${n}</option>`).join('');
+  // manual type select + sample chips
+  $('mType').innerHTML = Object.entries(META.slipTypes).map(([c,l]) => `<option value="${c}">${c} — ${l}</option>`).join('');
+  $('docAdd').innerHTML = Object.keys(SAMPLES).map(t => `<button class="chip-add" data-sample="${t}">+ ${t}</button>`).join('') ;
+  renderManualFields();
+  await loadProfile();
+  await loadDocs();
+  try { const { audit } = await ONYX.api('/audit'); audit ? renderReport(audit) : renderEmpty(); } catch (_) { renderEmpty(); }
+}
+
+async function loadProfile() {
+  const { profile } = await ONYX.api('/profile');
+  const p = profile || {};
+  ['age','spouseNetIncome','dependants','rrspRoom','tfsaRoom'].forEach(k => { if (p[k] != null) $(k).value = p[k]; });
+  if (p.province) $('province').value = p.province;
+  if (p.maritalStatus) $('maritalStatus').value = p.maritalStatus;
+  ['isStudent','firstTimeHomeBuyer','ownsHome','disability'].forEach(k => { $(k).checked = !!p[k]; });
+}
+
+async function saveProfile() {
+  const num = (id) => { const v = parseFloat($(id).value); return isNaN(v) ? undefined : v; };
+  const patch = {
+    province: $('province').value, year: 2024,
+    age: num('age'), maritalStatus: $('maritalStatus').value,
+    spouseNetIncome: num('spouseNetIncome') || 0, dependants: num('dependants') || 0,
+    rrspRoom: num('rrspRoom'), tfsaRoom: num('tfsaRoom'),
+    isStudent: $('isStudent').checked, firstTimeHomeBuyer: $('firstTimeHomeBuyer').checked,
+    ownsHome: $('ownsHome').checked, disability: $('disability').checked,
+  };
+  await ONYX.api('/profile', { method:'PUT', body: patch });
+  flash('saveProfile', 'Saved ✓');
+}
+
+async function loadDocs() {
+  const { documents } = await ONYX.api('/documents'); DOCS = documents;
+  $('docBadge').textContent = DOCS.length + ' added';
+  $('docList').innerHTML = DOCS.length ? DOCS.map(docRow).join('') : '<p class="hint">No documents yet.</p>';
+  $('docList').querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => delDoc(b.dataset.del)));
+  // disable sample chips already added
+  document.querySelectorAll('[data-sample]').forEach(b => { b.disabled = DOCS.some(d => d.type === b.dataset.sample); });
+}
+function docRow(d) {
+  const s = d.scan || {};
+  const status = s.status || 'processed';
+  const conf = s.confidence != null ? Math.round(s.confidence*100)+'%' : '';
+  return `<div class="doc-row"><div class="t"><div class="nm">${esc(d.name || META.slipTypes[d.type] || d.type)}</div>
+    <div class="mt">${d.type}${conf ? ' · '+conf+' confidence' : ''}</div></div>
+    <span class="pill ${status}">${status.replace('_',' ')}</span>
+    <button class="del" data-del="${d.id}" title="Remove">✕</button></div>`;
+}
+
+async function addSample(type) { await ONYX.api('/documents', { method:'POST', body: { type, fields: SAMPLES[type], name: sampleName(type) } }); await loadDocs(); markStale(); }
+function sampleName(t){ return ({T4:'T4 — Employer income',T5:'T5 — Investment income',T2202:'T2202 — Tuition',RRSP:'RRSP receipt',DONATION:'Donation receipt',MEDICAL:'Medical receipts'})[t] || t; }
+async function delDoc(id) { await ONYX.api('/documents/'+id, { method:'DELETE' }); await loadDocs(); markStale(); }
+
+function renderManualFields() {
+  const t = $('mType').value; const fields = FIELD_LABELS[t] || [];
+  $('mFields').innerHTML = fields.map(([k,l]) => `<label class="field">${l}<input data-mf="${k}" type="number" min="0" placeholder="0" /></label>`).join('');
+}
+async function addManual() {
+  const type = $('mType').value; const fields = {};
+  $('mFields').querySelectorAll('[data-mf]').forEach(inp => { const v = parseFloat(inp.value); if (!isNaN(v)) fields[inp.dataset.mf] = v; });
+  if (!Object.keys(fields).length) { flash('addManual', 'Enter an amount'); return; }
+  await ONYX.api('/documents', { method:'POST', body: { type, fields, name: type+' (manual)' } });
+  $('mFields').querySelectorAll('[data-mf]').forEach(i => i.value = '');
+  await loadDocs(); markStale();
+}
+
+async function runAudit() {
+  await saveProfile();
+  $('runBtn').disabled = true; $('runStatus').innerHTML = '<span class="spin"></span> Scanning documents & auditing…';
+  try {
+    const { audit } = await ONYX.api('/audit', { method:'POST' });
+    renderReport(audit); $('runStatus').textContent = 'Audited ' + new Date().toLocaleTimeString();
+  } catch (ex) { $('runStatus').textContent = ex.message; }
+  $('runBtn').disabled = false;
+}
+function markStale(){ $('runStatus').textContent = 'Documents changed — run your audit'; }
+
+/* ---------- report rendering ---------- */
+function renderEmpty() {
+  $('report').innerHTML = `<div class="card" style="margin-top:1rem"><div class="empty">
+    <div class="serif">Your audit will appear here.</div>
+    <div>Add at least one document (try the sample chips), then press <b>Run my audit</b>.</div></div></div>`;
+}
+function renderReport(a) {
+  const r = a.return, h = a.health, adv = a.advisory;
+  const posClass = r.isRefund ? 'refund' : 'owing';
+  const posLabel = r.isRefund ? 'Estimated refund' : 'Estimated balance owing';
+  const tone = { positive:'var(--pos)', warning:'var(--warn)', critical:'var(--crit)' }[h.band.tone] || 'var(--accent)';
+  const C = 2*Math.PI*52, off = C*(1 - h.score/100);
+
+  const meters = h.subscores.map(s => {
+    const col = s.score>=80?'var(--pos)':s.score>=50?'var(--accent)':'var(--warn)';
+    return `<div class="meter"><span>${s.label}</span><span class="mt"><span class="mf" style="width:0;background:${col}" data-w="${s.score}"></span></span><span class="mv">${s.score}%</span></div>`;
+  }).join('');
+
+  const found = a.found.map(f => `<div class="f"><span class="${f.ok?'ic-ok':'ic-warn'}">${f.ok?'✓':'⚠'}</span> ${esc(f.label)} <span class="v">${esc(String(f.value))}</span></div>`).join('');
+
+  const opps = a.opportunities.map(o => {
+    const imp = o.impact ? `<div class="impact"><span class="n">${money(o.impact)}</span><span class="l">${esc(o.impactLabel||'est.')}</span></div>`
+      : (o.impactLabel ? `<div class="impact"><span class="n" style="font-size:.78rem;color:var(--info)">${esc(o.impactLabel)}</span></div>` : '');
+    return `<div class="opp ${o.priority===1?'p1':''}"><div class="body">
+      <span class="chip">${esc(o.category)}</span><h4>${esc(o.title)}</h4><p>${esc(o.detail)}</p>
+      <div class="cite">${esc(o.citation||'')}</div></div>${imp}</div>`;
+  }).join('');
+
+  const docs = a.documents.map(d => `<div class="doc-row"><div class="t"><div class="nm">${esc(d.name||d.label)}</div><div class="mt">${d.type} · found: ${(d.foundFields||[]).join(', ')||'—'}</div></div><span class="pill ${d.status}">${d.status.replace('_',' ')}</span><span class="mv" style="font-family:var(--mono);font-size:.72rem;color:var(--ink-3)">${Math.round((d.confidence||0)*100)}%</span></div>`).join('');
+
+  $('report').innerHTML = `
+  <h2 class="sectitle">Tax position · ${r.provinceName} ${r.year}</h2>
+  <div class="card glow"><div class="card-b"><div class="hero-pos">
+    <div>
+      <div class="k">${posLabel}</div>
+      <div class="bignum ${posClass}"><span class="cur">$</span>${Math.abs(Math.round(r.refundOrBalance)).toLocaleString('en-CA')}</div>
+      <div class="chips">
+        <span class="stchip">Total income <b>${money(r.income.total)}</b></span>
+        <span class="stchip">Taxable <b>${money(r.taxableIncome)}</b></span>
+        <span class="stchip">Total tax <b>${money(r.tax.total)}</b></span>
+        <span class="stchip">Marginal <b>${(r.marginalRate*100).toFixed(1)}%</b></span>
+        <span class="stchip">Average <b>${(r.averageRate*100).toFixed(1)}%</b></span>
+      </div>
+    </div>
+    <div style="text-align:center">
+      <div class="dial"><svg width="128" height="128" viewBox="0 0 128 128"><circle class="tk" cx="64" cy="64" r="52" fill="none" stroke-width="9"/>
+        <circle class="pg" id="hdial" cx="64" cy="64" r="52" fill="none" stroke-width="9" stroke="${tone}" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${C.toFixed(1)}"/></svg>
+        <div class="ctr"><span class="n" style="color:${tone}">${h.score}</span><span class="d">/ 100</span></div></div>
+      <span class="band" style="color:${tone};margin-top:.6rem">● ${h.band.label}</span>
+    </div>
+  </div></div></div>
+
+  <div class="grid g2" style="margin-top:1rem">
+    <div class="card"><div class="card-h">Tax Health breakdown</div><div class="card-b">${meters}
+      ${h.notes && h.notes.length ? '<div class="disc" style="border-top:0;padding-top:.6rem">'+h.notes.map(esc).join(' · ')+'</div>' : ''}
+    </div></div>
+    <div class="card"><div class="card-h">What ONYX found</div><div class="card-b found">${found || '<p class="hint">No figures extracted yet.</p>'}</div></div>
+  </div>
+
+  <h2 class="sectitle">Opportunities to lower your tax <span class="k" style="font-family:var(--mono)">· ${a.opportunities.length} found</span></h2>
+  ${opps || '<div class="card"><div class="empty">No specific opportunities detected — your position looks well optimized.</div></div>'}
+
+  <h2 class="sectitle">Advisory summary</h2>
+  <div class="card glow"><div class="card-b">
+    <p class="advisory">${esc(adv.headline)}</p>
+    ${adv.priorityActions && adv.priorityActions.length ? '<div class="actions-list">'+adv.priorityActions.map((t,i)=>`<div class="a"><span class="n">0${i+1}</span> ${esc(t)}</div>`).join('')+'</div>' : ''}
+    <p class="disc">${esc(adv.disclaimer)}</p>
+  </div></div>
+
+  <h2 class="sectitle">Documents scanned</h2>
+  <div class="card"><div class="card-b">${docs || '<p class="hint">No documents.</p>'}</div></div>`;
+
+  // animate dial + meters
+  requestAnimationFrame(() => {
+    const d = $('hdial'); if (d) d.style.strokeDashoffset = off;
+    document.querySelectorAll('.mf').forEach(m => m.style.width = m.dataset.w + '%');
+  });
+  $('introSub').textContent = 'Your latest audit is shown below. Edit your profile or documents and re-run anytime.';
+}
+
+/* ---------- utils + wiring ---------- */
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function flash(id, msg){ const b=$(id), t=b.textContent; b.textContent=msg; setTimeout(()=>b.textContent=t, 1400); }
+
+$('signout').addEventListener('click', ONYX.signOut);
+$('saveProfile').addEventListener('click', saveProfile);
+$('runBtn').addEventListener('click', runAudit);
+$('addManual').addEventListener('click', addManual);
+$('mType').addEventListener('change', renderManualFields);
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-sample]'); if (b && !b.disabled) addSample(b.dataset.sample); });
+
+boot();
+</script>
+</body>
+</html>

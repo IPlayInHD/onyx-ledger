@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Tax Copilot — ONYX TaxOS</title>
+<meta name="description" content="See the ONYX AI Tax Copilot in action: upload your slips and watch it extract every figure, find every credit, check for errors, and build a filing-ready return — each step explained in plain language." />
+<style>
+  :root{
+    --bg:#0C0A08;--bg-2:#131009;--bg-3:#1A160F;--bg-4:#221C13;--bg-glass:rgba(18,14,9,.78);
+    --line:rgba(233,214,183,.12);--line-2:rgba(233,214,183,.22);
+    --ink:#F2EBDF;--ink-2:#A79C8B;--ink-3:#726858;
+    --accent:#E3BE86;--accent-2:#C68A4E;--accent-hi:#F7E6C6;--accent-ink:#0C0A08;
+    --pos:#67B893;--info:#87ABD4;--warn:#D6A25A;--crit:#D77B63;--grain:.05;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
+    --pad:clamp(1rem,3vw,1.6rem);--r:14px;--r-lg:20px;
+  }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#F3EEE4;--bg-2:#FBF8F1;--bg-3:#FFFFFF;--bg-4:#F1EADD;--bg-glass:rgba(248,244,236,.82);
+      --line:rgba(50,36,16,.13);--line-2:rgba(50,36,16,.24);--ink:#1C1710;--ink-2:#5B5245;--ink-3:#8C8273;
+      --accent:#9A6A2A;--accent-2:#B98A45;--accent-hi:#7E551E;--accent-ink:#FFFFFF;
+      --pos:#3F8A66;--info:#3E6EA6;--warn:#B27C2E;--crit:#BC5B41;--grain:.035;}
+  }
+  :root[data-theme="light"]{--bg:#F3EEE4;--bg-2:#FBF8F1;--bg-3:#FFFFFF;--bg-4:#F1EADD;--bg-glass:rgba(248,244,236,.82);
+    --line:rgba(50,36,16,.13);--line-2:rgba(50,36,16,.24);--ink:#1C1710;--ink-2:#5B5245;--ink-3:#8C8273;
+    --accent:#9A6A2A;--accent-2:#B98A45;--accent-hi:#7E551E;--accent-ink:#FFFFFF;
+    --pos:#3F8A66;--info:#3E6EA6;--warn:#B27C2E;--crit:#BC5B41;--grain:.035;}
+  :root[data-theme="dark"]{--bg:#0C0A08;--bg-2:#131009;--bg-3:#1A160F;--bg-4:#221C13;--bg-glass:rgba(18,14,9,.78);
+    --line:rgba(233,214,183,.12);--line-2:rgba(233,214,183,.22);--ink:#F2EBDF;--ink-2:#A79C8B;--ink-3:#726858;
+    --accent:#E3BE86;--accent-2:#C68A4E;--accent-hi:#F7E6C6;--accent-ink:#0C0A08;
+    --pos:#67B893;--info:#87ABD4;--warn:#D6A25A;--crit:#D77B63;--grain:.05;}
+
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  svg{display:block}
+  button{font:inherit;color:inherit;cursor:pointer}
+  a{color:inherit;text-decoration:none}
+  h1,h2,h3,h4,p{margin:0}
+  ::selection{background:var(--accent);color:var(--accent-ink)}
+  .mono{font-family:var(--mono)}
+  .serif{font-family:var(--serif)}
+  .tnum{font-variant-numeric:tabular-nums}
+  body::after{content:"";position:fixed;inset:0;z-index:99;pointer-events:none;opacity:var(--grain);mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")}
+
+  /* ---- app bar ---- */
+  .appbar{position:sticky;top:0;z-index:30;background:var(--bg-glass);backdrop-filter:blur(14px) saturate(1.2);border-bottom:1px solid var(--line)}
+  .appbar-in{max-width:1240px;margin-inline:auto;padding:0 var(--pad);height:60px;display:flex;align-items:center;gap:1rem}
+  .brand{display:flex;align-items:baseline;gap:.5ch;font-family:var(--serif);font-size:1.2rem;font-weight:600;letter-spacing:.02em}
+  .brand .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);align-self:center;box-shadow:0 0 12px var(--accent)}
+  .brand .os{font-family:var(--mono);font-size:.6rem;letter-spacing:.22em;color:var(--ink-3);text-transform:uppercase;align-self:center}
+  .return-tag{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;color:var(--ink-3);padding-left:1rem;margin-left:.4rem;border-left:1px solid var(--line)}
+  .appbar .status{margin-left:auto;display:inline-flex;align-items:center;gap:.6ch;font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+    padding:.4em .8em;border-radius:999px;border:1px solid var(--line-2);color:var(--ink-2)}
+  .appbar .status .d{width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
+  .appbar .status.busy{color:var(--accent);border-color:color-mix(in oklab,var(--accent) 40%,transparent)}
+  .appbar .status.busy .d{background:var(--accent);animation:blink 1s infinite}
+  .appbar .status.ready{color:var(--pos);border-color:color-mix(in oklab,var(--pos) 40%,transparent)}
+  .appbar .status.ready .d{background:var(--pos)}
+  @keyframes blink{50%{opacity:.3}}
+  .home-link{font-size:.82rem;color:var(--ink-2);margin-left:1rem;display:none}
+  @media(min-width:720px){.home-link{display:inline}}
+  .home-link:hover{color:var(--accent)}
+
+  /* ---- layout ---- */
+  .app{max-width:1240px;margin-inline:auto;padding:var(--pad);display:grid;grid-template-columns:320px 1fr;gap:var(--pad);align-items:start}
+  @media (max-width:880px){.app{grid-template-columns:1fr}}
+  .panel{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg-2);overflow:hidden}
+  .panel-h{padding:.9rem 1.1rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6ch;
+    font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .panel-h .c{margin-left:auto;font-family:var(--mono);font-size:.7rem;color:var(--accent)}
+
+  /* ---- documents ---- */
+  .side{position:sticky;top:76px;display:flex;flex-direction:column;gap:var(--pad)}
+  @media (max-width:880px){.side{position:static}}
+  .dropzone{margin:1rem;border:1.5px dashed var(--line-2);border-radius:var(--r);padding:1.3rem 1rem;text-align:center;transition:border-color .2s,background .2s}
+  .dropzone.hot{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 8%,transparent)}
+  .dropzone .ic{width:30px;height:30px;color:var(--accent);margin:0 auto .5rem}
+  .dropzone p{font-size:.86rem;color:var(--ink-2)}
+  .dropzone .sub{font-size:.74rem;color:var(--ink-3);margin-top:.2rem}
+  .samples{padding:0 1rem 1rem;display:flex;flex-wrap:wrap;gap:.4rem}
+  .chip-add{font-family:var(--mono);font-size:.72rem;letter-spacing:.02em;padding:.4em .7em;border-radius:999px;border:1px solid var(--line-2);
+    background:var(--bg-3);color:var(--ink-2);transition:.18s}
+  .chip-add:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .chip-add:disabled{opacity:.4;cursor:default;text-decoration:line-through}
+  .runbar{padding:0 1rem 1rem}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:.55ch;padding:.8em 1.2em;border-radius:999px;border:1px solid transparent;
+    font-weight:600;font-size:.9rem;line-height:1;transition:transform .18s,box-shadow .25s,border-color .2s,color .2s,background .2s;width:100%}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .btn-primary{background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:var(--accent-ink);box-shadow:0 10px 26px -12px rgba(227,190,134,.55)}
+  .btn-primary:hover:not(:disabled){transform:translateY(-2px)}
+  .btn-primary:disabled{opacity:.5;cursor:default}
+  .btn-ghost{border-color:var(--line-2);color:var(--ink);background:transparent}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+  .doclist{border-top:1px solid var(--line)}
+  .doc{display:flex;align-items:center;gap:.75rem;padding:.75rem 1.1rem;border-bottom:1px solid var(--line)}
+  .doc:last-child{border-bottom:0}
+  .doc .dic{width:34px;height:34px;flex:none;border-radius:8px;background:var(--bg-4);display:grid;place-items:center;color:var(--accent);font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.02em}
+  .doc .meta{flex:1;min-width:0}
+  .doc .meta .t{font-size:.86rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .doc .meta .s{font-size:.72rem;color:var(--ink-3);font-family:var(--mono);display:flex;align-items:center;gap:.5ch}
+  .doc .st{flex:none;font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase}
+  .doc .st.scan{color:var(--accent)}
+  .doc .st.done{color:var(--pos)}
+  .scanbar{height:2px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:.35rem}
+  .scanbar i{display:block;height:100%;width:0;background:var(--accent);transition:width 1s linear}
+  .empty{padding:1.2rem 1.1rem;color:var(--ink-3);font-size:.82rem;text-align:center}
+
+  /* ---- workspace ---- */
+  .work{display:flex;flex-direction:column;gap:var(--pad)}
+  .hero{border:1px solid var(--line-2);border-radius:var(--r-lg);padding:1.4rem 1.5rem;position:relative;overflow:hidden;
+    background:radial-gradient(120% 90% at 100% 0%,rgba(227,190,134,.12),transparent 55%),linear-gradient(180deg,var(--bg-3),var(--bg-2))}
+  .hero-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:1.5rem;align-items:center}
+  @media (max-width:560px){.hero-grid{grid-template-columns:1fr;gap:1.1rem}}
+  .hero .k{font-family:var(--mono);font-size:.64rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+  .refund{font-family:var(--serif);font-weight:600;font-size:clamp(2.6rem,2rem + 3vw,3.6rem);line-height:1;letter-spacing:-.02em;margin-top:.3rem}
+  .refund .cur{color:var(--accent);font-size:.55em;vertical-align:.2em;margin-right:.05ch}
+  .refund.pending{color:var(--ink-3)}
+  .hero .cap{font-size:.82rem;color:var(--ink-2);margin-top:.5rem}
+  .health{display:flex;align-items:center;gap:1rem}
+  .health .dial{position:relative;width:96px;height:96px;flex:none}
+  .health .dial svg{transform:rotate(-90deg)}
+  .health .dial .tk{stroke:var(--line)}
+  .health .dial .pg{stroke:var(--accent);stroke-linecap:round;transition:stroke-dashoffset 1.2s cubic-bezier(.2,.7,.2,1)}
+  .health .dial .ctr{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--serif);font-size:1.5rem;font-weight:600}
+  .health .lab .n{font-family:var(--mono);font-size:.64rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .health .lab .v{font-size:.92rem;color:var(--ink);font-weight:600;margin-top:.15rem}
+
+  .card{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg-2);overflow:hidden}
+  .card-h{padding:.9rem 1.2rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6ch;font-weight:600;font-size:.92rem}
+  .card-h .badge{margin-left:auto;font-family:var(--mono);font-size:.66rem;letter-spacing:.04em;color:var(--ink-3)}
+  .card-h svg{width:17px;height:17px;color:var(--accent)}
+
+  .row{display:flex;align-items:center;gap:1rem;padding:.7rem 1.2rem;border-bottom:1px solid var(--line);font-size:.9rem}
+  .row:last-child{border-bottom:0}
+  .row .rl{flex:1}
+  .row .rv{font-family:var(--mono);color:var(--ink);letter-spacing:.02em}
+  .row .src{font-family:var(--mono);font-size:.66rem;color:var(--ink-3);background:var(--bg-4);padding:.15em .5em;border-radius:5px}
+
+  .ded{border-bottom:1px solid var(--line)}
+  .ded:last-child{border-bottom:0}
+  .ded-top{display:flex;align-items:center;gap:1rem;padding:.75rem 1.2rem}
+  .ded-top .chk{width:18px;height:18px;flex:none;border-radius:5px;background:color-mix(in oklab,var(--pos) 26%,transparent);color:var(--pos);display:grid;place-items:center;font-size:.66rem;font-weight:800}
+  .ded-top .name{flex:1;font-size:.9rem;font-weight:600}
+  .ded-top .amt{font-family:var(--mono);color:var(--pos);font-size:.9rem}
+  .ded-top .why{font-family:var(--mono);font-size:.66rem;letter-spacing:.06em;color:var(--ink-3);border:1px solid var(--line-2);border-radius:999px;padding:.25em .6em;background:transparent;transition:.18s}
+  .ded-top .why:hover{border-color:var(--accent);color:var(--accent)}
+  .ded-why{max-height:0;overflow:hidden;transition:max-height .3s ease}
+  .ded-why.open{max-height:160px}
+  .ded-why .inner{padding:0 1.2rem 1rem 3.5rem;font-size:.84rem;color:var(--ink-2)}
+
+  .review-item{display:flex;align-items:center;gap:.75rem;padding:.65rem 1.2rem;border-bottom:1px solid var(--line);font-size:.88rem}
+  .review-item:last-child{border-bottom:0}
+  .review-item .ri{width:18px;height:18px;flex:none;display:grid;place-items:center;border-radius:50%;font-size:.66rem;font-weight:800}
+  .review-item .ri.ok{background:color-mix(in oklab,var(--pos) 24%,transparent);color:var(--pos)}
+  .review-item .ri.warn{background:color-mix(in oklab,var(--warn) 24%,transparent);color:var(--warn)}
+  .flag{margin:1rem 1.2rem;border:1px solid color-mix(in oklab,var(--warn) 40%,transparent);border-radius:var(--r);
+    background:color-mix(in oklab,var(--warn) 8%,transparent);padding:.9rem 1rem;display:flex;gap:.75rem;align-items:flex-start}
+  .flag svg{width:18px;height:18px;color:var(--warn);flex:none;margin-top:.1em}
+  .flag .ft{font-size:.86rem}
+  .flag .ft b{font-weight:600}
+  .flag .fa{margin-top:.5rem;display:flex;gap:.5rem}
+  .flag .fa button{font-family:var(--mono);font-size:.7rem;padding:.35em .8em;border-radius:999px;border:1px solid var(--line-2);background:var(--bg-2)}
+  .flag .fa button:hover{border-color:var(--warn);color:var(--warn)}
+
+  .finalize{padding:1.2rem;display:flex;flex-wrap:wrap;gap:.8rem;align-items:center;justify-content:space-between}
+  .finalize .ft{font-size:.9rem;color:var(--ink-2)}
+  .finalize .fb{display:flex;gap:.6rem;flex-wrap:wrap}
+  .finalize .btn{width:auto}
+
+  .placeholder{padding:2.6rem 1.5rem;text-align:center;color:var(--ink-3)}
+  .placeholder .serif{font-size:1.3rem;color:var(--ink-2);margin-bottom:.4rem}
+
+  /* ---- copilot chat ---- */
+  .chatbtn{position:fixed;right:20px;bottom:20px;z-index:40;border-radius:999px;padding:.8em 1.2em;
+    background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:var(--accent-ink);font-weight:600;
+    box-shadow:0 14px 34px -14px rgba(227,190,134,.7);display:inline-flex;align-items:center;gap:.55ch;border:0}
+  .chatbtn:hover{transform:translateY(-2px)}
+  .chatbtn svg{width:18px;height:18px}
+  .chat{position:fixed;right:20px;bottom:20px;z-index:41;width:min(380px,calc(100vw - 40px));height:min(560px,calc(100vh - 40px));
+    display:none;flex-direction:column;border:1px solid var(--line-2);border-radius:var(--r-lg);overflow:hidden;
+    background:var(--bg-2);box-shadow:0 40px 90px -40px rgba(0,0,0,.8)}
+  .chat.open{display:flex}
+  .chat-h{padding:.9rem 1.1rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6ch;background:var(--bg-3)}
+  .chat-h .avatar{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,var(--accent-hi),var(--accent-2));box-shadow:0 0 12px -2px var(--accent)}
+  .chat-h .ti{font-weight:600;font-size:.92rem}
+  .chat-h .ti small{display:block;font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;color:var(--pos);text-transform:uppercase}
+  .chat-h .x{margin-left:auto;background:none;border:0;color:var(--ink-3);font-size:1.3rem;line-height:1;padding:.1em .3em}
+  .chat-h .x:hover{color:var(--ink)}
+  .chat-body{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.7rem}
+  .msg{max-width:85%;padding:.65rem .85rem;border-radius:14px;font-size:.86rem;line-height:1.5}
+  .msg.bot{align-self:flex-start;background:var(--bg-4);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .msg.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px}
+  .msg b{color:var(--accent)}
+  .msg.me b{color:var(--accent-ink);text-decoration:underline}
+  .typing{align-self:flex-start;display:inline-flex;gap:4px;padding:.7rem .9rem;background:var(--bg-4);border:1px solid var(--line);border-radius:14px;border-bottom-left-radius:4px}
+  .typing i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);animation:td 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes td{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+  .prompts{padding:.7rem 1rem;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.4rem;background:var(--bg-3)}
+  .prompts button{font-size:.76rem;text-align:left;padding:.45em .7em;border-radius:10px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink-2);transition:.18s}
+  .prompts button:hover{border-color:var(--accent);color:var(--accent)}
+
+  .reveal-in{animation:ri .45s cubic-bezier(.2,.7,.2,1)}
+  @keyframes ri{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+</style>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<header class="appbar">
+  <div class="appbar-in">
+    <a class="brand" href="index.html"><span class="dot" aria-hidden="true"></span>ONYX<span class="os">TaxOS</span></a>
+    <span class="return-tag">Return · 2024</span>
+    <a class="home-link" href="index.html">&larr; Home</a>
+    <span class="status" id="status"><span class="d"></span><span id="statusText">Idle</span></span>
+  </div>
+</header>
+
+<div class="app">
+  <!-- DOCUMENTS -->
+  <aside class="side">
+    <section class="panel">
+      <div class="panel-h">Documents <span class="c" id="docCount">0</span></div>
+      <div class="dropzone" id="dropzone">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 16V4m0 0 4 4m-4-4-4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <p>Drop your slips &amp; receipts</p>
+        <span class="sub">or add a sample below</span>
+      </div>
+      <div class="samples" id="samples"></div>
+      <div class="runbar">
+        <button class="btn btn-primary" id="runAll">Add all &amp; run ONYX</button>
+      </div>
+      <div class="doclist" id="doclist"><div class="empty" id="docEmpty">No documents yet. ONYX reads each one the moment it arrives.</div></div>
+    </section>
+  </aside>
+
+  <!-- WORKSPACE -->
+  <main class="work">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="k">Estimated refund</div>
+          <div class="refund pending"><span class="cur">$</span><span id="refund" class="tnum">0</span></div>
+          <div class="cap" id="refundCap">Add documents to begin. Your refund updates in real time.</div>
+        </div>
+        <div class="health">
+          <div class="dial">
+            <svg width="96" height="96" viewBox="0 0 96 96"><circle class="tk" cx="48" cy="48" r="40" fill="none" stroke-width="8"/>
+              <circle class="pg" id="hpg" cx="48" cy="48" r="40" fill="none" stroke-width="8" stroke-dasharray="251.3" stroke-dashoffset="251.3"/></svg>
+            <div class="ctr" id="hnum">0</div>
+          </div>
+          <div class="lab"><div class="n">Tax Health</div><div class="v" id="hlabel">Awaiting docs</div></div>
+        </div>
+      </div>
+    </section>
+
+    <div id="workBody">
+      <div class="card"><div class="placeholder">
+        <div class="serif">Your return will build here.</div>
+        <div>Add a document — or run all samples — and watch ONYX extract, optimize, and check every line.</div>
+      </div></div>
+    </div>
+  </main>
+</div>
+
+<!-- COPILOT CHAT -->
+<button class="chatbtn" id="chatOpen" aria-label="Open the ONYX Copilot chat">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12Z"/></svg>
+  Ask ONYX
+</button>
+<section class="chat" id="chat" aria-label="ONYX Copilot chat">
+  <div class="chat-h">
+    <span class="avatar" aria-hidden="true"></span>
+    <span class="ti">ONYX Copilot <small>● Online</small></span>
+    <button class="x" id="chatClose" aria-label="Close chat">&times;</button>
+  </div>
+  <div class="chat-body" id="chatBody">
+    <div class="msg bot">Hi! I&rsquo;m your tax Copilot. Add your documents and I&rsquo;ll build your return — ask me anything about it in plain language.</div>
+  </div>
+  <div class="prompts" id="prompts"></div>
+</section>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var T = function(ms){ return reduce ? Math.min(ms,20) : ms; };
+  var wait = function(ms){ return new Promise(function(r){ setTimeout(r, T(ms)); }); };
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ---------- data (illustrative sample return) ----------
+  var DOCS = [
+    {id:"t4", tag:"T4", name:"T4 · Maple Tech Inc.", sub:"Employment income",
+      income:[{l:"Employment income",v:"$68,400",src:"T4"}],
+      deds:[
+        {name:"Tax withheld at source",amt:"$13,120",refund:980,why:"Your employer already remitted $13,120. Because your credits reduce what you actually owe, part of that comes back as a refund."},
+        {name:"Canada employment amount",amt:"auto",refund:205,why:"An automatic federal credit for anyone with employment income — no receipt required."}
+      ]},
+    {id:"rrsp", tag:"RRSP", name:"RRSP receipt · Onyx Wealth", sub:"Contribution slip",
+      income:[],
+      deds:[{name:"RRSP deduction",amt:"$6,000",refund:1800,why:"RRSP contributions lower your taxable income dollar-for-dollar. At your ~30% marginal rate, $6,000 returns roughly $1,800."}]},
+    {id:"t2202", tag:"T2202", name:"T2202 · TMU", sub:"Tuition certificate",
+      income:[],
+      deds:[{name:"Tuition credit",amt:"$4,200",refund:630,why:"Eligible tuition earns a 15% federal credit (~$630). Any unused amount carries forward or can transfer to a parent or spouse."}]},
+    {id:"t5", tag:"T5", name:"T5 · Onyx Bank", sub:"Investment income",
+      income:[{l:"Eligible dividends",v:"$1,240",src:"T5"},{l:"Interest income",v:"$310",src:"T5"}],
+      deds:[{name:"Dividend tax credit",amt:"$1,240",refund:150,why:"Eligible Canadian dividends are grossed up, then a dividend tax credit offsets most of the extra tax — a lower effective rate than regular income."}]},
+    {id:"donation", tag:"DON", name:"Donation receipts · United Way", sub:"Charitable gifts",
+      income:[],
+      deds:[{name:"Charitable donations",amt:"$600",refund:174,why:"The first $200 earns a 15% credit and everything above it earns 29% federally — plus provincial credits on top."}]},
+    {id:"medical", tag:"MED", name:"Medical receipts", sub:"Dental + prescriptions",
+      income:[],
+      deds:[{name:"Medical expenses",amt:"$1,850",refund:210,why:"Eligible medical costs above 3% of your net income (or a fixed cap) become a credit. ONYX totals every receipt for you."}]}
+  ];
+
+  // ---------- state ----------
+  var added = {}, refund = 0, health = 0, incomeLines = [], deductions = [], finalized=false, running=false;
+  var HCIRC = 2*Math.PI*40;
+
+  // ---------- documents UI ----------
+  var samples = $("samples");
+  DOCS.forEach(function(d){
+    var b = document.createElement("button");
+    b.className="chip-add"; b.id="add-"+d.id; b.textContent="+ "+d.tag;
+    b.addEventListener("click", function(){ addDoc(d.id); });
+    samples.appendChild(b);
+  });
+
+  function setStatus(text, cls){
+    var s=$("status"); s.className="status"+(cls?" "+cls:""); $("statusText").textContent=text;
+  }
+
+  function renderIncome(){
+    if(!incomeLines.length) return "";
+    var rows = incomeLines.map(function(r){
+      return '<div class="row"><span class="rl">'+r.l+'</span><span class="src">'+r.src+'</span><span class="rv tnum">'+r.v+'</span></div>';
+    }).join("");
+    return '<div class="card reveal-in"><div class="card-h">'+
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"/></svg>'+
+      'Income extracted<span class="badge">'+incomeLines.length+' line'+(incomeLines.length>1?"s":"")+'</span></div>'+rows+'</div>';
+  }
+  function renderDeductions(){
+    if(!deductions.length) return "";
+    var items = deductions.map(function(d,i){
+      return '<div class="ded"><div class="ded-top"><span class="chk">&#10003;</span>'+
+        '<span class="name">'+d.name+'</span><span class="amt tnum">'+d.amt+'</span>'+
+        '<button class="why" data-i="'+i+'">Why?</button></div>'+
+        '<div class="ded-why" id="why-'+i+'"><div class="inner">'+d.why+'</div></div></div>';
+    }).join("");
+    return '<div class="card reveal-in"><div class="card-h">'+
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v18M8 7h6a3 3 0 0 1 0 6H8m0 0h7"/></svg>'+
+      'Deductions &amp; credits found<span class="badge">'+deductions.length+' applied</span></div>'+items+'</div>';
+  }
+  function renderReview(){
+    if(!finalized) return "";
+    return '<div class="card reveal-in"><div class="card-h">'+
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3Z"/><path d="M9 12l2 2 4-4"/></svg>'+
+      'Review &amp; audit check<span class="badge">passed</span></div>'+
+      '<div class="review-item"><span class="ri ok">&#10003;</span> Every figure traces to an uploaded slip</div>'+
+      '<div class="review-item"><span class="ri ok">&#10003;</span> Credits are within their legal limits</div>'+
+      '<div class="review-item"><span class="ri ok">&#10003;</span> No arithmetic errors detected</div>'+
+      '<div class="review-item"><span class="ri warn">!</span> 1 possible missing slip flagged below</div>'+
+      '<div class="flag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 8v5M12 16h.01"/><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>'+
+        '<div class="ft"><b>Missing document?</b> Your T4 shows a mid-year start date. If you changed jobs in 2024, a second T4 may still be outstanding.'+
+        '<div class="fa"><button id="addT4b">Add the other T4</button><button id="dismissFlag">It&rsquo;s my only job</button></div></div></div>'+
+      '<div class="finalize"><div class="ft">Return complete &mdash; optimized and ready to file.</div>'+
+      '<div class="fb"><a class="btn btn-primary" href="index.html#pricing" style="width:auto">File for $29.99</a>'+
+      '<button class="btn btn-ghost" id="exportBtn" style="width:auto">Export PDF</button></div></div></div>';
+  }
+
+  function renderWork(){
+    var body=$("workBody");
+    var html = renderIncome()+renderDeductions()+renderReview();
+    if(!html){
+      body.innerHTML='<div class="card"><div class="placeholder"><div class="serif">Your return will build here.</div>'+
+        '<div>Add a document — or run all samples — and watch ONYX extract, optimize, and check every line.</div></div></div>';
+      return;
+    }
+    body.innerHTML = html;
+    // wire why toggles
+    body.querySelectorAll(".why").forEach(function(b){
+      b.addEventListener("click", function(){
+        var w=$("why-"+b.getAttribute("data-i")); w.classList.toggle("open");
+        b.textContent = w.classList.contains("open") ? "Hide" : "Why?";
+      });
+    });
+    var ex=$("exportBtn"); if(ex) ex.addEventListener("click", function(){ ex.textContent="✓ Exported"; });
+    var at=$("addT4b"); if(at) at.addEventListener("click", function(){ bumpRefund(340,"Second T4 added — refund updated."); at.closest(".flag").style.display="none"; });
+    var df=$("dismissFlag"); if(df) df.addEventListener("click", function(){ df.closest(".flag").style.display="none"; });
+  }
+
+  // ---------- refund / health animation ----------
+  function animateRefund(to){
+    var el=$("refund"), from=refund; refund=to;
+    $("refund").parentElement.classList.remove("pending");
+    if(reduce){ el.textContent=to.toLocaleString("en-CA"); return; }
+    var start=null,dur=650;
+    function tick(ts){ if(!start)start=ts; var p=Math.min((ts-start)/dur,1); var e=1-Math.pow(1-p,3);
+      el.textContent=Math.round(from+(to-from)*e).toLocaleString("en-CA"); if(p<1) requestAnimationFrame(tick); }
+    requestAnimationFrame(tick);
+  }
+  function setHealth(v,label){
+    health=v; var off=HCIRC*(1-v/100); $("hpg").style.strokeDashoffset=off;
+    if(reduce){ $("hnum").textContent=v; } else {
+      var start=null,dur=1000,from=0;
+      function tick(ts){ if(!start)start=ts; var p=Math.min((ts-start)/dur,1); $("hnum").textContent=Math.round(from+(v-from)*(1-Math.pow(1-p,3))); if(p<1) requestAnimationFrame(tick); }
+      requestAnimationFrame(tick);
+    }
+    $("hlabel").textContent=label;
+  }
+  function bumpRefund(delta,cap){ animateRefund(refund+delta); if(cap) $("refundCap").textContent=cap; }
+
+  // ---------- add a document ----------
+  function addDoc(id){
+    if(added[id]) return Promise.resolve();
+    added[id]=true;
+    var d = DOCS.find(function(x){return x.id===id;});
+    $("add-"+id).disabled=true;
+    var empty=$("docEmpty"); if(empty) empty.remove();
+    // build doc row (scanning)
+    var row=document.createElement("div"); row.className="doc reveal-in"; row.id="doc-"+id;
+    row.innerHTML='<div class="dic">'+d.tag+'</div><div class="meta"><div class="t">'+d.name+'</div>'+
+      '<div class="s">'+d.sub+'<div class="scanbar"><i></i></div></div></div>'+
+      '<div class="st scan">Scanning</div>';
+    $("doclist").appendChild(row);
+    $("docCount").textContent=Object.keys(added).length;
+    setStatus("Reading "+d.tag, "busy");
+
+    return wait(80).then(function(){
+      row.querySelector(".scanbar i").style.width="100%";
+      return wait(1000);
+    }).then(function(){
+      // extracted
+      row.querySelector(".st").className="st done"; row.querySelector(".st").textContent="Read";
+      row.querySelector(".scanbar").style.display="none";
+      d.income.forEach(function(l){ incomeLines.push(l); });
+      renderWork();
+      // reveal deductions with refund ticks
+      return d.deds.reduce(function(chain,ded){
+        return chain.then(function(){
+          deductions.push(ded); renderWork(); bumpRefund(ded.refund, "Found: "+ded.name+".");
+          return wait(420);
+        });
+      }, Promise.resolve());
+    }).then(function(){
+      setStatus("Ready for more", "");
+    });
+  }
+
+  // ---------- run all + finalize ----------
+  function finalize(){
+    if(finalized) return;
+    setStatus("Auditing return", "busy");
+    return wait(700).then(function(){
+      finalized=true; renderWork();
+      var grade = health>=85?"Optimized":health>=65?"Solid":"Needs attention";
+      setStatus("Ready to file", "ready");
+    });
+  }
+
+  $("runAll").addEventListener("click", function(){
+    if(running) return; running=true; $("runAll").disabled=true; $("runAll").textContent="Running…";
+    var chain = DOCS.reduce(function(c,d){ return c.then(function(){ return added[d.id]?null:addDoc(d.id); }); }, Promise.resolve());
+    chain.then(function(){ setHealth(94,"Optimized"); return finalize(); }).then(function(){
+      $("runAll").textContent="✓ Return built"; running=false;
+    });
+  });
+
+  // gentle health nudge as docs arrive individually
+  var origAdd = addDoc;
+  addDoc = function(id){ return origAdd(id).then(function(){
+    if(!running){ // manual adds: scale health with progress
+      var pct = Math.round(Object.keys(added).length / DOCS.length * 94);
+      setHealth(Math.max(pct,20), pct>=85?"Optimized":pct>=55?"Solid":"Building…");
+      $("refundCap").textContent = Object.keys(added).length===DOCS.length ? "All documents in. Run a final review when ready." : "Refund updating as documents arrive.";
+    }
+  }); };
+
+  // ---------- drag/drop (simulated) ----------
+  var dz=$("dropzone");
+  ["dragenter","dragover"].forEach(function(e){ dz.addEventListener(e,function(ev){ ev.preventDefault(); dz.classList.add("hot"); }); });
+  ["dragleave","drop"].forEach(function(e){ dz.addEventListener(e,function(ev){ ev.preventDefault(); dz.classList.remove("hot"); }); });
+  dz.addEventListener("drop", function(){ var next=DOCS.find(function(d){return !added[d.id];}); if(next) addDoc(next.id); });
+  dz.addEventListener("click", function(){ var next=DOCS.find(function(d){return !added[d.id];}); if(next) addDoc(next.id); });
+
+  // ---------- copilot chat ----------
+  var chat=$("chat"), chatBody=$("chatBody");
+  $("chatOpen").addEventListener("click", function(){ chat.classList.add("open"); $("chatOpen").style.display="none"; });
+  $("chatClose").addEventListener("click", function(){ chat.classList.remove("open"); $("chatOpen").style.display="inline-flex"; });
+
+  var QA = [
+    {q:"Why am I getting a tuition credit?",
+     a:"Your <b>T2202 from TMU</b> reports $4,200 in eligible tuition. That earns a 15% federal credit — about <b>$630</b> — plus a provincial amount. Anything you don&rsquo;t need this year carries forward, or can transfer to a parent or spouse."},
+    {q:"How can I lower my taxes even more?",
+     a:"Two moves stand out. You still have <b>unused RRSP room</b> — contributing before the March deadline could add roughly <b>$1,800</b> more to your refund. And your eligible dividends already qualify for the <b>dividend tax credit</b>, which I&rsquo;ve applied."},
+    {q:"Is my return safe to file?",
+     a:"Yes. The audit check found <b>0 errors and 0 risks</b>, and every figure traces back to a slip you uploaded. The one thing to confirm is whether you have a second T4 from a job change — I&rsquo;ve flagged it in the review."},
+    {q:"What is my refund made of?",
+     a:"Right now: tax withheld ($980 back), the <b>RRSP deduction</b> ($1,800), the <b>tuition credit</b> ($630), <b>medical</b> ($210), the Canada employment amount ($205), <b>donations</b> ($174) and the dividend tax credit ($150)."}
+  ];
+  var prompts=$("prompts");
+  QA.forEach(function(item){
+    var b=document.createElement("button"); b.textContent=item.q;
+    b.addEventListener("click", function(){ ask(item); b.disabled=true; b.style.opacity=".4"; });
+    prompts.appendChild(b);
+  });
+  function bubble(cls,html){ var d=document.createElement("div"); d.className="msg "+cls; d.innerHTML=html; chatBody.appendChild(d); chatBody.scrollTop=chatBody.scrollHeight; return d; }
+  function ask(item){
+    bubble("me", item.q);
+    var t=document.createElement("div"); t.className="typing"; t.innerHTML="<i></i><i></i><i></i>";
+    chatBody.appendChild(t); chatBody.scrollTop=chatBody.scrollHeight;
+    setTimeout(function(){ t.remove(); bubble("bot", item.a); }, T(900));
+  }
+})();
+</script>
+</body>
+</html>

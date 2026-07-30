@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tax Health Score — ONYX TaxOS</title>
+<meta name="description" content="A free, 2-minute Tax Health Score for Canadians. See how optimized your taxes are and where you're leaving money on the table. Runs entirely in your browser — nothing is uploaded." />
+<style>
+  :root{
+    --bg:#0C0A08;--bg-2:#131009;--bg-3:#1A160F;--bg-glass:rgba(18,14,9,.72);
+    --line:rgba(233,214,183,.12);--line-2:rgba(233,214,183,.22);
+    --ink:#F2EBDF;--ink-2:#A79C8B;--ink-3:#726858;
+    --accent:#E3BE86;--accent-2:#C68A4E;--accent-hi:#F7E6C6;--accent-ink:#0C0A08;
+    --pos:#67B893;--info:#87ABD4;--warn:#D6A25A;--crit:#D77B63;--grain:.05;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,ui-serif,serif;
+    --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"Cascadia Code",Consolas,monospace;
+    --pad:clamp(1.15rem,4vw,2rem);--r:16px;--r-lg:22px;
+  }
+  @media (prefers-color-scheme:light){
+    :root{--bg:#F3EEE4;--bg-2:#FBF8F1;--bg-3:#FFFFFF;--bg-glass:rgba(248,244,236,.8);
+      --line:rgba(50,36,16,.13);--line-2:rgba(50,36,16,.24);
+      --ink:#1C1710;--ink-2:#5B5245;--ink-3:#8C8273;
+      --accent:#9A6A2A;--accent-2:#B98A45;--accent-hi:#7E551E;--accent-ink:#FFFFFF;
+      --pos:#3F8A66;--info:#3E6EA6;--warn:#B27C2E;--crit:#BC5B41;--grain:.035;}
+  }
+  :root[data-theme="light"]{--bg:#F3EEE4;--bg-2:#FBF8F1;--bg-3:#FFFFFF;--bg-glass:rgba(248,244,236,.8);
+    --line:rgba(50,36,16,.13);--line-2:rgba(50,36,16,.24);--ink:#1C1710;--ink-2:#5B5245;--ink-3:#8C8273;
+    --accent:#9A6A2A;--accent-2:#B98A45;--accent-hi:#7E551E;--accent-ink:#FFFFFF;
+    --pos:#3F8A66;--info:#3E6EA6;--warn:#B27C2E;--crit:#BC5B41;--grain:.035;}
+  :root[data-theme="dark"]{--bg:#0C0A08;--bg-2:#131009;--bg-3:#1A160F;--bg-glass:rgba(18,14,9,.72);
+    --line:rgba(233,214,183,.12);--line-2:rgba(233,214,183,.22);--ink:#F2EBDF;--ink-2:#A79C8B;--ink-3:#726858;
+    --accent:#E3BE86;--accent-2:#C68A4E;--accent-hi:#F7E6C6;--accent-ink:#0C0A08;
+    --pos:#67B893;--info:#87ABD4;--warn:#D6A25A;--crit:#D77B63;--grain:.05;}
+
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:clamp(1rem,.97rem + .2vw,1.06rem);line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
+  svg{display:block}
+  button{font:inherit;color:inherit;cursor:pointer}
+  a{color:inherit;text-decoration:none}
+  h1,h2,h3,p{margin:0}
+  ::selection{background:var(--accent);color:var(--accent-ink)}
+  body::after{content:"";position:fixed;inset:0;z-index:9;pointer-events:none;opacity:var(--grain);mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")}
+
+  .serif{font-family:var(--serif)}
+  .mono{font-family:var(--mono)}
+  .tnum{font-variant-numeric:tabular-nums}
+  .eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.26em;text-transform:uppercase;color:var(--accent)}
+
+  /* header */
+  .top{position:sticky;top:0;z-index:20;background:var(--bg-glass);backdrop-filter:blur(14px) saturate(1.2);border-bottom:1px solid var(--line)}
+  .top-in{max-width:960px;margin-inline:auto;padding:0 var(--pad);height:64px;display:flex;align-items:center;justify-content:space-between}
+  .brand{display:flex;align-items:baseline;gap:.5ch;font-family:var(--serif);font-size:1.25rem;font-weight:600;letter-spacing:.02em}
+  .brand .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);align-self:center;box-shadow:0 0 12px var(--accent)}
+  .brand .os{font-family:var(--mono);font-size:.62rem;letter-spacing:.22em;color:var(--ink-3);text-transform:uppercase;align-self:center}
+  .back{font-size:.85rem;color:var(--ink-2);display:inline-flex;gap:.5ch;align-items:center;transition:color .2s}
+  .back:hover{color:var(--accent)}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:.6ch;padding:.85em 1.5em;border-radius:999px;
+    border:1px solid transparent;font-weight:600;font-size:.95rem;line-height:1;transition:transform .18s,box-shadow .25s,border-color .2s,color .2s,background .2s}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .btn-primary{background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:var(--accent-ink);box-shadow:0 10px 30px -12px rgba(227,190,134,.55)}
+  .btn-primary:hover{transform:translateY(-2px)}
+  .btn-ghost{border-color:var(--line-2);color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* stage */
+  .stage{max-width:640px;margin-inline:auto;padding:clamp(2rem,6vw,4rem) var(--pad) 5rem}
+  .stage.wide{max-width:820px}
+
+  /* intro */
+  .intro{text-align:center}
+  .intro h1{font-family:var(--serif);font-weight:500;line-height:1.05;letter-spacing:-.02em;
+    font-size:clamp(2.3rem,1.6rem + 3vw,3.4rem);margin:1rem 0 0;text-wrap:balance}
+  .intro h1 .glow{background:linear-gradient(100deg,var(--accent-hi),var(--accent) 55%,var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .intro p{color:var(--ink-2);max-width:46ch;margin:1.2rem auto 0;font-size:1.08rem}
+  .intro .go{margin-top:2rem}
+  .privacy{margin-top:1.4rem;font-family:var(--mono);font-size:.74rem;letter-spacing:.03em;color:var(--ink-3);display:inline-flex;align-items:center;gap:.6ch}
+  .privacy .lk{color:var(--accent)}
+  .meta{display:flex;gap:1.6rem;justify-content:center;margin-top:2.6rem;flex-wrap:wrap}
+  .meta div{display:flex;flex-direction:column;gap:.2rem;align-items:center}
+  .meta .m-n{font-family:var(--serif);font-size:1.5rem;color:var(--ink)}
+  .meta .m-l{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+  /* quiz */
+  .progress{height:4px;background:var(--line);border-radius:99px;overflow:hidden;margin-bottom:2.4rem}
+  .progress .pf{height:100%;width:0;background:linear-gradient(90deg,var(--accent-2),var(--accent));border-radius:99px;transition:width .4s cubic-bezier(.2,.7,.2,1)}
+  .qcount{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase;margin-bottom:.8rem}
+  .qtitle{font-family:var(--serif);font-weight:500;font-size:clamp(1.6rem,1.2rem + 1.8vw,2.2rem);line-height:1.12;letter-spacing:-.01em;text-wrap:balance;outline:none}
+  .qsub{color:var(--ink-3);font-size:.9rem;margin-top:.6rem}
+  .opts{display:flex;flex-direction:column;gap:.7rem;margin-top:1.8rem}
+  .opt{display:flex;align-items:center;gap:1rem;text-align:left;width:100%;padding:1.05rem 1.2rem;border:1px solid var(--line-2);border-radius:var(--r);
+    background:var(--bg-2);color:var(--ink);font-size:1.02rem;transition:border-color .18s,background .18s,transform .18s}
+  .opt:hover{border-color:var(--accent);background:var(--bg-3);transform:translateY(-1px)}
+  .opt .key{width:26px;height:26px;flex:none;border-radius:8px;border:1px solid var(--line-2);display:grid;place-items:center;
+    font-family:var(--mono);font-size:.78rem;color:var(--ink-3);transition:.18s}
+  .opt:hover .key{border-color:var(--accent);color:var(--accent)}
+  .opt.sel{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 12%,var(--bg-2))}
+  .opt.sel .key{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .qnav{display:flex;justify-content:space-between;align-items:center;margin-top:1.8rem}
+  .lnk{background:none;border:0;color:var(--ink-3);font-size:.86rem;display:inline-flex;gap:.5ch;align-items:center;padding:.4rem 0;transition:color .2s}
+  .lnk:hover{color:var(--accent)}
+  .lnk:disabled{opacity:.35;cursor:default}
+
+  /* analyzing */
+  .analyzing{text-align:center;padding:3rem 0}
+  .ring{width:64px;height:64px;margin:0 auto 1.6rem;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .analyzing .t{font-family:var(--serif);font-size:1.4rem}
+  .analyzing .s{font-family:var(--mono);font-size:.8rem;color:var(--ink-3);margin-top:.6rem;letter-spacing:.04em}
+
+  /* results */
+  .res-head{display:grid;grid-template-columns:220px 1fr;gap:clamp(1.5rem,4vw,3rem);align-items:center}
+  @media (max-width:640px){.res-head{grid-template-columns:1fr;justify-items:center;text-align:center}}
+  .dial{position:relative;width:220px;height:220px}
+  .dial svg{transform:rotate(-90deg)}
+  .dial .track{stroke:var(--line)}
+  .dial .prog{stroke:var(--accent);stroke-linecap:round;transition:stroke-dashoffset 1.4s cubic-bezier(.2,.7,.2,1)}
+  .dial .ctr{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.1rem}
+  .dial .num{font-family:var(--serif);font-size:3.6rem;font-weight:600;line-height:1;letter-spacing:-.02em}
+  .dial .den{font-family:var(--mono);font-size:.7rem;color:var(--ink-3);letter-spacing:.12em}
+  .grade{display:inline-flex;align-items:center;gap:.6ch;font-family:var(--mono);font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;
+    padding:.4em .9em;border-radius:999px;border:1px solid currentColor}
+  .grade .gd{width:8px;height:8px;border-radius:50%;background:currentColor}
+  .res-head h1{font-family:var(--serif);font-weight:500;font-size:clamp(1.7rem,1.3rem + 1.6vw,2.3rem);line-height:1.1;margin:.9rem 0 0;letter-spacing:-.01em;text-wrap:balance}
+  .res-head p{color:var(--ink-2);margin-top:.7rem;max-width:42ch}
+  @media (max-width:640px){.res-head p{margin-inline:auto}}
+
+  .opp{margin-top:2.4rem;border:1px solid var(--line-2);border-radius:var(--r-lg);padding:1.5rem 1.6rem;
+    background:radial-gradient(120% 80% at 100% 0%,rgba(227,190,134,.1),transparent 60%),var(--bg-2);
+    display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem}
+  .opp .l{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+  .opp .v{font-family:var(--serif);font-size:clamp(2rem,1.5rem + 2vw,2.8rem);font-weight:600;letter-spacing:-.02em;line-height:1}
+  .opp .v .cur{color:var(--accent);font-size:.6em;vertical-align:.16em}
+  .opp .note{font-size:.82rem;color:var(--ink-3);max-width:30ch}
+
+  .subs{margin-top:2.4rem}
+  .subs h2,.recs h2{font-family:var(--mono);font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);margin-bottom:1.1rem}
+  .meter{display:grid;grid-template-columns:150px 1fr 42px;align-items:center;gap:1rem;padding:.55rem 0}
+  @media (max-width:520px){.meter{grid-template-columns:110px 1fr 38px;gap:.7rem}}
+  .meter .ml{font-size:.92rem;color:var(--ink)}
+  .meter .mt{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
+  .meter .mf{height:100%;width:0;border-radius:99px;transition:width 1.1s cubic-bezier(.2,.7,.2,1)}
+  .meter .mv{font-family:var(--mono);font-size:.82rem;color:var(--ink-2);text-align:right}
+
+  .recs{margin-top:2.6rem}
+  .rec{display:flex;gap:1rem;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r);
+    background:var(--bg-2);padding:1.25rem 1.3rem;margin-bottom:.9rem;align-items:flex-start}
+  .rec .body{flex:1}
+  .rec .chip{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+  .rec h3{font-family:var(--serif);font-size:1.16rem;font-weight:600;margin:.35rem 0 .3rem;letter-spacing:-.01em}
+  .rec p{font-size:.92rem;color:var(--ink-2)}
+  .rec .tag{display:inline-flex;align-items:center;gap:.5ch;margin-top:.7rem;font-family:var(--mono);font-size:.7rem;letter-spacing:.04em;color:var(--accent)}
+  .rec .impact{flex:none;text-align:right;font-family:var(--mono);min-width:74px}
+  .rec .impact .n{font-size:1.05rem;color:var(--ink);font-weight:600}
+  .rec .impact .k{font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);display:block;margin-top:.2rem}
+
+  .res-cta{margin-top:2.8rem;border-top:1px solid var(--line);padding-top:2.4rem;text-align:center}
+  .res-cta h2{font-family:var(--serif);font-weight:500;font-size:clamp(1.6rem,1.2rem + 1.6vw,2.2rem);letter-spacing:-.01em;text-wrap:balance;max-width:22ch;margin:0 auto}
+  .res-cta p{color:var(--ink-2);margin:.9rem auto 0;max-width:42ch}
+  .res-cta .row{display:flex;gap:.9rem;justify-content:center;flex-wrap:wrap;margin-top:1.6rem}
+  .retake{margin-top:1.6rem}
+  .retake button{background:none;border:0;color:var(--ink-3);font-family:var(--mono);font-size:.74rem;letter-spacing:.06em;text-decoration:underline;text-underline-offset:3px}
+  .retake button:hover{color:var(--accent)}
+
+  .disclaimer{max-width:820px;margin:3rem auto 0;padding:0 var(--pad);color:var(--ink-3);font-size:.76rem;line-height:1.6;text-align:center}
+
+  .fade{animation:fade .5s cubic-bezier(.2,.7,.2,1)}
+  @keyframes fade{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="index.html"><span class="dot" aria-hidden="true"></span>ONYX<span class="os">TaxOS</span></a>
+    <a class="back" href="index.html">&larr; Back to home</a>
+  </div>
+</header>
+
+<main class="stage" id="stage" aria-live="polite"></main>
+<p class="disclaimer" id="disclaimer" hidden>Your Tax Health Score is an educational estimate based on the answers you provide, not tax advice or a guarantee of any refund or saving. Dollar figures are rough illustrations that vary with your actual situation. ONYX is not affiliated with the Canada Revenue Agency.</p>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var stage = document.getElementById("stage");
+  var disclaimer = document.getElementById("disclaimer");
+
+  // ---------- model ----------
+  var rates = {lt40:0.20, "40to80":0.30, "80to120":0.38, gt120:0.45};
+  var incomeLabel = {lt40:"under $40k","40to80":"$40k–$80k","80to120":"$80k–$120k",gt120:"$120k+"};
+
+  var questions = [
+    {id:"income", cat:null, q:"Roughly, what's your annual income?", sub:"Used only to estimate your numbers — it never leaves this page.",
+      opts:[{l:"Under $40,000",v:"lt40"},{l:"$40,000 – $80,000",v:"40to80"},{l:"$80,000 – $120,000",v:"80to120"},{l:"$120,000 or more",v:"gt120"}]},
+    {id:"work", cat:null, q:"How do you earn most of your income?",
+      opts:[{l:"Employed (T4)",v:"emp"},{l:"Freelance / contractor",v:"free"},{l:"I run a business",v:"biz"},{l:"A mix of these",v:"mix"}]},
+    {id:"rrsp", cat:"savings", max:15, q:"How do you use your RRSP?",
+      opts:[{l:"I max it out most years",v:15},{l:"I contribute some",v:9},{l:"I don't really use it",v:0}]},
+    {id:"tfsa", cat:"savings", max:15, q:"And your TFSA?",
+      opts:[{l:"Maxed or close to it",v:15},{l:"I use some of the room",v:9},{l:"Not using it",v:0}]},
+    {id:"ded", cat:"deductions", max:22, q:"How well do you track deductible expenses and receipts?",
+      opts:[{l:"Everything, kept organized",v:22},{l:"I catch the big ones",v:12},{l:"I probably miss a lot",v:2}]},
+    {id:"plan", cat:"planning", max:18, q:"When do you actually think about taxes?",
+      opts:[{l:"Year-round — I plan moves",v:18},{l:"A little before the deadline",v:9},{l:"Only in April",v:2}]},
+    {id:"file", cat:"filing", max:15, q:"How do your filings usually go?",
+      opts:[{l:"Organized, and I file early",v:15},{l:"I scramble, but file on time",v:8},{l:"Often late or missing slips",v:1}]},
+    {id:"sit", cat:"situation", max:15, q:"", opts:[]} // branched at render
+  ];
+
+  function situationQuestion(){
+    var w = answers.work;
+    if(w==="free" || w==="biz" || w==="mix"){
+      return {q:"For your self-employment income, do you set money aside for taxes and track GST/HST?",
+        opts:[{l:"Yes, systematically",v:15},{l:"Roughly, in my head",v:8},{l:"Not really",v:1}]};
+    }
+    return {q:"When you sell investments, do you weigh the tax first?",
+      opts:[{l:"Yes, always",v:15},{l:"Sometimes",v:9},{l:"I have no non-registered investments",v:11},{l:"No, never",v:3}]};
+  }
+
+  var answers = {};
+  var step = 0; // index into questions
+  var TOTAL = questions.length;
+
+  // ---------- rendering ----------
+  function el(html){ var d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstElementChild; }
+  function clear(){ stage.innerHTML=""; }
+  function anim(node){ if(!reduce) node.classList.add("fade"); return node; }
+
+  function renderIntro(){
+    stage.className="stage"; disclaimer.hidden=true; clear();
+    var node = el(
+      '<div class="intro">'+
+        '<span class="eyebrow">Free · 2 minutes · No signup</span>'+
+        '<h1>What&rsquo;s your <span class="glow">Tax Health Score</span>?</h1>'+
+        '<p>Answer eight quick questions and see how optimized your taxes really are &mdash; and exactly where you&rsquo;re leaving money on the table.</p>'+
+        '<div class="go"><button class="btn btn-primary" id="start">Check my score &nbsp;&rarr;</button></div>'+
+        '<div class="privacy"><span class="lk">&#9679;</span> Runs entirely in your browser. Nothing is uploaded.</div>'+
+        '<div class="meta">'+
+          '<div><span class="m-n serif">8</span><span class="m-l">Questions</span></div>'+
+          '<div><span class="m-n serif">~2 min</span><span class="m-l">To finish</span></div>'+
+          '<div><span class="m-n serif">$0</span><span class="m-l">Forever free</span></div>'+
+        '</div>'+
+      '</div>');
+    stage.appendChild(anim(node));
+    document.getElementById("start").addEventListener("click", function(){ step=0; renderStep(); });
+  }
+
+  function renderStep(){
+    stage.className="stage"; disclaimer.hidden=true; clear();
+    var q = questions[step];
+    var opts = q.opts, qtext = q.q, sub = q.sub;
+    if(q.id==="sit"){ var sq=situationQuestion(); opts=sq.opts; qtext=sq.q; }
+
+    var pct = Math.round((step/TOTAL)*100);
+    var keys = "1234";
+    var optHTML = opts.map(function(o,i){
+      var selected = (answers[q.id]!==undefined && String(answers[q.id])===String(o.v)) ? " sel" : "";
+      return '<button class="opt'+selected+'" data-val="'+o.v+'" data-i="'+i+'">'+
+               '<span class="key">'+keys[i]+'</span><span>'+o.l+'</span></button>';
+    }).join("");
+
+    var node = el(
+      '<div>'+
+        '<div class="progress"><span class="pf" style="width:'+pct+'%"></span></div>'+
+        '<div class="qcount">Question '+(step+1)+' of '+TOTAL+'</div>'+
+        '<h2 class="qtitle" tabindex="-1">'+qtext+'</h2>'+
+        (sub?'<p class="qsub">'+sub+'</p>':'')+
+        '<div class="opts">'+optHTML+'</div>'+
+        '<div class="qnav">'+
+          '<button class="lnk" id="back"'+(step===0?' disabled':'')+'>&larr; Back</button>'+
+          '<span class="qcount" style="margin:0">Tip: press 1&ndash;'+opts.length+'</span>'+
+        '</div>'+
+      '</div>');
+    stage.appendChild(anim(node));
+
+    node.querySelectorAll(".opt").forEach(function(b){
+      b.addEventListener("click", function(){ choose(q.id, b.getAttribute("data-val")); });
+    });
+    var back = document.getElementById("back");
+    if(back) back.addEventListener("click", function(){ if(step>0){ step--; renderStep(); } });
+    // focus question for a11y
+    var h = node.querySelector(".qtitle"); if(h) h.focus();
+    currentOptCount = opts.length;
+    currentQid = q.id;
+  }
+
+  var currentOptCount=0, currentQid=null;
+  document.addEventListener("keydown", function(e){
+    if(currentQid===null) return;
+    var n = parseInt(e.key,10);
+    if(n>=1 && n<=currentOptCount){
+      var b = stage.querySelectorAll(".opt")[n-1];
+      if(b) b.click();
+    }
+  });
+
+  function choose(id, val){
+    // store numeric where relevant
+    answers[id] = isNaN(Number(val)) ? val : Number(val);
+    var b = stage.querySelector('.opt[data-val="'+val+'"]');
+    if(b){ stage.querySelectorAll(".opt").forEach(function(x){x.classList.remove("sel");}); b.classList.add("sel"); }
+    currentQid=null;
+    var advance = function(){
+      if(step < TOTAL-1){ step++; renderStep(); }
+      else { renderAnalyzing(); }
+    };
+    if(reduce) advance(); else setTimeout(advance, 190);
+  }
+
+  function renderAnalyzing(){
+    stage.className="stage"; clear();
+    var node = el(
+      '<div class="analyzing">'+
+        '<div class="ring" aria-hidden="true"></div>'+
+        '<div class="t serif">Scoring your taxes&hellip;</div>'+
+        '<div class="s mono">Applying tax rules &middot; checking for missed deductions</div>'+
+      '</div>');
+    stage.appendChild(node);
+    var wait = reduce ? 0 : 1150;
+    setTimeout(renderResults, wait);
+  }
+
+  // ---------- scoring ----------
+  function compute(){
+    var sub = {
+      savings:(num(answers.rrsp)+num(answers.tfsa)),      // /30
+      deductions:num(answers.ded),                         // /22
+      planning:num(answers.plan),                          // /18
+      filing:num(answers.file),                            // /15
+      situation:num(answers.sit)                           // /15
+    };
+    var max = {savings:30,deductions:22,planning:18,filing:15,situation:15};
+    var score = sub.savings+sub.deductions+sub.planning+sub.filing+sub.situation;
+    return {score:Math.round(score), sub:sub, max:max};
+  }
+  function num(x){ return typeof x==="number"?x:0; }
+
+  function grade(s){
+    if(s>=85) return {label:"Optimized", color:"var(--pos)", blurb:"You&rsquo;re running a tight ship. A few refinements could still add up."};
+    if(s>=65) return {label:"Solid", color:"var(--accent)", blurb:"A strong foundation with clear, worthwhile moves still on the table."};
+    if(s>=40) return {label:"Needs attention", color:"var(--warn)", blurb:"You&rsquo;re likely leaving real money behind. The good news: it&rsquo;s fixable."};
+    return {label:"At risk", color:"var(--crit)", blurb:"There&rsquo;s significant opportunity here &mdash; and some risk worth closing fast."};
+  }
+
+  function recommendations(r){
+    var inc = answers.income, rate = rates[inc]||0.3, recs=[];
+    var isSelf = (answers.work==="free"||answers.work==="biz"||answers.work==="mix");
+
+    // RRSP
+    if(num(answers.rrsp) < 15){
+      var contrib = ({lt40:2500,"40to80":6000,"80to120":11000,gt120:18000}[inc]||6000) * (num(answers.rrsp)===9?0.45:1);
+      recs.push({cat:"Retirement", impact:Math.round(contrib*rate),
+        h:"Put your RRSP to work", p:"Contributing about $"+fmt(Math.round(contrib))+" could lower this year&rsquo;s tax bill while it grows tax-deferred.",
+        tag:"ONYX Pro · RRSP optimization"});
+    }
+    // TFSA
+    if(num(answers.tfsa) < 15){
+      recs.push({cat:"Tax-free growth", impact:null, impactLabel:"Tax-free",
+        h:"Use your TFSA room", p:"Every dollar inside a TFSA grows and comes out completely tax-free. Unused room is one of the most common misses.",
+        tag:"ONYX Pro · TFSA optimization"});
+    }
+    // Deductions
+    if(num(answers.ded) < 22){
+      var missed = ({lt40:900,"40to80":1700,"80to120":2800,gt120:3800}[inc]||1700) * (num(answers.ded)===12?0.4:1);
+      recs.push({cat:"Deductions", impact:Math.round(missed*rate),
+        h:"Stop missing deductions", p:"People who don&rsquo;t track receipts routinely overlook credits they qualify for. ONYX scans every document for all of them.",
+        tag:"ONYX Premium · Deduction finder"});
+    }
+    // Planning
+    if(num(answers.plan) < 18){
+      var plan = ({lt40:300,"40to80":700,"80to120":1200,gt120:2000}[inc]||700) * (num(answers.plan)===9?0.5:1);
+      recs.push({cat:"Planning", impact:Math.round(plan),
+        h:"Plan year-round, not in April", p:"The biggest tax moves have deadlines before December 31. Year-round forecasting surfaces them while you can still act.",
+        tag:"ONYX Pro · Year-round planning"});
+    }
+    // Filing hygiene
+    if(num(answers.file) <= 8){
+      recs.push({cat:"Filing", impact:null, impactLabel:"Avoid",
+        h:"Close the late-filing risk", p:"Filing late on a balance owing triggers a penalty plus daily interest. ONYX flags every missing slip and deadline for you.",
+        tag:"ONYX · Audit checker"});
+    }
+    // Situation
+    if(isSelf && num(answers.sit) < 15){
+      recs.push({cat:"Self-employment", impact:null, impactLabel:"No surprises",
+        h:"Set aside for taxes &amp; GST/HST", p:"Putting aside ~25&ndash;30% and tracking GST/HST as you earn prevents a painful bill at filing time.",
+        tag:"ONYX Freelancer"});
+    } else if(!isSelf && num(answers.sit) < 11){
+      recs.push({cat:"Investments", impact:null, impactLabel:"Timing",
+        h:"Weigh the tax before you sell", p:"Realizing gains in the wrong year can cost hundreds. Model the impact first, and offset gains with losses where you can.",
+        tag:"ONYX Pro · Investment tax"});
+    }
+
+    // sort: quantified impact first (desc), then qualitative
+    recs.sort(function(a,b){ return (b.impact||0)-(a.impact||0); });
+    return recs.slice(0,6);
+  }
+
+  function fmt(n){ return Number(n).toLocaleString("en-CA"); }
+
+  function renderResults(){
+    var r = compute(), g = grade(r.score), recs = recommendations(r);
+    var totalOpp = recs.reduce(function(s,x){ return s + (x.impact||0); }, 0);
+    stage.className="stage wide"; clear(); disclaimer.hidden=false;
+
+    var C = 2*Math.PI*90; // circumference
+
+    var meterRows = [
+      ["Savings & shelter","savings"],
+      ["Deduction capture","deductions"],
+      ["Planning ahead","planning"],
+      ["Filing hygiene","filing"],
+      [answers.work==="emp"?"Investment tax":"Self-employment","situation"]
+    ].map(function(row){
+      var key=row[1], val=r.sub[key], mx=r.max[key], pct=Math.round(val/mx*100);
+      var col = pct>=80?"var(--pos)":pct>=45?"var(--accent)":"var(--warn)";
+      return '<div class="meter"><span class="ml">'+row[0]+'</span>'+
+             '<span class="mt"><span class="mf" data-w="'+pct+'" style="background:'+col+'"></span></span>'+
+             '<span class="mv tnum">'+pct+'%</span></div>';
+    }).join("");
+
+    var recHTML = recs.length===0 ?
+      '<div class="rec" style="border-left-color:var(--pos)"><div class="body">'+
+      '<span class="chip">Nothing urgent</span><h3>You&rsquo;re already well optimized.</h3>'+
+      '<p>Every area scored high. ONYX keeps it that way &mdash; watching for new credits, deadlines, and moves all year.</p>'+
+      '<span class="tag">&rarr; ONYX Pro · Year-round planning</span></div></div>' :
+      recs.map(function(x){
+      var imp = x.impact!=null ? '<span class="n">$'+fmt(x.impact)+'</span><span class="k">est./yr</span>'
+                              : '<span class="n" style="font-size:.8rem;letter-spacing:.1em">'+(x.impactLabel||"")+'</span>';
+      return '<div class="rec" style="border-left-color:'+(x.impact!=null?"var(--accent)":"var(--info)")+'">'+
+               '<div class="body"><span class="chip">'+x.cat+'</span><h3>'+x.h+'</h3><p>'+x.p+'</p>'+
+               '<span class="tag">&rarr; '+x.tag+'</span></div>'+
+               '<div class="impact">'+imp+'</div>'+
+             '</div>';
+    }).join("");
+
+    var oppBlock = totalOpp>0 ?
+      '<div class="opp"><div><div class="l">Estimated opportunity</div>'+
+      '<div class="v"><span class="cur">$</span><span class="tnum">'+fmt(totalOpp)+'</span></div></div>'+
+      '<p class="note">A rough yearly estimate from your answers, for illustration. ONYX pinpoints the real figure from your documents.</p></div>' : '';
+
+    var node = el(
+      '<div>'+
+        '<div class="res-head">'+
+          '<div class="dial">'+
+            '<svg width="220" height="220" viewBox="0 0 220 220">'+
+              '<circle class="track" cx="110" cy="110" r="90" fill="none" stroke-width="14"></circle>'+
+              '<circle class="prog" id="prog" cx="110" cy="110" r="90" fill="none" stroke-width="14" '+
+                'stroke-dasharray="'+C+'" stroke-dashoffset="'+C+'" style="stroke:'+g.color+'"></circle>'+
+            '</svg>'+
+            '<div class="ctr"><span class="num" id="scoreNum" style="color:'+g.color+'">0</span><span class="den">/ 100</span></div>'+
+          '</div>'+
+          '<div>'+
+            '<span class="grade" style="color:'+g.color+'"><span class="gd"></span>'+g.label+'</span>'+
+            '<h1>Your Tax Health Score is '+r.score+'.</h1>'+
+            '<p>'+g.blurb+'</p>'+
+          '</div>'+
+        '</div>'+
+        oppBlock+
+        '<div class="subs"><h2>Where your score comes from</h2>'+meterRows+'</div>'+
+        '<div class="recs"><h2>Your top moves</h2>'+recHTML+'</div>'+
+        '<div class="res-cta">'+
+          '<h2>Turn this score into a bigger refund.</h2>'+
+          '<p>Start free, upload your slips, and let ONYX act on every move above &mdash; then file a complete, optimized return.</p>'+
+          '<div class="row">'+
+            '<a class="btn btn-primary" href="index.html#pricing">Start free &nbsp;&rarr;</a>'+
+            '<a class="btn btn-ghost" href="index.html#pricing">See plans</a>'+
+          '</div>'+
+          '<div class="retake"><button id="retake">Retake the assessment</button></div>'+
+        '</div>'+
+      '</div>');
+    stage.appendChild(anim(node));
+
+    // animate dial + number
+    var prog = document.getElementById("prog"), scoreNum = document.getElementById("scoreNum");
+    var offset = C*(1 - r.score/100);
+    function fillMeters(){ node.querySelectorAll(".mf").forEach(function(m){ m.style.width = m.getAttribute("data-w")+"%"; }); }
+    if(reduce){
+      prog.style.strokeDashoffset = offset; scoreNum.textContent = r.score; fillMeters();
+    } else {
+      requestAnimationFrame(function(){ prog.style.strokeDashoffset = offset; fillMeters(); });
+      var start=null, dur=1400;
+      function tick(ts){ if(!start)start=ts; var p=Math.min((ts-start)/dur,1); var e=1-Math.pow(1-p,3);
+        scoreNum.textContent = Math.round(r.score*e); if(p<1) requestAnimationFrame(tick); }
+      requestAnimationFrame(tick);
+    }
+    document.getElementById("retake").addEventListener("click", function(){ answers={}; step=0; window.scrollTo({top:0,behavior:reduce?"auto":"smooth"}); renderIntro(); });
+    currentQid=null;
+    window.scrollTo({top:0,behavior:reduce?"auto":"smooth"});
+  }
+
+  renderIntro();
+})();
+</script>
+</body>
+</html>

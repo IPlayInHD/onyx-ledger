@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Create your account — Onyx Ledger</title>
+<link rel="stylesheet" href="onyx.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+</head>
+<body>
+<div class="authwrap">
+  <div class="authcard card glow">
+    <div class="card-b">
+      <a class="brand" href="index.html" style="margin-bottom:1.2rem"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
+      <h1 class="auth-h">Create your account</h1>
+      <p class="auth-sub">Start your free tax audit. No card required.</p>
+      <form id="form" novalidate>
+        <div class="grid" style="gap:.9rem">
+          <label class="field">Full name
+            <input id="name" type="text" autocomplete="name" placeholder="Alex Chen" />
+          </label>
+          <label class="field">Email
+            <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+          </label>
+          <label class="field">Password
+            <input id="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" required />
+            <span class="hint">8+ characters. Choose something unique.</span>
+          </label>
+        </div>
+        <p class="err" id="err"></p>
+        <button class="btn btn-primary btn-block" id="submit" type="submit">Create account &amp; continue</button>
+      </form>
+      <div class="secnote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg> Your information is encrypted and securely processed.</div>
+      <p class="auth-alt">Already have an account? <a href="login.html">Sign in</a></p>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+<script>
+  if (ONYX.token()) location.href = 'dashboard.html';
+  const form = document.getElementById('form'), err = document.getElementById('err'), submit = document.getElementById('submit');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault(); err.textContent = '';
+    const name = name0(), email = document.getElementById('email').value.trim(), password = document.getElementById('password').value;
+    if (!email || !password) { err.textContent = 'Email and password are required.'; return; }
+    if (password.length < 8) { err.textContent = 'Password must be at least 8 characters.'; return; }
+    submit.disabled = true; submit.textContent = 'Creating account…';
+    try {
+      const { token, user } = await ONYX.api('/auth/register', { method: 'POST', body: { name, email, password } });
+      ONYX.setAuth(token, user); location.href = 'dashboard.html';
+    } catch (ex) { err.textContent = ex.message; submit.disabled = false; submit.textContent = 'Create account & continue'; }
+  });
+  function name0(){ return document.getElementById('name').value.trim(); }
+</script>
+</body>
+</html>

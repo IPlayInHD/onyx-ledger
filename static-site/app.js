@@ -1,0 +1,1203 @@
+/* ONYX Ledger — static build. The full Canadian tax audit engine runs in your
+   browser; accounts & audits are saved in this browser via localStorage.
+   No server required. Generated from the tested engine in server/engine/. */
+(function(){
+'use strict';
+
+/* ===== engine/taxData.js ===== */
+/**
+ * ONYX Intelligence — Canadian tax constants
+ * =========================================================================
+ * Tax year: 2024 (the constants a real engine maintains as data, separate
+ * from the calculation logic in taxEngine.js).
+ *
+ * IMPORTANT — these figures are indexed and legislated ANNUALLY. They reflect
+ * the 2024 federal and provincial parameters to the best of published CRA and
+ * provincial finance references and MUST be validated against official CRA
+ * (T1 General / income tax package) and each province's finance publications
+ * before any production or advice use. The engine is written so a new tax year
+ * is added purely as data — no logic changes.
+ *
+ * Sources to verify against each year:
+ *   - CRA "Federal income tax rates" and the T1 income tax and benefit guide
+ *   - Each province/territory's income tax rates and tax credit amounts
+ *   - CRA "Indexation" adjustment factors
+ * =========================================================================
+ */
+
+
+const FEDERAL_2024 = {
+  brackets: [
+    { upTo: 55867, rate: 0.15 },
+    { upTo: 111733, rate: 0.205 },
+    { upTo: 173205, rate: 0.26 },
+    { upTo: 246752, rate: 0.29 },
+    { upTo: Infinity, rate: 0.33 },
+  ],
+  // Basic personal amount phases DOWN for high earners (2024: $15,705 → $14,156).
+  bpa: { max: 15705, min: 14156, phaseStart: 173205, phaseEnd: 246752 },
+  creditRate: 0.15, // rate at which most federal non-refundable credits are valued
+  canadaEmployment: 1433, // Canada employment amount (2024)
+  pensionIncomeMax: 2000, // pension income amount
+  ageAmount: { max: 8790, threshold: 44325, rate: 0.15 }, // 65+ age amount, clawed back
+  // Canada / Quebec Pension Plan (employee side, 2024)
+  cpp: {
+    maxPensionable: 68500,
+    exemption: 3500,
+    rate: 0.0595,
+    max: 3867.5,
+    cpp2: { lower: 68500, upper: 73200, rate: 0.04, max: 188 }, // second additional CPP
+  },
+  // Employment Insurance (2024, outside Quebec)
+  ei: { maxInsurable: 63200, rate: 0.0166, max: 1049.12 },
+  medical: { pct: 0.03, cap: 2759 }, // threshold = lesser of 3% of net income or cap
+  donation: { threshold: 200, low: 0.15, high: 0.29, top: 0.33, topBracket: 246752 },
+  eligibleDiv: { grossUp: 0.38, dtc: 0.150198 }, // eligible dividend gross-up + federal DTC
+  nonEligibleDiv: { grossUp: 0.15, dtc: 0.090301 },
+  capitalGainsInclusion: 0.5, // 50% inclusion rate (2024)
+  disabilityAmount: 9872, // disability tax credit base amount (2024)
+  // Canada Workers Benefit (basic, single, 2024 — approximate, varies by province)
+  cwb: { maxSingle: 1518, maxFamily: 2616, phaseInStart: 3000, singlePhaseOut: 24975, familyPhaseOut: 28494, phaseOutRate: 0.12 },
+  gstCredit: { single: 340, perChild: 179, base: 349 }, // approximate annual GST/HST credit (2024 base year)
+  rrspRoomRate: 0.18, // 18% of prior-year earned income
+  rrspRoomCap: 31560, // 2024 RRSP dollar limit
+  fhsaAnnual: 8000, // First Home Savings Account annual limit
+  tfsaAnnual: 7000, // 2024 TFSA annual limit
+};
+
+/**
+ * Provincial / territorial parameters (2024).
+ * creditRate = the province's lowest bracket rate (how its non-refundable
+ * credits are valued). Optional: surtax, healthPremium (Ontario).
+ */
+const PROVINCES_2024 = {
+  ON: {
+    name: 'Ontario',
+    brackets: [
+      { upTo: 51446, rate: 0.0505 },
+      { upTo: 102894, rate: 0.0915 },
+      { upTo: 150000, rate: 0.1116 },
+      { upTo: 220000, rate: 0.1216 },
+      { upTo: Infinity, rate: 0.1316 },
+    ],
+    bpa: 12399,
+    creditRate: 0.0505,
+    // Ontario surtax applies to Ontario tax after credits
+    surtax: [ { over: 5554, rate: 0.20 }, { over: 7108, rate: 0.36 } ],
+    // Ontario Health Premium by taxable income band (annual $)
+    healthPremium: [
+      { upTo: 20000, amount: 0 }, { upTo: 36000, amount: 300 }, { upTo: 48000, amount: 450 },
+      { upTo: 72000, amount: 600 }, { upTo: 200000, amount: 750 }, { upTo: Infinity, amount: 900 },
+    ],
+  },
+  BC: {
+    name: 'British Columbia',
+    brackets: [
+      { upTo: 47937, rate: 0.0506 }, { upTo: 95875, rate: 0.077 }, { upTo: 110076, rate: 0.105 },
+      { upTo: 133664, rate: 0.1229 }, { upTo: 181232, rate: 0.147 }, { upTo: 252752, rate: 0.168 },
+      { upTo: Infinity, rate: 0.205 },
+    ],
+    bpa: 12580, creditRate: 0.0506,
+  },
+  AB: {
+    name: 'Alberta',
+    brackets: [
+      { upTo: 148269, rate: 0.10 }, { upTo: 177922, rate: 0.12 }, { upTo: 237230, rate: 0.13 },
+      { upTo: 355845, rate: 0.14 }, { upTo: Infinity, rate: 0.15 },
+    ],
+    bpa: 21885, creditRate: 0.10,
+  },
+  QC: {
+    name: 'Quebec',
+    brackets: [
+      { upTo: 51780, rate: 0.14 }, { upTo: 103545, rate: 0.19 }, { upTo: 126000, rate: 0.24 },
+      { upTo: Infinity, rate: 0.2575 },
+    ],
+    bpa: 18056, creditRate: 0.14,
+    abatement: 0.165, // Quebec residents get a 16.5% federal tax abatement
+  },
+  MB: {
+    name: 'Manitoba',
+    brackets: [ { upTo: 47000, rate: 0.108 }, { upTo: 100000, rate: 0.1275 }, { upTo: Infinity, rate: 0.174 } ],
+    bpa: 15780, creditRate: 0.108,
+  },
+  SK: {
+    name: 'Saskatchewan',
+    brackets: [ { upTo: 52057, rate: 0.105 }, { upTo: 148734, rate: 0.125 }, { upTo: Infinity, rate: 0.145 } ],
+    bpa: 18491, creditRate: 0.105,
+  },
+  NS: {
+    name: 'Nova Scotia',
+    brackets: [
+      { upTo: 29590, rate: 0.0879 }, { upTo: 59180, rate: 0.1495 }, { upTo: 93000, rate: 0.1667 },
+      { upTo: 150000, rate: 0.175 }, { upTo: Infinity, rate: 0.21 },
+    ],
+    bpa: 8481, creditRate: 0.0879,
+  },
+  NB: {
+    name: 'New Brunswick',
+    brackets: [
+      { upTo: 49958, rate: 0.094 }, { upTo: 99916, rate: 0.14 }, { upTo: 185064, rate: 0.16 },
+      { upTo: Infinity, rate: 0.195 },
+    ],
+    bpa: 13044, creditRate: 0.094,
+  },
+  PE: {
+    name: 'Prince Edward Island',
+    brackets: [
+      { upTo: 32656, rate: 0.0965 }, { upTo: 64313, rate: 0.1363 }, { upTo: 105000, rate: 0.1665 },
+      { upTo: 140000, rate: 0.18 }, { upTo: Infinity, rate: 0.1875 },
+    ],
+    bpa: 13500, creditRate: 0.0965,
+  },
+  NL: {
+    name: 'Newfoundland and Labrador',
+    brackets: [
+      { upTo: 43198, rate: 0.087 }, { upTo: 86395, rate: 0.145 }, { upTo: 154244, rate: 0.158 },
+      { upTo: 215943, rate: 0.178 }, { upTo: 275870, rate: 0.198 }, { upTo: 551739, rate: 0.208 },
+      { upTo: 1103478, rate: 0.213 }, { upTo: Infinity, rate: 0.218 },
+    ],
+    bpa: 10818, creditRate: 0.087,
+  },
+  YT: {
+    name: 'Yukon',
+    brackets: [
+      { upTo: 55867, rate: 0.064 }, { upTo: 111733, rate: 0.09 }, { upTo: 173205, rate: 0.109 },
+      { upTo: 500000, rate: 0.128 }, { upTo: Infinity, rate: 0.15 },
+    ],
+    bpa: 15705, creditRate: 0.064,
+  },
+  NT: {
+    name: 'Northwest Territories',
+    brackets: [
+      { upTo: 50597, rate: 0.059 }, { upTo: 101198, rate: 0.086 }, { upTo: 164525, rate: 0.122 },
+      { upTo: Infinity, rate: 0.1405 },
+    ],
+    bpa: 17373, creditRate: 0.059,
+  },
+  NU: {
+    name: 'Nunavut',
+    brackets: [
+      { upTo: 53268, rate: 0.04 }, { upTo: 106537, rate: 0.07 }, { upTo: 173205, rate: 0.09 },
+      { upTo: Infinity, rate: 0.115 },
+    ],
+    bpa: 18767, creditRate: 0.04,
+  },
+};
+
+const TAX_DATA = {
+  2024: { federal: FEDERAL_2024, provinces: PROVINCES_2024 },
+};
+
+const PROVINCE_NAMES = Object.fromEntries(
+  Object.entries(PROVINCES_2024).map(([code, p]) => [code, p.name])
+);
+
+function getTaxData(year) {
+  return TAX_DATA[year] || TAX_DATA[2024];
+}
+
+
+/* ===== engine/taxEngine.js ===== */
+/**
+ * ONYX Intelligence — core Canadian tax engine
+ * =========================================================================
+ * Pure, deterministic calculation of a T1-style personal tax position from a
+ * normalized financial profile. This is an AUDITOR-GRADE ESTIMATE, not a filed
+ * return: it models the mainstream federal + provincial calculation (brackets,
+ * the major non-refundable credits, dividend gross-up/DTC, capital-gains
+ * inclusion, Ontario surtax + health premium, and the Quebec abatement).
+ *
+ * Deliberate simplifications (documented so advice is honest):
+ *   - Uses net income as a proxy for taxable income (no capital-loss carryovers,
+ *     stock-option or northern deductions, etc.).
+ *   - Provincial non-refundable credits are modelled on the shared amounts
+ *     (BPA, CPP/EI, tuition, medical, pension, spousal); province-specific
+ *     amounts (age, disability variants) are approximated federally.
+ *   - Provincial dividend tax credits are approximated; dividends are a small
+ *     component for most filers. Figures are estimates, clearly labelled.
+ * =========================================================================
+ */
+
+
+
+const round = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+const clampPos = (n) => (n > 0 ? n : 0);
+
+/** Progressive tax on `income` given an array of {upTo, rate} brackets. */
+function bracketTax(income, brackets) {
+  let tax = 0;
+  let lower = 0;
+  for (const b of brackets) {
+    if (income > lower) {
+      tax += (Math.min(income, b.upTo) - lower) * b.rate;
+      lower = b.upTo;
+    } else break;
+  }
+  return tax;
+}
+
+/** Federal basic personal amount with the high-income phase-down. */
+function federalBPA(netIncome, bpa) {
+  if (netIncome <= bpa.phaseStart) return bpa.max;
+  if (netIncome >= bpa.phaseEnd) return bpa.min;
+  const frac = (netIncome - bpa.phaseStart) / (bpa.phaseEnd - bpa.phaseStart);
+  return bpa.max - (bpa.max - bpa.min) * frac;
+}
+
+/** Ontario-style surtax on provincial tax after credits. */
+function applySurtax(provTax, surtax) {
+  if (!surtax) return 0;
+  let s = 0;
+  for (const tier of surtax) if (provTax > tier.over) s += (provTax - tier.over) * tier.rate;
+  return s;
+}
+
+function healthPremium(taxableIncome, table) {
+  if (!table) return 0;
+  for (const band of table) if (taxableIncome <= band.upTo) return band.amount;
+  return 0;
+}
+
+/**
+ * Normalize a raw financial profile into every field the engine expects,
+ * defaulting anything missing to 0 / sensible values.
+ */
+function normalizeProfile(p = {}) {
+  const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+  return {
+    year: p.year || 2024,
+    province: (p.province || 'ON').toUpperCase(),
+    age: n(p.age) || null,
+    maritalStatus: p.maritalStatus || 'single',
+    spouseNetIncome: n(p.spouseNetIncome),
+    dependants: n(p.dependants),
+    isStudent: !!p.isStudent,
+    disability: !!p.disability,
+    firstTimeHomeBuyer: !!p.firstTimeHomeBuyer,
+    ownsHome: !!p.ownsHome,
+    // income
+    employmentIncome: n(p.employmentIncome),
+    selfEmploymentIncome: n(p.selfEmploymentIncome),
+    interestIncome: n(p.interestIncome),
+    eligibleDividends: n(p.eligibleDividends),
+    nonEligibleDividends: n(p.nonEligibleDividends),
+    capitalGains: n(p.capitalGains), // actual gain; engine applies inclusion rate
+    pensionIncome: n(p.pensionIncome),
+    otherIncome: n(p.otherIncome),
+    // deductions
+    rrspDeduction: n(p.rrspDeduction),
+    fhsaDeduction: n(p.fhsaDeduction),
+    unionDues: n(p.unionDues),
+    childCare: n(p.childCare),
+    movingExpenses: n(p.movingExpenses),
+    employmentExpenses: n(p.employmentExpenses),
+    otherDeductions: n(p.otherDeductions),
+    // credits / receipts
+    tuition: n(p.tuition),
+    medicalExpenses: n(p.medicalExpenses),
+    donations: n(p.donations),
+    // withheld / contributed
+    cppContrib: n(p.cppContrib),
+    eiContrib: n(p.eiContrib),
+    taxWithheld: n(p.taxWithheld),
+    // planning context (used by advisory)
+    rrspRoom: p.rrspRoom == null ? null : n(p.rrspRoom),
+    tfsaRoom: p.tfsaRoom == null ? null : n(p.tfsaRoom),
+  };
+}
+
+function donationCredit(donations, rate) {
+  if (donations <= 0) return 0;
+  const first = Math.min(donations, rate.threshold) * rate.low;
+  const rest = Math.max(0, donations - rate.threshold) * rate.high;
+  return first + rest;
+}
+
+/**
+ * Compute the full tax position. Returns a rich breakdown object.
+ */
+function computeReturn(rawProfile) {
+  const p = normalizeProfile(rawProfile);
+  const data = getTaxData(p.year);
+  const fed = data.federal;
+  const prov = data.provinces[p.province] || data.provinces.ON;
+
+  // ---- Income ----
+  const taxableCapitalGains = p.capitalGains * fed.capitalGainsInclusion;
+  const grossedElig = p.eligibleDividends * (1 + fed.eligibleDiv.grossUp);
+  const grossedNonElig = p.nonEligibleDividends * (1 + fed.nonEligibleDiv.grossUp);
+
+  const totalIncome =
+    p.employmentIncome + p.selfEmploymentIncome + p.interestIncome +
+    grossedElig + grossedNonElig + taxableCapitalGains + p.pensionIncome + p.otherIncome;
+
+  // ---- Deductions ----
+  const totalDeductions =
+    p.rrspDeduction + p.fhsaDeduction + p.unionDues + p.childCare +
+    p.movingExpenses + p.employmentExpenses + p.otherDeductions;
+
+  const netIncome = clampPos(totalIncome - totalDeductions);
+  const taxableIncome = netIncome; // documented proxy
+
+  // ---- Shared non-refundable credit amounts ----
+  const cpp = Math.min(p.cppContrib, fed.cpp.max + fed.cpp.cpp2.max);
+  const ei = Math.min(p.eiContrib, fed.ei.max);
+  const canadaEmployment = p.employmentIncome > 0 ? Math.min(fed.canadaEmployment, p.employmentIncome) : 0;
+  const pensionCredit = Math.min(fed.pensionIncomeMax, p.pensionIncome);
+  const ageAmount =
+    p.age && p.age >= 65
+      ? clampPos(fed.ageAmount.max - clampPos(netIncome - fed.ageAmount.threshold) * fed.ageAmount.rate)
+      : 0;
+  const disabilityAmount = p.disability ? fed.disabilityAmount : 0;
+  const spousalAmount =
+    (p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw')
+      ? clampPos(fed.bpa.max - p.spouseNetIncome)
+      : 0;
+  const medicalThreshold = Math.min(netIncome * fed.medical.pct, fed.medical.cap);
+  const medicalEligible = clampPos(p.medicalExpenses - medicalThreshold);
+
+  // ---- FEDERAL tax ----
+  const fedTaxBefore = bracketTax(taxableIncome, fed.brackets);
+  const fedBpaAmt = federalBPA(netIncome, fed.bpa);
+  const fedCreditBase =
+    fedBpaAmt + cpp + ei + canadaEmployment + p.tuition + ageAmount +
+    pensionCredit + disabilityAmount + spousalAmount + medicalEligible;
+  const fedNonRefundable = fed.creditRate * fedCreditBase + donationCredit(p.donations, fed.donation);
+  const fedDTC = grossedElig * fed.eligibleDiv.dtc + grossedNonElig * fed.nonEligibleDiv.dtc;
+  let federalTax = clampPos(fedTaxBefore - fedNonRefundable - fedDTC);
+  if (prov.abatement) federalTax *= 1 - prov.abatement; // Quebec
+
+  // ---- PROVINCIAL tax ----
+  const provTaxBefore = bracketTax(taxableIncome, prov.brackets);
+  // Provinces mirror the shared credits but NOT the federal Canada employment amount.
+  const provCreditBase =
+    prov.bpa + cpp + ei + p.tuition + pensionCredit +
+    (spousalAmount > 0 ? Math.min(spousalAmount, prov.bpa) : 0) + medicalEligible;
+  const provDonation =
+    donations2(p.donations, prov.creditRate, prov.brackets[prov.brackets.length - 1].rate);
+  const provNonRefundable = prov.creditRate * provCreditBase + provDonation;
+  let provincialTax = clampPos(provTaxBefore - provNonRefundable);
+  const surtax = applySurtax(provincialTax, prov.surtax);
+  provincialTax += surtax;
+  const ohp = healthPremium(taxableIncome, prov.healthPremium);
+  provincialTax += ohp;
+
+  // ---- Totals ----
+  const incomeTax = round(federalTax + provincialTax);
+  const refundOrBalance = round(p.taxWithheld - incomeTax); // + = refund, - = owing
+
+  // ---- Rates ----
+  const totalTaxFn = (ti) =>
+    bracketTax(ti, fed.brackets) * (prov.abatement ? 1 - prov.abatement : 1) +
+    bracketTax(ti, prov.brackets) +
+    applySurtax(clampPos(bracketTax(ti, prov.brackets) - prov.creditRate * prov.bpa), prov.surtax);
+  const marginalRate = round((totalTaxFn(taxableIncome + 1000) - totalTaxFn(taxableIncome)) / 1000 * 100) / 100;
+  const averageRate = totalIncome > 0 ? round((incomeTax / totalIncome) * 100) / 100 : 0;
+
+  return {
+    year: p.year,
+    province: p.province,
+    provinceName: PROVINCE_NAMES[p.province] || p.province,
+    income: {
+      employment: round(p.employmentIncome),
+      selfEmployment: round(p.selfEmploymentIncome),
+      interest: round(p.interestIncome),
+      eligibleDividendsGrossed: round(grossedElig),
+      nonEligibleDividendsGrossed: round(grossedNonElig),
+      taxableCapitalGains: round(taxableCapitalGains),
+      pension: round(p.pensionIncome),
+      other: round(p.otherIncome),
+      total: round(totalIncome),
+    },
+    deductions: {
+      rrsp: round(p.rrspDeduction), fhsa: round(p.fhsaDeduction), unionDues: round(p.unionDues),
+      childCare: round(p.childCare), moving: round(p.movingExpenses),
+      employment: round(p.employmentExpenses), other: round(p.otherDeductions),
+      total: round(totalDeductions),
+    },
+    netIncome: round(netIncome),
+    taxableIncome: round(taxableIncome),
+    credits: {
+      basicPersonalAmount: round(fedBpaAmt),
+      cppEi: round(cpp + ei),
+      canadaEmployment: round(canadaEmployment),
+      tuition: round(p.tuition),
+      medicalEligible: round(medicalEligible),
+      medicalThreshold: round(medicalThreshold),
+      ageAmount: round(ageAmount),
+      pension: round(pensionCredit),
+      disability: round(disabilityAmount),
+      spousal: round(spousalAmount),
+      donations: round(p.donations),
+      federalValue: round(fedNonRefundable + fedDTC),
+      provincialValue: round(provNonRefundable),
+    },
+    tax: {
+      federalBeforeCredits: round(fedTaxBefore),
+      federal: round(federalTax),
+      provincialBeforeCredits: round(provTaxBefore),
+      surtax: round(surtax),
+      healthPremium: round(ohp),
+      provincial: round(provincialTax),
+      total: incomeTax,
+    },
+    taxWithheld: round(p.taxWithheld),
+    refundOrBalance,
+    isRefund: refundOrBalance >= 0,
+    marginalRate,
+    averageRate,
+    profile: p,
+  };
+}
+
+// Provincial donation credit: lowest rate on first $200, top provincial rate above.
+function donations2(donations, lowRate, topRate) {
+  if (donations <= 0) return 0;
+  const first = Math.min(donations, 200) * lowRate;
+  const rest = Math.max(0, donations - 200) * topRate;
+  return first + rest;
+}
+
+
+/* ===== engine/extract.js ===== */
+/**
+ * ONYX Intelligence — document scanner / extraction layer
+ * =========================================================================
+ * Turns uploaded tax documents into normalized financial fields the engine
+ * understands. Two input paths:
+ *   1) STRUCTURED  { type, fields:{...} }  — highest confidence (0.99).
+ *   2) TEXT        { type, text:"..." }    — OCR / PDF text; scanned with
+ *      slip-aware regex heuristics and a confidence derived from how many
+ *      expected boxes were located.
+ *
+ * Real image OCR (photo/scan -> text) is intentionally behind a pluggable
+ * `ocrProvider` interface — swap in Tesseract or a cloud OCR in production.
+ * The engine and advisory never depend on how the text was produced.
+ * =========================================================================
+ */
+
+
+// Which normalized fields each slip type can contribute, and the box/keyword
+// hints used to scan free text. Values are summed across all documents.
+const SLIP_MAP = {
+  T4: {
+    label: 'T4 — Statement of Remuneration Paid',
+    fields: {
+      employmentIncome: [/box\s*14[^0-9]{0,12}([\d,]+\.?\d*)/i, /employment income[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      cppContrib: [/box\s*16[^0-9]{0,12}([\d,]+\.?\d*)/i, /cpp contributions[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      eiContrib: [/box\s*18[^0-9]{0,12}([\d,]+\.?\d*)/i, /ei premiums[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      taxWithheld: [/box\s*22[^0-9]{0,12}([\d,]+\.?\d*)/i, /income tax deducted[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      unionDues: [/box\s*44[^0-9]{0,12}([\d,]+\.?\d*)/i, /union dues[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      donations: [/box\s*46[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['employmentIncome', 'taxWithheld'],
+  },
+  T4A: {
+    label: 'T4A — Pension, Retirement, Annuity, Other',
+    fields: {
+      pensionIncome: [/box\s*016[^0-9]{0,12}([\d,]+\.?\d*)/i, /pension[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      selfEmploymentIncome: [/box\s*048[^0-9]{0,12}([\d,]+\.?\d*)/i, /fees for services[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      taxWithheld: [/box\s*022[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['pensionIncome'],
+  },
+  T5: {
+    label: 'T5 — Statement of Investment Income',
+    fields: {
+      eligibleDividends: [/box\s*24[^0-9]{0,12}([\d,]+\.?\d*)/i, /actual amount of eligible dividends[^0-9]{0,12}([\d,]+\.?\d*)/i, /box\s*10[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      nonEligibleDividends: [/box\s*10[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      interestIncome: [/box\s*13[^0-9]{0,12}([\d,]+\.?\d*)/i, /interest[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['interestIncome'],
+  },
+  T3: {
+    label: 'T3 — Statement of Trust Income',
+    fields: {
+      eligibleDividends: [/box\s*49[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      capitalGains: [/box\s*21[^0-9]{0,12}([\d,]+\.?\d*)/i, /capital gains[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      otherIncome: [/box\s*26[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: [],
+  },
+  T2202: {
+    label: 'T2202 — Tuition and Enrolment Certificate',
+    fields: { tuition: [/box\s*23[^0-9]{0,12}([\d,]+\.?\d*)/i, /eligible tuition[^0-9]{0,12}([\d,]+\.?\d*)/i, /tuition[^0-9]{0,12}([\d,]+\.?\d*)/i] },
+    expected: ['tuition'],
+  },
+  RRSP: {
+    label: 'RRSP Contribution Receipt',
+    fields: { rrspDeduction: [/contribution[^0-9]{0,12}([\d,]+\.?\d*)/i, /amount[^0-9]{0,12}([\d,]+\.?\d*)/i] },
+    expected: ['rrspDeduction'],
+  },
+  FHSA: {
+    label: 'FHSA Contribution Receipt',
+    fields: { fhsaDeduction: [/contribution[^0-9]{0,12}([\d,]+\.?\d*)/i, /amount[^0-9]{0,12}([\d,]+\.?\d*)/i] },
+    expected: ['fhsaDeduction'],
+  },
+  DONATION: {
+    label: 'Charitable Donation Receipt',
+    fields: { donations: [/(?:total|amount|donation)[^0-9]{0,12}([\d,]+\.?\d*)/i] },
+    expected: ['donations'],
+  },
+  MEDICAL: {
+    label: 'Medical Expense Receipts',
+    fields: { medicalExpenses: [/(?:total|amount)[^0-9]{0,12}([\d,]+\.?\d*)/i] },
+    expected: ['medicalExpenses'],
+  },
+  T5008: {
+    label: 'T5008 — Securities Transactions',
+    fields: { capitalGains: [/(?:gain|net gain)[^0-9]{0,12}(-?[\d,]+\.?\d*)/i] },
+    expected: ['capitalGains'],
+  },
+  T4E: {
+    label: 'T4E — Employment Insurance Benefits',
+    fields: {
+      otherIncome: [/box\s*14[^0-9]{0,12}([\d,]+\.?\d*)/i, /total benefits[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      taxWithheld: [/box\s*22[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['otherIncome'],
+  },
+  CHILDCARE: {
+    label: 'Child Care Expense Receipt',
+    fields: { childCare: [/(?:total|amount)[^0-9]{0,12}([\d,]+\.?\d*)/i] },
+    expected: ['childCare'],
+  },
+};
+
+const num = (s) => (s == null ? null : parseFloat(String(s).replace(/[, $]/g, '')));
+
+/** Default OCR provider: passthrough for text, explicit error for binary. */
+const defaultOcr = {
+  toText(doc) {
+    if (doc.text) return doc.text;
+    throw new Error('No OCR provider configured for binary documents. Provide { text } or { fields }, or plug in an OCR provider.');
+  },
+};
+
+/**
+ * Extract normalized fields from a single document.
+ * @returns {{type, label, fields, confidence, foundFields, missingExpected, status}}
+ */
+function extractDocument(doc, ocrProvider = defaultOcr) {
+  const type = (doc.type || 'UNKNOWN').toUpperCase();
+  const map = SLIP_MAP[type];
+  if (!map) {
+    return { type, label: 'Unrecognized document', fields: {}, confidence: 0, foundFields: [], missingExpected: [], status: 'unsupported' };
+  }
+
+  // Path 1: structured fields provided directly
+  if (doc.fields && Object.keys(doc.fields).length) {
+    const fields = {};
+    for (const [k, v] of Object.entries(doc.fields)) {
+      const val = num(v);
+      if (val != null && !isNaN(val)) fields[k] = val;
+    }
+    const found = Object.keys(fields);
+    const missing = map.expected.filter((e) => !(e in fields));
+    return {
+      type, label: map.label, fields,
+      confidence: 0.99,
+      foundFields: found, missingExpected: missing,
+      status: missing.length ? 'needs_review' : 'processed',
+    };
+  }
+
+  // Path 2: scan text (from OCR / PDF)
+  const text = ocrProvider.toText(doc) || '';
+  const fields = {};
+  const found = [];
+  for (const [field, patterns] of Object.entries(map.fields)) {
+    for (const re of patterns) {
+      const m = text.match(re);
+      if (m && m[1] != null) {
+        const val = num(m[1]);
+        if (val != null && !isNaN(val)) { fields[field] = (fields[field] || 0) + val; found.push(field); break; }
+      }
+    }
+  }
+  const uniqFound = [...new Set(found)];
+  const missing = map.expected.filter((e) => !(e in fields));
+  // Confidence: share of expected boxes located, floored so a partial read still surfaces.
+  const expectedHit = map.expected.length ? map.expected.filter((e) => e in fields).length / map.expected.length : (uniqFound.length ? 1 : 0);
+  const confidence = Math.round((0.55 + 0.44 * expectedHit) * 100) / 100;
+  return {
+    type, label: map.label, fields,
+    confidence: uniqFound.length ? confidence : 0,
+    foundFields: uniqFound, missingExpected: missing,
+    status: !uniqFound.length ? 'failed' : missing.length ? 'needs_review' : 'processed',
+  };
+}
+
+/**
+ * Scan a batch of documents and merge them into one financial profile.
+ * @returns {{ financial, documents, summary }}
+ */
+function scanDocuments(docs = [], ocrProvider = defaultOcr) {
+  const financial = {};
+  const results = [];
+  const ADDITIVE = new Set([
+    'employmentIncome', 'selfEmploymentIncome', 'interestIncome', 'eligibleDividends',
+    'nonEligibleDividends', 'capitalGains', 'pensionIncome', 'otherIncome',
+    'rrspDeduction', 'fhsaDeduction', 'unionDues', 'childCare', 'movingExpenses',
+    'employmentExpenses', 'otherDeductions', 'tuition', 'medicalExpenses', 'donations',
+    'cppContrib', 'eiContrib', 'taxWithheld',
+  ]);
+
+  for (const doc of docs) {
+    const res = extractDocument(doc, ocrProvider);
+    for (const [k, v] of Object.entries(res.fields)) {
+      if (ADDITIVE.has(k)) financial[k] = round2((financial[k] || 0) + v);
+    }
+    results.push({
+      type: res.type, label: res.label, status: res.status,
+      confidence: res.confidence, foundFields: res.foundFields,
+      missingExpected: res.missingExpected,
+      fields: res.fields, name: doc.name || res.label,
+    });
+  }
+
+  const processed = results.filter((r) => r.status === 'processed').length;
+  const needsReview = results.filter((r) => r.status === 'needs_review').length;
+  const failed = results.filter((r) => r.status === 'failed' || r.status === 'unsupported').length;
+
+  return {
+    financial,
+    documents: results,
+    summary: {
+      total: results.length, processed, needsReview, failed,
+      avgConfidence: results.length
+        ? Math.round((results.reduce((s, r) => s + r.confidence, 0) / results.length) * 100) / 100
+        : 0,
+      typesSeen: [...new Set(results.map((r) => r.type))],
+    },
+  };
+}
+
+const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+
+/* ===== engine/scoring.js ===== */
+/**
+ * ONYX Intelligence — Tax Health scoring
+ * =========================================================================
+ * A 0–100 score that mirrors how a tax professional would rate a filer's
+ * position, across five weighted categories. Each sub-score is derived from
+ * the computed return + profile + scanned documents, then combined.
+ *
+ * This is an educational assessment of tax *optimization and hygiene*, not an
+ * audit-risk score or a compliance guarantee.
+ * =========================================================================
+ */
+
+
+
+const clamp = (n, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, n));
+const pct = (n) => Math.round(clamp(n));
+
+/** Estimate RRSP room if the user hasn't supplied it (18% of earned income, capped). */
+function estimateRrspRoom(profile, data) {
+  const earned = profile.employmentIncome + profile.selfEmploymentIncome;
+  return Math.min(earned * data.federal.rrspRoomRate, data.federal.rrspRoomCap);
+}
+
+function computeTaxHealth(ret) {
+  const p = ret.profile;
+  const data = getTaxData(p.year);
+  const notes = [];
+
+  // 1) Registered savings utilization (RRSP / TFSA / FHSA) ---------------- 30
+  const estRoom = p.rrspRoom != null ? p.rrspRoom + p.rrspDeduction : estimateRrspRoom(p, data);
+  const rrspUtil = estRoom > 0 ? p.rrspDeduction / estRoom : (p.employmentIncome + p.selfEmploymentIncome > 0 ? 0 : 1);
+  let savings = rrspUtil * 70;
+  // FHSA opportunity for eligible first-time buyers
+  if (p.firstTimeHomeBuyer && !p.ownsHome) savings += (p.fhsaDeduction >= data.federal.fhsaAnnual ? 15 : p.fhsaDeduction > 0 ? 8 : 0);
+  else savings += 12;
+  // TFSA signal
+  if (p.tfsaRoom != null) savings += p.tfsaRoom > 20000 ? 4 : 12;
+  else savings += 10;
+  savings = clamp(savings);
+  if (rrspUtil < 0.5 && estRoom > 1000) notes.push('Significant unused RRSP room.');
+
+  // 2) Deduction & credit capture ---------------------------------------- 25
+  let capture = 55; // baseline: engine already applies the automatic credits
+  if (p.donations > 0) capture += 6;
+  if (p.medicalExpenses > 0) capture += 6;
+  if (p.isStudent && p.tuition > 0) capture += 8; else if (p.isStudent && p.tuition === 0) { capture -= 6; notes.push('Student with no tuition captured.'); }
+  if (p.dependants > 0 && p.childCare > 0) capture += 8; else if (p.dependants > 0 && p.childCare === 0) { capture -= 6; notes.push('Dependants but no child-care expenses claimed.'); }
+  if (p.employmentIncome > 0 && p.employmentExpenses > 0) capture += 4;
+  if (p.unionDues > 0) capture += 3;
+  capture = clamp(capture);
+
+  // 3) Tax efficiency ---------------------------------------------------- 15
+  // Reward a sensible gap between marginal and average rate (planning headroom used),
+  // penalize a large balance owing relative to income.
+  let efficiency = 60;
+  efficiency += clamp((ret.marginalRate - ret.averageRate) * 1.5, 0, 20);
+  if (!ret.isRefund && ret.income.total > 0) {
+    const owingRatio = Math.abs(ret.refundOrBalance) / ret.income.total;
+    if (owingRatio > 0.08) { efficiency -= 25; notes.push('Large balance owing relative to income.'); }
+    else if (owingRatio > 0.02) efficiency -= 12;
+  }
+  if (rrspUtil >= 0.8) efficiency += 8;
+  efficiency = clamp(efficiency);
+
+  // 4) Documentation & compliance ---------------------------------------- 15
+  const ds = ret._docSummary || null;
+  let documentation;
+  if (ds && ds.total > 0) {
+    documentation = ds.avgConfidence * 100 * 0.7;
+    documentation += (ds.processed / ds.total) * 30;
+    if (ds.failed > 0) documentation -= ds.failed * 8;
+    if (ds.needsReview > 0) documentation -= ds.needsReview * 4;
+  } else {
+    documentation = 45; // no documents scanned yet
+    notes.push('No documents scanned — audit is based on entered figures only.');
+  }
+  documentation = clamp(documentation);
+
+  // 5) Planning & carryforwards ------------------------------------------ 15
+  let planning = 50;
+  if ((p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw')) {
+    planning += 8; // household optimization available
+    if (p.age && p.age >= 65 && p.pensionIncome > 0) planning += 8; // pension splitting
+  }
+  if (p.firstTimeHomeBuyer && !p.ownsHome && p.fhsaDeduction > 0) planning += 8;
+  if (rrspUtil >= 0.6) planning += 10;
+  if (p.tfsaRoom != null && p.tfsaRoom < 10000) planning += 6;
+  planning = clamp(planning);
+
+  const subscores = [
+    { key: 'savings', label: 'Registered savings', score: pct(savings), weight: 30 },
+    { key: 'capture', label: 'Deduction & credit capture', score: pct(capture), weight: 25 },
+    { key: 'efficiency', label: 'Tax efficiency', score: pct(efficiency), weight: 15 },
+    { key: 'documentation', label: 'Documentation', score: pct(documentation), weight: 15 },
+    { key: 'planning', label: 'Planning', score: pct(planning), weight: 15 },
+  ];
+
+  const score = Math.round(subscores.reduce((s, c) => s + (c.score * c.weight) / 100, 0));
+  const band =
+    score >= 85 ? { label: 'Excellent', tone: 'positive' } :
+    score >= 70 ? { label: 'Good', tone: 'positive' } :
+    score >= 50 ? { label: 'Fair', tone: 'warning' } :
+                  { label: 'Needs attention', tone: 'critical' };
+
+  return { score, band, subscores, notes, context: { rrspUtil: Math.round(rrspUtil * 100) / 100, estimatedRrspRoom: Math.round(estRoom) } };
+}
+
+
+/* ===== engine/advisory.js ===== */
+/**
+ * ONYX Intelligence — advisory / opportunity engine
+ * =========================================================================
+ * The subject-matter layer: a rules engine encoding the legal tax-reduction
+ * strategies a Canadian tax accountant / auditor would look for. Each rule is
+ * a self-contained heuristic that:
+ *   - decides whether it APPLIES to this filer (profile + computed return),
+ *   - estimates a POTENTIAL dollar impact (using the filer's marginal rate),
+ *   - explains WHY in plain language, with the relevant statute/CRA reference.
+ *
+ * Every figure is an ESTIMATE and every recommendation is educational — the
+ * language is deliberately "potential/may", never a promise (per professional
+ * standards and to avoid overstating tax savings).
+ * =========================================================================
+ */
+
+
+
+const money = (n) => Math.round(n);
+
+/**
+ * Build the ordered list of opportunities for a computed return.
+ * @param {object} ret  output of computeReturn (with .profile)
+ * @param {object} health output of computeTaxHealth
+ */
+function findOpportunities(ret, health) {
+  const p = ret.profile;
+  const data = getTaxData(p.year);
+  const mr = ret.marginalRate || 0.3; // marginal rate as a decimal
+  const out = [];
+
+  const push = (o) => out.push(Object.assign({ impact: null, impactLabel: null, priority: 3 }, o));
+
+  // 1) Unused RRSP room -----------------------------------------------------
+  const estRoom = health.context.estimatedRrspRoom;
+  const usedRoom = p.rrspDeduction;
+  const roomLeft = Math.max(0, estRoom - usedRoom);
+  if (roomLeft > 1000 && (p.employmentIncome + p.selfEmploymentIncome) > 0) {
+    const suggested = Math.min(roomLeft, Math.max(2000, ret.taxableIncome * 0.1));
+    push({
+      id: 'rrsp', category: 'Registered savings', priority: 1,
+      title: 'Contribute to your RRSP',
+      detail: `You appear to have about $${money(roomLeft).toLocaleString('en-CA')} of unused RRSP room. A contribution of roughly $${money(suggested).toLocaleString('en-CA')} could reduce your taxable income and, at your marginal rate, potentially lower your tax by the amount shown.`,
+      impact: money(suggested * mr), impactLabel: 'est. tax reduction',
+      citation: 'Income Tax Act s.146 · RRSP deduction limit',
+    });
+  }
+
+  // 2) FHSA for first-time buyers ------------------------------------------
+  if (p.firstTimeHomeBuyer && !p.ownsHome) {
+    const room = Math.max(0, data.federal.fhsaAnnual - p.fhsaDeduction);
+    if (room > 0) push({
+      id: 'fhsa', category: 'Registered savings', priority: 1,
+      title: 'Open or top up a First Home Savings Account (FHSA)',
+      detail: `As a first-time home buyer you can contribute up to $${data.federal.fhsaAnnual.toLocaleString('en-CA')}/year to an FHSA. Contributions are deductible like an RRSP, and qualifying withdrawals for a home are tax-free — a rare combination.`,
+      impact: money(room * mr), impactLabel: 'est. tax reduction',
+      citation: 'Income Tax Act s.146.6 · FHSA',
+    });
+  }
+
+  // 3) TFSA sheltering ------------------------------------------------------
+  if (p.interestIncome + p.eligibleDividends + p.nonEligibleDividends > 500 && (p.tfsaRoom == null || p.tfsaRoom > 5000)) {
+    push({
+      id: 'tfsa', category: 'Registered savings', priority: 2,
+      title: 'Shelter investment income in a TFSA',
+      detail: 'You are reporting taxable investment income. Holding those investments inside a TFSA would let the growth and income compound completely tax-free. Consider using available TFSA room first.',
+      impactLabel: 'tax-free growth',
+      citation: 'Income Tax Act s.146.2 · TFSA',
+    });
+  }
+
+  // 4) Tuition — claim / transfer / carry forward --------------------------
+  if (p.tuition > 0) {
+    push({
+      id: 'tuition', category: 'Credits', priority: 2,
+      title: 'Use your tuition credit fully',
+      detail: `Your $${money(p.tuition).toLocaleString('en-CA')} tuition earns a 15% federal credit plus a provincial amount. If you don't need it all this year, up to $5,000 can be transferred to a parent, grandparent, or spouse, and the rest carries forward indefinitely.`,
+      impact: money(p.tuition * 0.15), impactLabel: 'est. federal credit',
+      citation: 'Income Tax Act s.118.5 / s.118.9 · Tuition',
+    });
+  } else if (p.isStudent) {
+    push({
+      id: 'tuition-missing', category: 'Credits', priority: 2,
+      title: 'Add your T2202 tuition certificate',
+      detail: 'You indicated you are a student but no tuition has been captured. Download your T2202 from your school\'s portal — the tuition credit is one of the most commonly missed by students.',
+      impactLabel: 'missing credit', citation: 'Income Tax Act s.118.5',
+    });
+  }
+
+  // 5) Medical — pooling & threshold ---------------------------------------
+  if (p.medicalExpenses > 0) {
+    const married = p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw';
+    if (married) push({
+      id: 'medical-pool', category: 'Credits', priority: 2,
+      title: 'Claim medical expenses on the lower-income spouse',
+      detail: 'Medical expenses are reduced by 3% of the claimant\'s net income (up to a cap). Claiming the whole family\'s eligible expenses on the lower-income spouse shrinks that 3% reduction and usually yields a larger credit.',
+      impact: money(Math.min(p.medicalExpenses, 2000) * 0.03 * (ret.marginalRate)), impactLabel: 'est. additional credit',
+      citation: 'Income Tax Act s.118.2 · Medical expense credit',
+    });
+    if (ret.credits.medicalEligible <= 0) push({
+      id: 'medical-threshold', category: 'Credits', priority: 3,
+      title: 'Your medical expenses are below the threshold',
+      detail: `Only medical costs above $${money(ret.credits.medicalThreshold).toLocaleString('en-CA')} (3% of net income) count this year. You can claim any 12-month period ending in the tax year — grouping receipts into one window can push you over the threshold.`,
+      impactLabel: 'timing', citation: 'Income Tax Act s.118.2',
+    });
+  }
+
+  // 6) Donations — pooling & carry-forward ---------------------------------
+  if (p.donations > 0) {
+    push({
+      id: 'donations', category: 'Credits', priority: 3,
+      title: 'Optimize your charitable donations',
+      detail: 'The donation credit jumps from 15% to 29% (federal) on amounts over $200. Pooling both spouses\' donations on one return, or carrying donations forward up to 5 years to cross $200 in a single year, increases the credit.',
+      impact: money(Math.max(0, p.donations - 200) * 0.14), impactLabel: 'est. extra credit',
+      citation: 'Income Tax Act s.118.1 · Charitable donations',
+    });
+  }
+
+  // 7) Pension income splitting --------------------------------------------
+  if ((p.pensionIncome > 0) && (p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw')) {
+    push({
+      id: 'pension-split', category: 'Planning', priority: 1,
+      title: 'Split eligible pension income with your spouse',
+      detail: 'Up to 50% of eligible pension income can be allocated to a lower-income spouse, moving it into a lower tax bracket and potentially preserving age-based credits. This is elected on the return each year.',
+      impact: money(Math.min(p.pensionIncome * 0.5, 20000) * (ret.marginalRate * 0.4)), impactLabel: 'est. household saving',
+      citation: 'Income Tax Act s.60.03 · Pension income splitting',
+    });
+  }
+
+  // 8) Canada Workers Benefit ----------------------------------------------
+  const workingIncome = p.employmentIncome + p.selfEmploymentIncome;
+  if (workingIncome > 3000 && ret.netIncome < data.federal.cwb.familyPhaseOut) {
+    push({
+      id: 'cwb', category: 'Benefits', priority: 2,
+      title: 'You may qualify for the Canada Workers Benefit',
+      detail: 'The CWB is a refundable credit for lower-income workers — it pays out even if you owe no tax. Filing a return (and the Schedule 6) is all it takes to receive it.',
+      impactLabel: 'refundable benefit', citation: 'Income Tax Act s.122.7 · CWB',
+    });
+  }
+
+  // 9) Child care expenses --------------------------------------------------
+  if (p.dependants > 0 && p.childCare === 0 && workingIncome > 0) {
+    push({
+      id: 'childcare', category: 'Deductions', priority: 2,
+      title: 'Claim your child care expenses',
+      detail: 'Eligible child care costs (daycare, day camps, before/after-school care) are deductible so you can work or study — generally claimed by the lower-income spouse. This is a deduction, not just a credit, so it reduces income directly.',
+      impactLabel: 'missing deduction', citation: 'Income Tax Act s.63 · Child care expenses',
+    });
+  }
+
+  // 10) Child benefit --------------------------------------------------------
+  if (p.dependants > 0) {
+    push({
+      id: 'ccb', category: 'Benefits', priority: 3,
+      title: 'Make sure you\'re receiving the Canada Child Benefit',
+      detail: 'The CCB is a tax-free monthly payment based on family net income and number of children. It is only paid if you (and your spouse) file a return every year.',
+      impactLabel: 'tax-free benefit', citation: 'Income Tax Act s.122.6 · CCB',
+    });
+  }
+
+  // 11) Employment / home-office expenses -----------------------------------
+  if (p.employmentIncome > 0 && p.employmentExpenses === 0) {
+    push({
+      id: 'employment-exp', category: 'Deductions', priority: 3,
+      title: 'Check whether you can claim employment expenses',
+      detail: 'If your employer requires you to pay for work expenses (home office, supplies, a vehicle) and signs a Form T2200, those costs may be deductible. Many employees who work from home never ask for the form.',
+      impactLabel: 'potential deduction', citation: 'Income Tax Act s.8 · Employment expenses / T2200',
+    });
+  }
+
+  // 12) Spousal amount -------------------------------------------------------
+  if ((p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw') && p.spouseNetIncome < data.federal.bpa.max && ret.credits.spousal > 0) {
+    push({
+      id: 'spousal', category: 'Credits', priority: 3,
+      title: 'Spousal amount is available',
+      detail: `Because your spouse's net income is below the basic personal amount, you can claim the spousal amount — worth roughly 15% of the shortfall federally, plus a provincial amount. This has been reflected in your estimate.`,
+      impact: money(ret.credits.spousal * 0.15), impactLabel: 'est. federal credit',
+      citation: 'Income Tax Act s.118(1)(a) · Spousal amount',
+    });
+  }
+
+  // 13) Capital gains / loss planning ---------------------------------------
+  if (p.capitalGains > 0) {
+    push({
+      id: 'capgains', category: 'Planning', priority: 3,
+      title: 'Consider tax-loss harvesting',
+      detail: 'Only 50% of a capital gain is taxable, but capital losses can offset gains. Realizing an unrealized loss before year-end (mindful of the 30-day superficial-loss rule) can reduce the tax on this year\'s gains.',
+      impactLabel: 'planning', citation: 'Income Tax Act s.38–40 · Capital gains/losses',
+    });
+  }
+
+  // 14) Balance owing / instalments -----------------------------------------
+  if (!ret.isRefund && Math.abs(ret.refundOrBalance) > 3000) {
+    push({
+      id: 'instalments', category: 'Compliance', priority: 1,
+      title: 'Plan for your balance owing',
+      detail: `Your estimate shows about $${money(Math.abs(ret.refundOrBalance)).toLocaleString('en-CA')} owing. If this recurs, CRA may require quarterly instalments. Setting money aside now (and considering an RRSP contribution before the deadline) softens the bill.`,
+      impactLabel: 'cash-flow', citation: 'Income Tax Act s.156 · Instalments',
+    });
+  }
+
+  // Sort: quantified impact first (desc) within priority, then qualitative.
+  out.sort((a, b) => (a.priority - b.priority) || ((b.impact || 0) - (a.impact || 0)));
+  return out;
+}
+
+/** "What ONYX found" — a plain-language read of the extracted data. */
+function whatWeFound(ret, docSummary) {
+  const f = [];
+  const i = ret.income;
+  if (i.employment > 0) f.push({ ok: true, label: 'Employment income', value: fmt(i.employment) });
+  if (i.selfEmployment > 0) f.push({ ok: true, label: 'Self-employment income', value: fmt(i.selfEmployment) });
+  if (i.interest > 0 || i.eligibleDividendsGrossed > 0) f.push({ ok: true, label: 'Investment income', value: fmt(i.interest + i.eligibleDividendsGrossed + i.nonEligibleDividendsGrossed) });
+  if (ret.taxWithheld > 0) f.push({ ok: true, label: 'Tax already paid', value: fmt(ret.taxWithheld) });
+  if (ret.deductions.rrsp > 0) f.push({ ok: true, label: 'RRSP contributions', value: fmt(ret.deductions.rrsp) });
+  if (ret.credits.tuition > 0) f.push({ ok: true, label: 'Tuition credit', value: fmt(ret.credits.tuition) });
+  if (docSummary && docSummary.needsReview > 0) f.push({ ok: false, label: `${docSummary.needsReview} document(s) need review`, value: 'review' });
+  if (docSummary && docSummary.failed > 0) f.push({ ok: false, label: `${docSummary.failed} document(s) could not be read`, value: 'action' });
+  return f;
+}
+
+const fmt = (n) => '$' + Math.round(n).toLocaleString('en-CA');
+
+/**
+ * Compose the full advisory summary (narrative + prioritized actions).
+ */
+function buildAdvisory(ret, health, opportunities) {
+  const p = ret.profile;
+  const quantified = opportunities.filter((o) => o.impact).reduce((s, o) => s + o.impact, 0);
+  const posLine = ret.isRefund
+    ? `Based on the documents provided, you have an estimated refund of ${fmt(ret.refundOrBalance)}.`
+    : `Based on the documents provided, you have an estimated balance owing of ${fmt(Math.abs(ret.refundOrBalance))}.`;
+
+  const headline =
+    `Your ${ret.provinceName} tax position for ${ret.year} scores ${health.score}/100 (${health.band.label}). ` +
+    posLine +
+    (quantified > 0 ? ` ONYX has identified about ${fmt(quantified)} in potential tax reductions you may be eligible for.` : '');
+
+  const next = opportunities.slice(0, 3).map((o) => o.title);
+
+  return {
+    headline,
+    estimatedOpportunity: quantified,
+    marginalRate: ret.marginalRate,
+    averageRate: ret.averageRate,
+    priorityActions: next,
+    disclaimer:
+      'This is an educational estimate generated from the information provided, not tax advice, an audit-risk assessment, or a filed return. Figures use current federal and provincial parameters but simplify parts of the calculation. Confirm your specifics with the CRA or a licensed tax professional before acting. ONYX does not file your return and is not affiliated with the CRA.',
+  };
+}
+
+
+/* ===== engine/index.js ===== */
+/**
+ * ONYX Intelligence — engine entry point
+ * Orchestrates: scan documents → compute return → score health →
+ * find opportunities → build advisory. One call: runAudit().
+ */
+
+
+
+/**
+ * Run a full audit.
+ * @param {object} args
+ * @param {object} args.profile     demographic + planning context (province, age, marital, etc.)
+ * @param {object} [args.financial] pre-normalized financial figures (optional)
+ * @param {Array}  [args.documents] raw documents to scan ({type, fields|text})
+ * @param {number} [args.year]
+ * @param {object} [args.ocrProvider]
+ * @returns {object} full audit report
+ */
+function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvider } = {}) {
+  const taxYear = year || profile.year || 2024;
+
+  // 1) Scan documents into financial figures, merged with any supplied figures.
+  const scan = scanDocuments(documents, ocrProvider);
+  const mergedFinancial = mergeFinancial(financial, scan.financial);
+
+  // 2) Compute the return.
+  const input = Object.assign({}, profile, mergedFinancial, { year: taxYear });
+  const ret = computeReturn(input);
+  ret._docSummary = scan.summary; // let scoring see documentation quality
+
+  // 3) Score, find opportunities, compose advisory.
+  const health = computeTaxHealth(ret);
+  const opportunities = findOpportunities(ret, health);
+  const found = whatWeFound(ret, scan.summary);
+  const advisory = buildAdvisory(ret, health, opportunities);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    taxYear,
+    province: ret.province,
+    provinceName: ret.provinceName,
+    return: stripInternal(ret),
+    health,
+    documents: scan.documents,
+    documentSummary: scan.summary,
+    found,
+    opportunities,
+    advisory,
+  };
+}
+
+function mergeFinancial(a = {}, b = {}) {
+  const out = Object.assign({}, a);
+  for (const [k, v] of Object.entries(b)) {
+    if (typeof v === 'number') out[k] = (typeof out[k] === 'number' ? out[k] : 0) + v;
+  }
+  return out;
+}
+
+function stripInternal(ret) {
+  const { _docSummary, profile, ...rest } = ret;
+  return Object.assign({}, rest, { profile });
+}
+
+
+/* ===== Local (serverless) client — implements the same ONYX.api interface
+   the pages use, but computes everything in-browser with the engine above and
+   persists to localStorage. NOTE: client-side accounts are for local/demo use
+   only — passwords are obfuscated, not securely hashed. For real multi-user
+   auth, deploy the Node API (server/) instead. ===== */
+
+var slipTypes = {};
+Object.keys(SLIP_MAP).forEach(function (k) { slipTypes[k] = SLIP_MAP[k].label; });
+
+var LS = {
+  get: function (k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (_) { return d; } },
+  set: function (k, v) { localStorage.setItem(k, JSON.stringify(v)); },
+};
+function usersDB() { return LS.get('onyx_users', {}); }
+function saveUsers(u) { LS.set('onyx_users', u); }
+function emailIndex() { return LS.get('onyx_email', {}); }
+function newId() { return 'u_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+function publicUser(u) { return { id: u.id, email: u.email, name: u.name, createdAt: u.createdAt }; }
+function currentUser() { var t = localStorage.getItem('onyx_token'); if (!t) return null; return usersDB()[t] || null; }
+
+function localApi(path, opts) {
+  opts = opts || {};
+  var method = opts.method || 'GET';
+  var body = opts.body || {};
+
+  if (path === '/meta') return { provinces: PROVINCE_NAMES, slipTypes: slipTypes, year: 2024 };
+
+  if (path === '/auth/register') {
+    var email = (body.email || '').toLowerCase().trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address.');
+    if (!body.password || body.password.length < 8) throw new Error('Password must be at least 8 characters.');
+    var users = usersDB(), idx = emailIndex();
+    if (idx[email]) throw new Error('An account with that email already exists.');
+    var u = { id: newId(), email: email, name: body.name || email.split('@')[0], pwd: btoa(body.password),
+      createdAt: new Date().toISOString(), profile: { province: 'ON', year: 2024, maritalStatus: 'single' }, documents: [], audit: null };
+    users[u.id] = u; idx[email] = u.id; saveUsers(users); LS.set('onyx_email', idx);
+    return { token: u.id, user: publicUser(u) };
+  }
+  if (path === '/auth/login') {
+    var em = (body.email || '').toLowerCase().trim(), ix = emailIndex(), us = usersDB();
+    var user = ix[em] ? us[ix[em]] : null;
+    if (!user || user.pwd !== btoa(body.password || '')) throw new Error('Incorrect email or password.');
+    return { token: user.id, user: publicUser(user) };
+  }
+
+  var me = currentUser();
+  if (!me) throw new Error('Not signed in.');
+  var save = function () { var u = usersDB(); u[me.id] = me; saveUsers(u); };
+
+  if (path === '/me') return { user: publicUser(me) };
+  if (path === '/profile' && method === 'GET') return { profile: me.profile };
+  if (path === '/profile' && method === 'PUT') {
+    ['province','year','age','maritalStatus','spouseNetIncome','dependants','isStudent','disability','firstTimeHomeBuyer','ownsHome','rrspRoom','tfsaRoom']
+      .forEach(function (f) { if (f in body) me.profile[f] = body[f]; });
+    save(); return { profile: me.profile };
+  }
+  if (path === '/documents' && method === 'GET') return { documents: me.documents };
+  if (path === '/documents' && method === 'POST') {
+    var type = (body.type || '').toUpperCase();
+    if (!SLIP_MAP[type]) throw new Error('Unknown document type.');
+    if (!body.fields && !body.text) throw new Error('Provide either extracted fields or document text.');
+    var scan = scanDocuments([{ type: type, fields: body.fields, text: body.text, name: body.name }]);
+    var rec = { id: newId(), uploadedAt: new Date().toISOString(), type: type, fields: body.fields, text: body.text, name: body.name, scan: scan.documents[0] };
+    me.documents.push(rec); save(); return { document: rec };
+  }
+  if (path.indexOf('/documents/') === 0 && method === 'DELETE') {
+    var did = path.split('/')[2], n = me.documents.length;
+    me.documents = me.documents.filter(function (d) { return d.id !== did; }); save();
+    return { ok: me.documents.length < n };
+  }
+  if (path === '/audit' && method === 'POST') {
+    var docs = me.documents.map(function (d) { return { type: d.type, fields: d.fields, text: d.text, name: d.name }; });
+    var audit = runAudit({ profile: me.profile, documents: docs, year: me.profile.year });
+    me.audit = audit; save(); return { audit: audit };
+  }
+  if (path === '/audit' && method === 'GET') return { audit: me.audit || null };
+
+  throw new Error('Unknown route: ' + path);
+}
+
+window.ONYX = {
+  token: function () { return localStorage.getItem('onyx_token'); },
+  user: function () { try { return JSON.parse(localStorage.getItem('onyx_user')); } catch (_) { return null; } },
+  setAuth: function (t, u) { localStorage.setItem('onyx_token', t); localStorage.setItem('onyx_user', JSON.stringify(u)); },
+  signOut: function () { localStorage.removeItem('onyx_token'); localStorage.removeItem('onyx_user'); location.href = 'login.html'; },
+  api: function (path, opts) {
+    return new Promise(function (resolve, reject) {
+      try { resolve(localApi(path, opts || {})); } catch (e) { reject(e); }
+    });
+  },
+  requireAuth: function () { if (!this.token()) location.href = 'login.html'; },
+  money: function (n) { return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('en-CA'); },
+  pctStr: function (n) { return (n * 100).toFixed(1) + '%'; },
+};
+
+})();
