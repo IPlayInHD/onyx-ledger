@@ -132,7 +132,32 @@
   .data-btns{display:flex;flex-wrap:wrap;gap:.6rem}
   .danger{color:var(--crit);border-color:color-mix(in oklab,var(--crit) 40%,transparent)!important}
   .danger:hover{background:color-mix(in oklab,var(--crit) 12%,transparent);color:var(--crit)!important}
+  /* ONYX Copilot dock */
+  .ask-fab{position:fixed;right:20px;bottom:20px;z-index:60;border-radius:999px;padding:.78em 1.2em;border:0;font-weight:600;font-size:.86rem;background:linear-gradient(180deg,var(--accent-hi),var(--accent));color:var(--accent-ink);box-shadow:0 14px 34px -14px rgba(227,190,134,.7);display:inline-flex;align-items:center;gap:.5ch}
+  .ask-fab:hover{transform:translateY(-2px)}.ask-fab svg{width:17px;height:17px}
+  .cop{position:fixed;right:20px;bottom:20px;z-index:61;width:min(400px,calc(100vw - 40px));height:min(600px,calc(100vh - 40px));display:none;flex-direction:column;border:1px solid var(--line-2);border-radius:var(--r-lg);overflow:hidden;background:var(--bg-2);box-shadow:0 40px 90px -40px rgba(0,0,0,.85)}
+  .cop.open{display:flex}
+  .cop-h{padding:.85rem 1rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6ch;background:var(--bg-3)}
+  .cop-h .av{width:28px;height:28px;border-radius:50%;flex:none;background:radial-gradient(circle at 35% 30%,var(--accent-hi),var(--accent-2));box-shadow:0 0 12px -2px var(--accent)}
+  .cop-h .ti{font-weight:600;font-size:.92rem;line-height:1.1}.cop-h .ti small{display:block;font-family:var(--mono);font-size:.56rem;letter-spacing:.08em;color:var(--pos);text-transform:uppercase;margin-top:.15rem}
+  .cop-h .x{margin-left:auto;background:none;border:0;color:var(--ink-3);font-size:1.35rem;line-height:1;padding:0 .3rem}.cop-h .x:hover{color:var(--ink)}
+  .cop-body{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.7rem}
+  .cmsg{max-width:88%;padding:.72rem .9rem;border-radius:14px;font-size:.88rem;line-height:1.55}
+  .cmsg.bot{align-self:flex-start;background:var(--bg-4);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .cmsg.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px}
+  .cmsg b{color:var(--accent)}.cmsg.me b{color:var(--accent-ink)}
+  .cmsg .lnk{color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+  .cop-sugg{padding:.55rem .7rem;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:.35rem;background:var(--bg-3)}
+  .cop-sugg button{font-size:.73rem;text-align:left;padding:.4em .65em;border-radius:10px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink-2)}
+  .cop-sugg button:hover{border-color:var(--accent);color:var(--accent)}
+  .cop-form{display:flex;gap:.4rem;padding:.7rem .8rem;border-top:1px solid var(--line);background:var(--bg-3)}
+  .cop-form input{flex:1;font-size:.86rem}
+  .ctyping{align-self:flex-start;display:inline-flex;gap:4px;padding:.7rem .9rem;background:var(--bg-4);border:1px solid var(--line);border-radius:14px}
+  .ctyping i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);animation:ctd 1.2s infinite}
+  .ctyping i:nth-child(2){animation-delay:.2s}.ctyping i:nth-child(3){animation-delay:.4s}
+  @keyframes ctd{0%,60%,100%{opacity:.25}30%{opacity:1}}
   @media print{
+    .ask-fab,.cop{display:none!important}
     .topbar,.intro .btn,.runstatus,.rpt-tools,#profileCard,#docsCard,.no-print{display:none!important}
     body{background:#fff;color:#000}.card{break-inside:avoid;border-color:#ddd}
     .sectitle{margin-top:1rem}
@@ -243,6 +268,17 @@
   <div id="report"></div>
   <div style="height:3rem"></div>
 </div>
+
+<!-- ONYX Copilot — grounded in the user's real audit -->
+<button class="ask-fab no-print" id="askFab" aria-label="Ask the ONYX Copilot">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12Z"/></svg>Ask ONYX
+</button>
+<section class="cop no-print" id="cop" aria-label="ONYX Copilot" aria-live="polite">
+  <div class="cop-h"><span class="av" aria-hidden="true"></span><span class="ti">ONYX Copilot<small>● grounded in your audit</small></span><button class="x" id="copClose" aria-label="Close Copilot">&times;</button></div>
+  <div class="cop-body" id="copBody"></div>
+  <div class="cop-sugg" id="copSugg"></div>
+  <form class="cop-form" id="copForm"><input id="copInput" type="text" placeholder="Ask about your taxes…" autocomplete="off" aria-label="Ask the Copilot a question" /><button class="btn btn-primary btn-sm" type="submit">Ask</button></form>
+</section>
 
 <script src="app.js"></script>
 <script>
@@ -572,6 +608,7 @@ function renderReport(a) {
   const db = $('downloadBtn'); if (db) db.addEventListener('click', downloadReport);
   const delb = $('deleteBtn'); if (delb) delb.addEventListener('click', deleteAccount);
   $('introSub').textContent = 'Your latest audit is shown below. Edit your profile or documents and re-run anytime.';
+  if (window.__onyxAuditRendered) window.__onyxAuditRendered();
 }
 
 let wfTimer = null;
@@ -653,6 +690,102 @@ document.addEventListener('click', (e) => { const b = e.target.closest('[data-sa
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('onyx_theme', next);
   });
+})();
+
+/* ================= ONYX Copilot (audit-grounded, no external LLM) ================= */
+(function(){
+  const cop = $('cop'), body = $('copBody'), sugg = $('copSugg');
+  const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const pct = (x,d=1) => (x*100).toFixed(d) + '%';
+
+  const GLOSS = {
+    'marginal rate': 'Your <b>marginal rate</b> is the tax on your <i>next</i> dollar of income — it’s why an RRSP dollar saves you that rate, not your lower average rate.',
+    'average rate': 'Your <b>average rate</b> is your total tax divided by your total income — the overall share of your income that goes to tax.',
+    'basic personal amount': 'The <b>basic personal amount</b> is income everyone can earn tax-free — it’s applied automatically as a credit before any tax is charged.',
+    'rrsp': 'An <b>RRSP</b> lets you deduct contributions now (a refund at your marginal rate) and grow investments tax-deferred; you’re taxed when you withdraw in retirement.',
+    'tfsa': 'A <b>TFSA</b> takes after-tax money, but all growth and withdrawals are completely tax-free — great when your marginal rate is lower now than it’ll be later.',
+    'fhsa': 'An <b>FHSA</b> (First Home Savings Account) is the best of both: contributions are deductible like an RRSP, and qualifying withdrawals for a first home are tax-free like a TFSA.',
+    'tax credit': 'A <b>tax credit</b> reduces the tax you owe directly (most federal credits are worth 15% of the amount). A <b>deduction</b> instead reduces your taxable income, saving you your marginal rate.',
+    'deduction': 'A <b>deduction</b> (like RRSP or child care) lowers your taxable income, so it saves you tax at your marginal rate — usually worth more per dollar than a credit.',
+    'capital gain': 'Only <b>50% of a capital gain</b> is taxable in Canada, and capital losses can offset gains — so timing a sale matters.',
+    'dividend': 'Canadian <b>dividends</b> are “grossed up” and then a dividend tax credit offsets most of the extra tax, giving them a lower effective rate than regular income.',
+    'tax health': 'Your <b>Tax Health score</b> (0–100) rates how optimized your position is across savings, deductions, efficiency, documentation, and planning — it’s not an audit-risk score.',
+    'notice of assessment': 'Your <b>Notice of Assessment</b> is the summary the CRA sends after you file. It confirms your RRSP/TFSA room and any carryforwards — handy for accuracy.',
+    'cpp': '<b>CPP</b> and <b>EI</b> are payroll contributions withheld from employment income; the amounts you paid also generate a small tax credit.',
+  };
+
+  const A = () => lastAudit;
+  const need = () => 'Run your audit first (press <b>Run my audit</b>) and I can explain your real numbers. Meanwhile, ask me to define any tax term — try “what is an FHSA?”.';
+
+  function ansRefund(a){ const r=a.return;
+    return r.isRefund
+      ? `Your estimated <b>${money(r.refundOrBalance)}</b> refund is money you overpaid. You had <b>${money(r.taxWithheld)}</b> withheld or paid during the year, but after your credits your actual tax is <b>${money(r.tax.total)}</b> — so the difference comes back to you.`
+      : `You have an estimated <b>${money(Math.abs(r.refundOrBalance))}</b> balance owing. Your total tax is <b>${money(r.tax.total)}</b>, but only <b>${money(r.taxWithheld)}</b> was withheld — you owe the gap. An <span class="lnk" data-q="What if I add $5,000 to my RRSP?">RRSP contribution</span> is the most common way to shrink it.`; }
+  function ansRates(a){ const r=a.return; return `Your <b>marginal rate</b> is <b>${pct(r.marginalRate)}</b> — the tax on your next dollar. Your <b>average rate</b> is <b>${pct(r.averageRate)}</b> — total tax ÷ total income. That’s why a deduction saves you ${pct(r.marginalRate,0)}, not ${pct(r.averageRate,0)}.`; }
+  function ansLower(a){ const ops=a.opportunities.slice(0,3); if(!ops.length) return 'Your position already looks well optimized — I don’t see obvious moves. Try the What-if planner to explore contributions.'; return 'Your biggest moves right now:<br>' + ops.map(o=>`&bull; <b>${esc(o.title)}</b>${o.impact?` (~${money(o.impact)})`:''}`).join('<br>') + '<br>Open the <b>What-if planner</b> to test them live.'; }
+  function ansMissing(a){ const m=(a.checklist&&a.checklist.items||[]).filter(x=>x.status==='missing'); return m.length ? 'To make your audit more accurate, add:<br>'+m.map(x=>`&bull; ${esc(x.label)}`).join('<br>') : 'You’ve provided everything I’d expect for your situation — nice work.'; }
+  function ansBracket(a){ const b=a.return.bracketFederal; if(!b) return GLOSS['marginal rate']; return `You’re in the <b>${pct(b.rate,b.rate*100%1?1:0)}</b> federal bracket${b.upTo?` — about <b>${money(b.toNext)}</b> more income would push you into the next one`:' (the top bracket)'}. Your province adds its own bracket on top.`; }
+  function ansHealth(a){ const h=a.health; const weak=[...h.subscores].sort((x,y)=>x.score-y.score)[0]; return `Your Tax Health is <b>${h.score}/100</b> (${h.band.label}). Your weakest area is <b>${esc(weak.label)}</b> at ${weak.score}%. ${(a.checklist&&a.checklist.counts.missing)?`Adding your ${a.checklist.counts.missing} missing document(s) would help most.`:'Contributing to registered accounts would lift it further.'}`; }
+  function ansBenefits(a){ const b=a.benefits; return (b&&b.items.length) ? 'Refundable benefits you may receive (paid separately from your refund):<br>'+b.items.map(x=>`&bull; ${esc(x.label)} ~${money(x.amount)}/yr`).join('<br>') : 'Based on your income I don’t estimate extra benefits — but filing is what triggers benefits like the GST/HST credit and CCB, so file even with no tax owing.'; }
+  function ansNewcomer(a){ const r=a.return; return `In plain terms: you earned about <b>${money(r.income.total)}</b> this year. The government already collected <b>${money(r.taxWithheld)}</b> through payroll. After the credits you qualify for — starting with the basic personal amount (income everyone gets tax-free) — your real tax is <b>${money(r.tax.total)}</b>. So you ${r.isRefund?`get <b>${money(r.refundOrBalance)}</b> back`:`owe <b>${money(Math.abs(r.refundOrBalance))}</b>`}.`; }
+
+  function route(qRaw){ const q=qRaw.toLowerCase(); const a=A();
+    if(/refund|owe|owing|balance|why.*(amount|much)/.test(q)) return a?ansRefund(a):need();
+    if(/marginal|average|\brate/.test(q)) return a?ansRates(a):GLOSS['marginal rate'];
+    if(/lower|reduce|pay less|save|owe less|optimi/.test(q)) return a?ansLower(a):need();
+    if(/missing|need|which document|slip|upload|what.*document/.test(q)) return a?ansMissing(a):need();
+    if(/bracket/.test(q)) return a?ansBracket(a):GLOSS['marginal rate'];
+    if(/health|score/.test(q)) return a?ansHealth(a):GLOSS['tax health'];
+    if(/benefit|gst|hst|\bccb\b|child benefit|carbon|climate/.test(q)) return a?ansBenefits(a):need();
+    if(/new to canada|like i.?m new|eli5|simple terms|explain my (return|tax)/.test(q)) return a?ansNewcomer(a):need();
+    for(const term in GLOSS) if(q.includes(term)) return GLOSS[term];
+    for(const term in GLOSS) if(q.includes(term.split(' ')[0])) return GLOSS[term];
+    return `I can explain your <span class="lnk" data-q="Why is my refund this amount?">refund</span>, your <span class="lnk" data-q="What is my marginal vs average rate?">tax rates</span>, <span class="lnk" data-q="How can I pay less tax?">how to pay less</span>, what <span class="lnk" data-q="What documents am I missing?">documents you’re missing</span>, or define any tax term.`; }
+
+  function msg(cls, html){ const d=document.createElement('div'); d.className='cmsg '+cls; d.innerHTML=html; body.appendChild(d); body.scrollTop=body.scrollHeight; return d; }
+  function typing(){ const d=document.createElement('div'); d.className='ctyping'; d.innerHTML='<i></i><i></i><i></i>'; body.appendChild(d); body.scrollTop=body.scrollHeight; return d; }
+  const wait = (ms)=>new Promise(r=>setTimeout(r, reduced?0:ms));
+
+  async function ask(text){ if(!text.trim()) return; msg('me', esc(text)); const t=typing();
+    let html;
+    try{
+      const amt = text.replace(/[,$]/g,'').match(/(\d{3,7})/);
+      if(/rrsp/i.test(text) && /(what if|contribut|add|put|more|extra)/i.test(text) && A()){
+        const c = amt?+amt[1]:5000;
+        const { result } = await ONYX.api('/simulate',{method:'POST',body:{overrides:{rrsp:c}}});
+        const base=A().return.refundOrBalance, d=result.refundOrBalance-base;
+        html = `Contributing <b>${money(c)}</b> to your RRSP would move your estimated position to <b>${money(Math.abs(result.refundOrBalance))}</b> ${result.isRefund?'refund':'owing'} — a <b>${d>=0?'+':'−'}${money(Math.abs(d))}</b> swing, roughly your ${pct(A().return.marginalRate,0)} marginal rate at work. Drag the RRSP slider in the <b>What-if planner</b> to explore more.`;
+      } else { html = route(text); }
+    }catch(e){ html = 'Sorry — I couldn’t work that out. Try one of the suggestions below.'; }
+    await wait(480); t.remove(); msg('bot', html);
+  }
+
+  function greet(){ if(body.children.length) return;
+    const a=A();
+    msg('bot', a
+      ? `Hi — I’ve read your ${a.return.year} audit. You’re looking at ${a.return.isRefund?`a <b>${money(a.return.refundOrBalance)}</b> refund`:`a <b>${money(Math.abs(a.return.refundOrBalance))}</b> balance owing`}. Ask me why, how to pay less, or any tax term.`
+      : `Hi — I’m your ONYX Copilot. Run your audit and I’ll explain your real numbers. You can also ask me to define any tax term.`);
+  }
+  function updateSugg(){ const a=A(); const list=[];
+    list.push(a&&!a.return.isRefund ? 'Why do I owe this amount?' : 'Why is my refund this amount?');
+    list.push('How can I pay less tax?');
+    list.push('Explain my tax bracket');
+    if(a && (a.health.context.estimatedRrspRoom||0) - a.return.deductions.rrsp > 1000) list.push('What if I add $5,000 to my RRSP?');
+    if(a && a.checklist && a.checklist.counts.missing>0) list.push('What documents am I missing?');
+    list.push('Explain my return like I’m new to Canada');
+    sugg.innerHTML = list.slice(0,5).map(q=>`<button data-q="${esc(q)}">${esc(q)}</button>`).join('');
+  }
+
+  function open(){ cop.classList.add('open'); $('askFab').style.display='none'; greet(); updateSugg(); $('copInput').focus(); }
+  function close(){ cop.classList.remove('open'); $('askFab').style.display='inline-flex'; }
+  $('askFab').addEventListener('click', open);
+  $('copClose').addEventListener('click', close);
+  $('copForm').addEventListener('submit', e=>{ e.preventDefault(); const v=$('copInput').value; $('copInput').value=''; ask(v); });
+  sugg.addEventListener('click', e=>{ const b=e.target.closest('[data-q]'); if(b) ask(b.dataset.q); });
+  body.addEventListener('click', e=>{ const l=e.target.closest('.lnk[data-q]'); if(l) ask(l.dataset.q); });
+
+  // refresh suggestions/greeting whenever a new audit renders
+  window.__onyxAuditRendered = () => { updateSugg(); if(cop.classList.contains('open') && body.children.length<=1){ body.innerHTML=''; greet(); } };
 })();
 
 boot();
