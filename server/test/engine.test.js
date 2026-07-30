@@ -118,6 +118,25 @@ ok(cal.length > 0 && cal.every((c) => c.daysAway >= 0), 'calendar returns only u
 ok(cal.some((c) => c.tag === 'instalment'), 'self-employed calendar includes instalment deadlines (personalized)');
 ok(taxCalendar({ employmentType: 'employed' }).every((c) => c.tag !== 'instalment'), 'employee calendar omits instalments');
 
+// ---- 8c. 2025 tax year + bracket/cashflow + simulate + account priority ----
+const fed25 = getTaxData(2025).federal;
+near(bracketTax(60000, fed25.brackets), 0.15 * 57375 + 0.205 * (60000 - 57375), 0.5, '2025 federal bracket tax on $60,000');
+const r2025 = computeReturn({ province: 'ON', year: 2025, employmentIncome: 60000, cppContrib: 4034.1, eiContrib: 996, taxWithheld: 9000 });
+ok(r2025.tax.total > 0 && Math.abs(r2025.tax.total - on.tax.total) > 1, '2025 differs from 2024 (indexation)');
+ok(r2025.bracketFederal && r2025.bracketFederal.rate === 0.205, 'bracketFederal identifies the 20.5% band at $60k');
+ok(r2025.bracketFederal.toNext > 0, `bracketFederal reports distance to next bracket (${r2025.bracketFederal.toNext})`);
+ok(Math.abs(r2025.cashflow.takeHome - (r2025.income.total - r2025.tax.total - r2025.cashflow.cpp - r2025.cashflow.ei)) < 1, 'cashflow.takeHome = income − tax − CPP − EI');
+
+const simBase = { province: 'ON', year: 2024, employmentIncome: 95000, taxWithheld: 12000 };
+const sim0 = require('../engine').simulate({ profile: simBase, overrides: {} });
+const sim1 = require('../engine').simulate({ profile: simBase, overrides: { rrsp: 10000 } });
+ok(sim1.refundOrBalance > sim0.refundOrBalance, 'simulate: adding $10k RRSP improves the position');
+ok(sim1.taxableIncome === sim0.taxableIncome - 10000, 'simulate: RRSP override reduces taxable income');
+
+const { accountPriority } = require('../engine/planner');
+const ap = accountPriority(computeReturn({ province: 'ON', year: 2024, employmentIncome: 90000, firstTimeHomeBuyer: true, ownsHome: false }));
+ok(ap.order.includes('FHSA') && ap.order.includes('RRSP'), 'account priority recommends FHSA + RRSP for a high-earning first-time buyer');
+
 // ---- 9. Every province computes without error ----
 for (const code of Object.keys(getTaxData(2024).provinces)) {
   const r = computeReturn({ province: code, year: 2024, employmentIncome: 75000, cppContrib: 3867.5, eiContrib: 1049.12, taxWithheld: 12000 });

@@ -98,6 +98,40 @@
   .rpt-tools{display:flex;gap:.6rem;justify-content:flex-end;margin:1.4rem 0 -.4rem}
   .themebtn{background:none;border:1px solid var(--line-2);border-radius:99px;width:34px;height:34px;display:grid;place-items:center;color:var(--ink-2)}
   .themebtn:hover{border-color:var(--accent);color:var(--accent)}
+  /* what-if planner */
+  .wf-out{display:flex;flex-wrap:wrap;gap:1.4rem;align-items:center;margin-bottom:1.3rem}
+  .wf-refund{font-family:var(--serif);font-size:2rem;font-weight:600;letter-spacing:-.02em;line-height:1}
+  .wf-refund.refund{color:var(--pos)}.wf-refund.owing{color:var(--crit)}
+  .wf-delta{font-family:var(--mono);font-size:.78rem;margin-top:.35rem;color:var(--ink-3)}
+  .wf-mini{border-left:1px solid var(--line);padding-left:1.1rem}.wf-mini b{display:block;font-family:var(--serif);font-size:1.2rem;font-weight:600;margin-top:.2rem}
+  .wf-sliders{display:grid;grid-template-columns:1fr 1fr;gap:1rem 1.8rem}
+  @media(max-width:640px){.wf-sliders{grid-template-columns:1fr}}
+  .wf-row{display:flex;flex-direction:column;gap:.35rem}
+  .wf-lab{display:flex;justify-content:space-between;font-size:.82rem;color:var(--ink-2)}.wf-lab b{font-family:var(--mono);color:var(--accent)}
+  .wf-row input[type=range]{width:100%;accent-color:var(--accent);height:22px}
+  /* cash-flow + bracket bars */
+  .flow-bar{display:flex;height:28px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  .flow-seg{height:100%;transition:width .8s cubic-bezier(.2,.7,.2,1)}
+  .flow-legend{display:flex;flex-wrap:wrap;gap:.9rem;margin-top:.8rem;font-family:var(--mono);font-size:.72rem}
+  .flow-legend span{display:inline-flex;align-items:center;gap:.45ch;color:var(--ink-2)}
+  .flow-dot{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .brk{display:flex;height:12px;border-radius:7px;overflow:hidden;background:var(--line)}
+  .brk .bseg{height:100%}
+  .brk-cap{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.68rem;color:var(--ink-3);margin-top:.35rem}
+  /* transparency */
+  .calc details{border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2);padding:0 1.1rem}
+  .calc summary{cursor:pointer;padding:.95rem 0;font-weight:600;font-size:.9rem}
+  .calc-row{display:flex;justify-content:space-between;padding:.35rem 0;font-size:.86rem;border-bottom:1px dashed var(--line)}
+  .calc-row.tot{font-weight:700;border-bottom:0;border-top:1px solid var(--line-2);margin-top:.2rem;padding-top:.5rem}
+  .calc-row .v{font-family:var(--mono)}
+  .calc-sub{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:.9rem 0 .2rem}
+  /* account priority + data controls */
+  .acct{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem}
+  .acct .a{border:1px solid var(--line-2);border-radius:99px;padding:.3em .8em;font-family:var(--mono);font-size:.74rem;color:var(--ink-2)}
+  .acct .a.n1{border-color:var(--accent);color:var(--accent);font-weight:600}
+  .data-btns{display:flex;flex-wrap:wrap;gap:.6rem}
+  .danger{color:var(--crit);border-color:color-mix(in oklab,var(--crit) 40%,transparent)!important}
+  .danger:hover{background:color-mix(in oklab,var(--crit) 12%,transparent);color:var(--crit)!important}
   @media print{
     .topbar,.intro .btn,.runstatus,.rpt-tools,#profileCard,#docsCard,.no-print{display:none!important}
     body{background:#fff;color:#000}.card{break-inside:avoid;border-color:#ddd}
@@ -251,6 +285,7 @@ async function boot() {
   META = await ONYX.api('/meta');
   // province select
   $('province').innerHTML = Object.entries(META.provinces).map(([c,n]) => `<option value="${c}">${n}</option>`).join('');
+  if (META.years && META.years.length) $('year').innerHTML = META.years.map(y => `<option value="${y}">${y}</option>`).join('');
   // manual type select + sample chips
   $('mType').innerHTML = Object.entries(META.slipTypes).map(([c,l]) => `<option value="${c}">${c} — ${l}</option>`).join('');
   $('docAdd').innerHTML = Object.keys(SAMPLES).map(t => `<button class="chip-add" data-sample="${t}">+ ${t}</button>`).join('') ;
@@ -265,6 +300,7 @@ async function loadProfile() {
   const p = profile || {};
   ['age','spouseNetIncome','dependants','rrspRoom','tfsaRoom'].forEach(k => { if (p[k] != null) $(k).value = p[k]; });
   if (p.province) $('province').value = p.province;
+  if (p.year) $('year').value = p.year;
   if (p.maritalStatus) $('maritalStatus').value = p.maritalStatus;
   if (p.employmentType) $('employmentType').value = p.employmentType;
   ['isStudent','firstTimeHomeBuyer','ownsHome','disability','hasInvestments','hasRentalIncome','hasCrypto','hasForeignIncome'].forEach(k => { $(k).checked = !!p[k]; });
@@ -273,7 +309,7 @@ async function loadProfile() {
 async function saveProfile() {
   const num = (id) => { const v = parseFloat($(id).value); return isNaN(v) ? undefined : v; };
   const patch = {
-    province: $('province').value, year: 2024,
+    province: $('province').value, year: parseInt($('year').value, 10) || 2024,
     age: num('age'), maritalStatus: $('maritalStatus').value,
     employmentType: $('employmentType').value,
     spouseNetIncome: num('spouseNetIncome') || 0, dependants: num('dependants') || 0,
@@ -391,6 +427,77 @@ function renderReport(a) {
   const calHTML = (a.calendar && a.calendar.length) ? `<h2 class="sectitle">Your tax calendar</h2>
   <div class="card"><div class="card-b">${a.calendar.map(c => `<div class="cal-row"><div class="cal-d ${c.daysAway<=30?'soon':''}"><span class="cal-days">${c.daysAway}</span><span class="cal-u">days</span></div><div class="cal-b"><div class="cal-t">${esc(c.label)}</div><div class="cal-n">${esc(c.note)}</div></div><span class="cal-date mono">${c.date}</span></div>`).join('')}</div></div>` : '';
 
+  // ---- final-product builders ----
+  const cf = r.cashflow;
+  const seg = (label,val,color) => (cf && cf.gross>0 && val>0) ? `<div class="flow-seg" title="${label}: ${money(val)}" style="width:0;background:${color}" data-w="${(val/cf.gross*100)}"></div>` : '';
+  const bf = r.bracketFederal;
+  const bracketBar = bf ? `<div style="margin-top:1.2rem"><div class="wf-lab"><span>Federal bracket · <b>${(bf.rate*100).toFixed(bf.rate*100%1?1:0)}%</b></span>${bf.upTo?`<span class="mono" style="color:var(--ink-3)">${money(bf.toNext)} to next</span>`:'<span class="mono" style="color:var(--ink-3)">top bracket</span>'}</div>${bf.upTo?`<div class="brk" style="margin-top:.4rem"><div class="bseg" style="width:${((r.taxableIncome-bf.from)/(bf.upTo-bf.from)*100).toFixed(0)}%;background:linear-gradient(90deg,var(--accent-2),var(--accent))"></div></div><div class="brk-cap"><span>${money(bf.from)}</span><span>${money(bf.upTo)}</span></div>`:''}</div>` : '';
+  const flowHTML = cf ? `<h2 class="sectitle">Where your money goes</h2>
+  <div class="card"><div class="card-b">
+    <div class="flow-bar">${seg('Federal tax',cf.federalTax,'var(--crit)')}${seg('Provincial tax',cf.provincialTax,'var(--warn)')}${seg('CPP',cf.cpp,'var(--info)')}${seg('EI',cf.ei,'#9a8cd0')}${seg('Take-home',cf.takeHome,'var(--pos)')}</div>
+    <div class="flow-legend">
+      <span><i class="flow-dot" style="background:var(--pos)"></i> Take-home ${money(cf.takeHome)} (${Math.round(cf.takeHomePct*100)}%)</span>
+      <span><i class="flow-dot" style="background:var(--crit)"></i> Federal ${money(cf.federalTax)}</span>
+      <span><i class="flow-dot" style="background:var(--warn)"></i> Provincial ${money(cf.provincialTax)}</span>
+      ${cf.cpp>0?`<span><i class="flow-dot" style="background:var(--info)"></i> CPP ${money(cf.cpp)}</span>`:''}
+      ${cf.ei>0?`<span><i class="flow-dot" style="background:#9a8cd0"></i> EI ${money(cf.ei)}</span>`:''}
+    </div>${bracketBar}
+  </div></div>` : '';
+
+  const acc = a.accounts;
+  const acctHTML = (acc && acc.order && acc.order.length) ? `<h2 class="sectitle">Which account first?</h2>
+  <div class="card"><div class="card-b"><div class="acct">${acc.order.map((x,i)=>`<span class="a ${i===0?'n1':''}">${i+1}. ${x}</span>`).join('')}</div>${acc.tips.map(t=>`<div class="small" style="margin-bottom:.3rem"><b style="color:var(--accent)">${esc(t.account)}</b> — ${esc(t.why)}</div>`).join('')}</div></div>` : '';
+
+  const room = Math.max(10000, Math.round((a.health.context && a.health.context.estimatedRrspRoom) || 10000));
+  const wfSlider = (id,label,max,step) => `<div class="wf-row"><div class="wf-lab"><span>${label}</span><b id="wfv-${id}">$0</b></div><input type="range" class="wf-slider" id="sl-${id}" min="0" max="${max}" step="${step}" value="0" /></div>`;
+  const wfHTML = `<h2 class="sectitle">What-if planner</h2>
+  <div class="card glow"><div class="card-b">
+    <div class="wf-out">
+      <div><div class="k">Projected refund / owing</div><div class="wf-refund ${r.isRefund?'refund':'owing'}" id="wfRefund">${money(Math.abs(r.refundOrBalance))}</div><div class="wf-delta" id="wfDelta">at your current numbers</div></div>
+      <div class="wf-mini"><span class="k">Marginal</span><b id="wfMarg">${(r.marginalRate*100).toFixed(1)}%</b></div>
+      <div class="wf-mini"><span class="k">Taxable</span><b id="wfTax">${money(r.taxableIncome)}</b></div>
+      <div class="wf-mini"><span class="k">Fed bracket</span><b id="wfBracket">${bf?(bf.rate*100).toFixed(bf.rate*100%1?1:0)+'%':'—'}</b></div>
+    </div>
+    <div class="wf-sliders">${wfSlider('rrsp','Extra RRSP contribution',room,100)}${wfSlider('fhsa','FHSA contribution',8000,100)}${wfSlider('don','Extra donations',5000,50)}${wfSlider('inc','Extra income',50000,500)}${wfSlider('cg','Capital gain realized',50000,500)}</div>
+    <p class="hint" style="margin-top:.8rem">Drag to preview the estimated impact. This never changes your saved data.</p>
+  </div></div>`;
+
+  const t = r.tax, cr = r.credits;
+  const calcHTML = `<h2 class="sectitle">How this was calculated</h2>
+  <div class="card calc"><div class="card-b"><details>
+    <summary>Show the federal &amp; provincial breakdown + assumptions</summary>
+    <div class="calc-sub">Income</div>
+    <div class="calc-row"><span>Total income</span><span class="v">${money(r.income.total)}</span></div>
+    <div class="calc-row"><span>Deductions</span><span class="v">−${money(r.deductions.total)}</span></div>
+    <div class="calc-row tot"><span>Taxable income</span><span class="v">${money(r.taxableIncome)}</span></div>
+    <div class="calc-sub">Federal</div>
+    <div class="calc-row"><span>Tax before credits</span><span class="v">${money(t.federalBeforeCredits)}</span></div>
+    <div class="calc-row"><span>Non-refundable credits + dividend credit</span><span class="v">−${money(cr.federalValue)}</span></div>
+    <div class="calc-row tot"><span>Federal tax</span><span class="v">${money(t.federal)}</span></div>
+    <div class="calc-sub">Provincial · ${esc(r.provinceName)}</div>
+    <div class="calc-row"><span>Tax before credits</span><span class="v">${money(t.provincialBeforeCredits)}</span></div>
+    <div class="calc-row"><span>Provincial credits</span><span class="v">−${money(cr.provincialValue)}</span></div>
+    ${t.surtax?`<div class="calc-row"><span>Surtax</span><span class="v">+${money(t.surtax)}</span></div>`:''}
+    ${t.healthPremium?`<div class="calc-row"><span>Health premium</span><span class="v">+${money(t.healthPremium)}</span></div>`:''}
+    <div class="calc-row tot"><span>Provincial tax</span><span class="v">${money(t.provincial)}</span></div>
+    <div class="calc-sub">Result</div>
+    <div class="calc-row"><span>Total income tax</span><span class="v">${money(t.total)}</span></div>
+    <div class="calc-row"><span>Tax withheld / already paid</span><span class="v">−${money(r.taxWithheld)}</span></div>
+    <div class="calc-row tot"><span>${r.isRefund?'Estimated refund':'Estimated balance owing'}</span><span class="v">${money(Math.abs(r.refundOrBalance))}</span></div>
+    <div class="calc-sub">Assumptions</div>
+    <p class="hint" style="line-height:1.65">Uses ${r.year} federal &amp; provincial parameters. Net income is used as a proxy for taxable income (no loss carryovers or specialized deductions). Capital gains at 50% inclusion. Provincial dividend credits and some province-specific amounts are approximated.${r.year===2025?' 2025 provincial figures are indexed estimates pending verification.':''} These are educational estimates, not a filed return.</p>
+  </details></div></div>`;
+
+  const dataHTML = `<h2 class="sectitle">Your data</h2>
+  <div class="card"><div class="card-b">
+    <p class="small muted" style="margin-bottom:.8rem">Your information is yours. Export it, download your report, or delete everything from this browser.</p>
+    <div class="data-btns">
+      <button class="btn btn-ghost btn-sm" id="exportBtn">Export my data (JSON)</button>
+      <button class="btn btn-ghost btn-sm" id="downloadBtn">Download report (.txt)</button>
+      <button class="btn btn-ghost btn-sm danger" id="deleteBtn">Delete my account</button>
+    </div>
+  </div></div>`;
+
   $('report').innerHTML = `
   <div class="rpt-tools no-print">
     <button class="btn btn-ghost btn-sm" id="copyBtn">Copy summary</button>
@@ -416,6 +523,7 @@ function renderReport(a) {
       <span class="band" style="color:${tone};margin-top:.6rem">● ${h.band.label}</span>
     </div>
   </div></div></div>
+  ${flowHTML}
 
   <div class="grid g2" style="margin-top:1rem">
     <div class="card"><div class="card-h">Tax Health breakdown</div><div class="card-b">${meters}
@@ -428,6 +536,8 @@ function renderReport(a) {
   <h2 class="sectitle">Opportunities to lower your tax <span class="k" style="font-family:var(--mono)">· ${a.opportunities.length} found</span></h2>
   ${opps || '<div class="card"><div class="empty">No specific opportunities detected — your position looks well optimized.</div></div>'}
   ${rrspHTML}
+  ${acctHTML}
+  ${wfHTML}
 
   <h2 class="sectitle">Advisory summary</h2>
   <div class="card glow"><div class="card-b">
@@ -437,24 +547,70 @@ function renderReport(a) {
   </div></div>
   ${benefitsHTML}
   ${calHTML}
+  ${calcHTML}
 
   <h2 class="sectitle">Documents scanned</h2>
-  <div class="card"><div class="card-b">${docs || '<p class="hint">No documents.</p>'}</div></div>`;
+  <div class="card"><div class="card-b">${docs || '<p class="hint">No documents.</p>'}</div></div>
+  ${dataHTML}`;
 
-  // animate dial + meters + completeness bar
+  // animate dial + meters + completeness + cash-flow bars
   requestAnimationFrame(() => {
     const d = $('hdial'); if (d) d.style.strokeDashoffset = off;
     document.querySelectorAll('.mf').forEach(m => m.style.width = m.dataset.w + '%');
     document.querySelectorAll('.cl-fill').forEach(m => m.style.width = m.dataset.w + '%');
+    document.querySelectorAll('.flow-seg').forEach(m => m.style.width = m.dataset.w + '%');
   });
-  // QOL toolbar handlers
+  // toolbar
   const pb = $('printBtn'); if (pb) pb.addEventListener('click', () => window.print());
   const cb = $('copyBtn'); if (cb) cb.addEventListener('click', copySummary);
+  // what-if sliders
+  document.querySelectorAll('.wf-slider').forEach(s => s.addEventListener('input', onWfInput));
+  // data controls
+  const eb = $('exportBtn'); if (eb) eb.addEventListener('click', exportData);
+  const db = $('downloadBtn'); if (db) db.addEventListener('click', downloadReport);
+  const delb = $('deleteBtn'); if (delb) delb.addEventListener('click', deleteAccount);
   $('introSub').textContent = 'Your latest audit is shown below. Edit your profile or documents and re-run anytime.';
 }
 
+let wfTimer = null;
+function onWfInput() {
+  const rd = (id) => { const v = +$('sl-'+id).value; $('wfv-'+id).textContent = money(v); return v; };
+  const ov = { rrsp: rd('rrsp'), fhsa: rd('fhsa'), donations: rd('don'), extraIncome: rd('inc'), capitalGains: rd('cg') };
+  clearTimeout(wfTimer);
+  wfTimer = setTimeout(() => runSimulate(ov), 110);
+}
+async function runSimulate(ov) {
+  try {
+    const { result } = await ONYX.api('/simulate', { method: 'POST', body: { overrides: ov } });
+    const base = lastAudit.return.refundOrBalance;
+    const el = $('wfRefund'); el.textContent = money(Math.abs(result.refundOrBalance)); el.className = 'wf-refund ' + (result.isRefund ? 'refund' : 'owing');
+    const d = result.refundOrBalance - base;
+    const anyOv = Object.values(ov).some(x => x > 0);
+    $('wfDelta').textContent = anyOv ? ((d >= 0 ? '+' : '−') + money(Math.abs(d)) + ' vs current') : 'at your current numbers';
+    $('wfDelta').style.color = !anyOv ? 'var(--ink-3)' : (d >= 0 ? 'var(--pos)' : 'var(--crit)');
+    $('wfMarg').textContent = (result.marginalRate*100).toFixed(1) + '%';
+    $('wfTax').textContent = money(result.taxableIncome);
+    $('wfBracket').textContent = result.bracketFederal ? (result.bracketFederal.rate*100).toFixed(result.bracketFederal.rate*100%1?1:0) + '%' : '—';
+  } catch (_) {}
+}
+function download(filename, text, type) {
+  const blob = new Blob([text], { type: type || 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function exportData() { try { const data = await ONYX.api('/export'); download('onyx-ledger-data.json', JSON.stringify(data, null, 2), 'application/json'); flash('exportBtn', 'Exported ✓'); } catch (e) { flash('exportBtn', e.message); } }
+function downloadReport() { if (!lastAudit) return; download('onyx-tax-summary.txt', buildSummaryText(lastAudit)); flash('downloadBtn', 'Downloaded ✓'); }
+async function deleteAccount() { if (!confirm('Delete your account and all its data from this browser? This cannot be undone.')) return; try { await ONYX.api('/account', { method: 'DELETE' }); ONYX.signOut(); } catch (e) { flash('deleteBtn', e.message); } }
+
 function copySummary() {
   const a = lastAudit; if (!a) return;
+  const text = buildSummaryText(a);
+  const done = () => flash('copyBtn', 'Copied ✓');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+function buildSummaryText(a) {
   const r = a.return, L = [];
   L.push(`ONYX LEDGER — TAX AUDIT SUMMARY (${r.provinceName} ${r.year})`);
   L.push(`Generated ${new Date(a.generatedAt).toLocaleDateString()}  ·  Educational estimate, not tax advice`);
@@ -469,10 +625,7 @@ function copySummary() {
   a.opportunities.slice(0,6).forEach(o => L.push(`  • ${o.title}${o.impact?` (~${money(o.impact)})`:''} [${o.citation||''}]`));
   if (a.benefits && a.benefits.items.length) { L.push(''); L.push('ESTIMATED BENEFITS (paid separately):'); a.benefits.items.forEach(b => L.push(`  • ${b.label}: ~${money(b.amount)}/yr`)); }
   L.push(''); L.push(a.advisory.disclaimer);
-  const text = L.join('\n');
-  const done = () => flash('copyBtn', 'Copied ✓');
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text, done));
-  else fallbackCopy(text, done);
+  return L.join('\n');
 }
 function fallbackCopy(text, done){ const t=document.createElement('textarea'); t.value=text; document.body.appendChild(t); t.select(); try{document.execCommand('copy');}catch(_){} t.remove(); done(); }
 

@@ -62,6 +62,7 @@ function FileStore() {
     },
     async saveAudit(uid, audit) { const u = db.users[uid]; if (!u) return null; u.audit = audit; persist(); return audit; },
     async getAudit(uid) { const u = db.users[uid]; return u ? u.audit : null; },
+    async deleteUser(uid) { delete db.users[uid]; persist(); return true; },
   };
 }
 
@@ -111,6 +112,7 @@ function BlobStore() {
     },
     async saveAudit(uid, audit) { const u = await getUser(uid); if (!u) return null; u.audit = audit; await putUser(u); return audit; },
     async getAudit(uid) { const u = await getUser(uid); return u ? u.audit : null; },
+    async deleteUser(uid) { const u = await getUser(uid); if (u) { await store.delete(K.user(uid)); await store.delete(K.email(u.email)); } return true; },
   };
 }
 

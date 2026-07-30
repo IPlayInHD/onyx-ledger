@@ -179,9 +179,67 @@ const PROVINCES_2024 = {
   },
 };
 
+/**
+ * 2025 tax year. Federal figures are the published 2025 amounts. Provincial
+ * figures are the 2024 tables indexed forward (~2.8%) as a PRELIMINARY estimate,
+ * with Alberta's new 2025 8% bracket applied explicitly. Verify provincial 2025
+ * figures against each province's published amounts before production use.
+ */
+const FEDERAL_2025 = {
+  brackets: [
+    { upTo: 57375, rate: 0.15 }, { upTo: 114750, rate: 0.205 }, { upTo: 177882, rate: 0.26 },
+    { upTo: 253414, rate: 0.29 }, { upTo: Infinity, rate: 0.33 },
+  ],
+  bpa: { max: 16129, min: 14538, phaseStart: 177882, phaseEnd: 253414 },
+  creditRate: 0.15,
+  canadaEmployment: 1471,
+  pensionIncomeMax: 2000,
+  ageAmount: { max: 9028, threshold: 45522, rate: 0.15 },
+  cpp: { maxPensionable: 71300, exemption: 3500, rate: 0.0595, max: 4034.1, cpp2: { lower: 71300, upper: 81200, rate: 0.04, max: 396 } },
+  ei: { maxInsurable: 65700, rate: 0.0164, max: 1077.48 },
+  medical: { pct: 0.03, cap: 2834 },
+  donation: { threshold: 200, low: 0.15, high: 0.29, top: 0.33, topBracket: 253414 },
+  eligibleDiv: { grossUp: 0.38, dtc: 0.150198 },
+  nonEligibleDiv: { grossUp: 0.15, dtc: 0.090301 },
+  capitalGainsInclusion: 0.5,
+  disabilityAmount: 10138,
+  cwb: { maxSingle: 1590, maxFamily: 2739, phaseInStart: 3000, singlePhaseOut: 26149, familyPhaseOut: 29833, phaseOutRate: 0.12 },
+  gstCredit: { single: 349, perChild: 184, base: 358 },
+  rrspRoomRate: 0.18,
+  rrspRoomCap: 32490,
+  fhsaAnnual: 8000,
+  tfsaAnnual: 7000,
+};
+
+function indexProvinces(base, factor) {
+  const out = {};
+  for (const [code, p] of Object.entries(base)) {
+    const np = Object.assign({}, p, {
+      brackets: p.brackets.map((b) => ({ upTo: b.upTo === Infinity ? Infinity : Math.round(b.upTo * factor), rate: b.rate })),
+      bpa: Math.round(p.bpa * factor),
+    });
+    if (p.surtax) np.surtax = p.surtax.map((s) => ({ over: Math.round(s.over * factor), rate: s.rate }));
+    out[code] = np;
+  }
+  return out;
+}
+const PROVINCES_2025 = indexProvinces(PROVINCES_2024, 1.028);
+// Alberta 2025: new 8% bracket on the first $60,000 (credits still valued at 10%).
+PROVINCES_2025.AB = {
+  name: 'Alberta',
+  brackets: [
+    { upTo: 60000, rate: 0.08 }, { upTo: 151234, rate: 0.10 }, { upTo: 181481, rate: 0.12 },
+    { upTo: 241974, rate: 0.13 }, { upTo: 362961, rate: 0.14 }, { upTo: Infinity, rate: 0.15 },
+  ],
+  bpa: 22323, creditRate: 0.10,
+};
+
 const TAX_DATA = {
   2024: { federal: FEDERAL_2024, provinces: PROVINCES_2024 },
+  2025: { federal: FEDERAL_2025, provinces: PROVINCES_2025 },
 };
+
+const AVAILABLE_YEARS = [2025, 2024];
 
 const PROVINCE_NAMES = Object.fromEntries(
   Object.entries(PROVINCES_2024).map(([code, p]) => [code, p.name])
@@ -191,4 +249,4 @@ function getTaxData(year) {
   return TAX_DATA[year] || TAX_DATA[2024];
 }
 
-module.exports = { TAX_DATA, getTaxData, PROVINCE_NAMES, DEFAULT_YEAR: 2024 };
+module.exports = { TAX_DATA, getTaxData, PROVINCE_NAMES, AVAILABLE_YEARS, DEFAULT_YEAR: 2024 };

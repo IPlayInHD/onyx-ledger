@@ -183,9 +183,67 @@ const PROVINCES_2024 = {
   },
 };
 
+/**
+ * 2025 tax year. Federal figures are the published 2025 amounts. Provincial
+ * figures are the 2024 tables indexed forward (~2.8%) as a PRELIMINARY estimate,
+ * with Alberta's new 2025 8% bracket applied explicitly. Verify provincial 2025
+ * figures against each province's published amounts before production use.
+ */
+const FEDERAL_2025 = {
+  brackets: [
+    { upTo: 57375, rate: 0.15 }, { upTo: 114750, rate: 0.205 }, { upTo: 177882, rate: 0.26 },
+    { upTo: 253414, rate: 0.29 }, { upTo: Infinity, rate: 0.33 },
+  ],
+  bpa: { max: 16129, min: 14538, phaseStart: 177882, phaseEnd: 253414 },
+  creditRate: 0.15,
+  canadaEmployment: 1471,
+  pensionIncomeMax: 2000,
+  ageAmount: { max: 9028, threshold: 45522, rate: 0.15 },
+  cpp: { maxPensionable: 71300, exemption: 3500, rate: 0.0595, max: 4034.1, cpp2: { lower: 71300, upper: 81200, rate: 0.04, max: 396 } },
+  ei: { maxInsurable: 65700, rate: 0.0164, max: 1077.48 },
+  medical: { pct: 0.03, cap: 2834 },
+  donation: { threshold: 200, low: 0.15, high: 0.29, top: 0.33, topBracket: 253414 },
+  eligibleDiv: { grossUp: 0.38, dtc: 0.150198 },
+  nonEligibleDiv: { grossUp: 0.15, dtc: 0.090301 },
+  capitalGainsInclusion: 0.5,
+  disabilityAmount: 10138,
+  cwb: { maxSingle: 1590, maxFamily: 2739, phaseInStart: 3000, singlePhaseOut: 26149, familyPhaseOut: 29833, phaseOutRate: 0.12 },
+  gstCredit: { single: 349, perChild: 184, base: 358 },
+  rrspRoomRate: 0.18,
+  rrspRoomCap: 32490,
+  fhsaAnnual: 8000,
+  tfsaAnnual: 7000,
+};
+
+function indexProvinces(base, factor) {
+  const out = {};
+  for (const [code, p] of Object.entries(base)) {
+    const np = Object.assign({}, p, {
+      brackets: p.brackets.map((b) => ({ upTo: b.upTo === Infinity ? Infinity : Math.round(b.upTo * factor), rate: b.rate })),
+      bpa: Math.round(p.bpa * factor),
+    });
+    if (p.surtax) np.surtax = p.surtax.map((s) => ({ over: Math.round(s.over * factor), rate: s.rate }));
+    out[code] = np;
+  }
+  return out;
+}
+const PROVINCES_2025 = indexProvinces(PROVINCES_2024, 1.028);
+// Alberta 2025: new 8% bracket on the first $60,000 (credits still valued at 10%).
+PROVINCES_2025.AB = {
+  name: 'Alberta',
+  brackets: [
+    { upTo: 60000, rate: 0.08 }, { upTo: 151234, rate: 0.10 }, { upTo: 181481, rate: 0.12 },
+    { upTo: 241974, rate: 0.13 }, { upTo: 362961, rate: 0.14 }, { upTo: Infinity, rate: 0.15 },
+  ],
+  bpa: 22323, creditRate: 0.10,
+};
+
 const TAX_DATA = {
   2024: { federal: FEDERAL_2024, provinces: PROVINCES_2024 },
+  2025: { federal: FEDERAL_2025, provinces: PROVINCES_2025 },
 };
+
+const AVAILABLE_YEARS = [2025, 2024];
 
 const PROVINCE_NAMES = Object.fromEntries(
   Object.entries(PROVINCES_2024).map(([code, p]) => [code, p.name])
@@ -399,6 +457,23 @@ function computeReturn(rawProfile) {
   const marginalRate = round((totalTaxFn(taxableIncome + 1000) - totalTaxFn(taxableIncome)) / 1000 * 100) / 100;
   const averageRate = totalIncome > 0 ? round((incomeTax / totalIncome) * 100) / 100 : 0;
 
+  // Federal bracket position (for visualization) + cash-flow breakdown.
+  let bracketFederal = null; let lo = 0;
+  for (const b of fed.brackets) {
+    if (taxableIncome <= b.upTo) { bracketFederal = { rate: b.rate, from: lo, upTo: b.upTo === Infinity ? null : b.upTo, toNext: b.upTo === Infinity ? null : round(b.upTo - taxableIncome) }; break; }
+    lo = b.upTo;
+  }
+  const cpp2 = 0; // (CPP is already summed in `cpp`)
+  const takeHome = round(totalIncome - incomeTax - cpp - ei);
+  const cashflow = {
+    gross: round(totalIncome),
+    federalTax: round(federalTax),
+    provincialTax: round(provincialTax),
+    cpp: round(cpp), ei: round(ei),
+    takeHome,
+    takeHomePct: totalIncome > 0 ? round((takeHome / totalIncome) * 100) / 100 : 0,
+  };
+
   return {
     year: p.year,
     province: p.province,
@@ -451,6 +526,8 @@ function computeReturn(rawProfile) {
     isRefund: refundOrBalance >= 0,
     marginalRate,
     averageRate,
+    bracketFederal,
+    cashflow,
     profile: p,
   };
 }
@@ -1115,23 +1192,27 @@ function buildChecklist(ret, documents) {
 
 /* ===== engine/planner.js ===== */
 /**
- * ONYX Intelligence — planning tools (QOL features)
- *   - optimizeRRSP : solve the RRSP contribution to erase a balance owing or
- *                    drop into a lower tax bracket (recomputed with the engine)
+ * ONYX Intelligence — planning tools (QOL)
+ *   - optimizeRRSP     : solve the RRSP contribution to erase owing / drop a bracket
+ *   - accountPriority  : which registered account to prioritize (RRSP/TFSA/FHSA)
  *   - estimateBenefits : rough estimates of refundable government benefits
- *                    (GST/HST credit, Canada Carbon Rebate, Canada Child Benefit)
- *   - taxCalendar : the taxpayer's next key CRA deadlines, with live countdowns
- * All estimates are clearly labelled; benefits use simplified formulas.
- * =========================================================================
+ *   - taxCalendar      : the taxpayer's next key CRA deadlines, with countdowns
+ * Estimates are clearly labelled; benefit formulas are simplified.
  */
 
 
 const r0 = (n) => Math.round(n);
 const ceilTo = (n, step) => Math.ceil(n / step) * step;
+const pctLabel = (rate) => (Math.round(rate * 1000) / 10) + '%';
+function rateAtIncome(income, brackets) {
+  for (const b of brackets) if (income <= b.upTo) return b.rate;
+  return brackets[brackets.length - 1].rate;
+}
 
-/** Solve useful RRSP contributions using the real engine. */
+/** Solve useful RRSP contributions using the real engine (year-aware). */
 function optimizeRRSP(ret, estRoom) {
   const base = ret.profile;
+  const brackets = getTaxData(base.year).federal.brackets;
   const roomLeft = Math.max(0, (estRoom || 0) - base.rrspDeduction);
   const moves = [];
   if (roomLeft < 500 || (base.employmentIncome + base.selfEmploymentIncome) <= 0) return moves;
@@ -1144,17 +1225,14 @@ function optimizeRRSP(ret, estRoom) {
     const guess = Math.min(roomLeft, ceilTo(Math.abs(ret.refundOrBalance) / Math.max(ret.marginalRate, 0.15), 100));
     const after = recompute(guess);
     moves.push({
-      type: 'erase', contribution: r0(Math.min(guess, roomLeft)),
-      newRefund: after.refundOrBalance,
+      type: 'erase', contribution: r0(Math.min(guess, roomLeft)), newRefund: after.refundOrBalance,
       label: `Contribute about $${r0(Math.min(guess, roomLeft)).toLocaleString('en-CA')} to wipe out your balance owing`,
       note: 'Brings your estimated balance close to zero at your marginal rate.',
     });
   }
 
   // 2) Drop into the next-lower federal bracket.
-  const thresholds = [55867, 111733, 173205, 246752];
-  const rateAbove = { 55867: '20.5%', 111733: '26%', 173205: '29%', 246752: '33%' };
-  const rateBelow = { 55867: '15%', 111733: '20.5%', 173205: '26%', 246752: '29%' };
+  const thresholds = brackets.slice(0, -1).map((b) => b.upTo);
   const ti = ret.taxableIncome;
   const th = thresholds.filter((t) => t < ti - 1).pop();
   if (th) {
@@ -1163,7 +1241,7 @@ function optimizeRRSP(ret, estRoom) {
       const after = recompute(need);
       moves.push({
         type: 'bracket', contribution: r0(need), newRefund: after.refundOrBalance,
-        label: `Contribute $${r0(need).toLocaleString('en-CA')} to drop from the ${rateAbove[th]} bracket into the ${rateBelow[th]} bracket`,
+        label: `Contribute $${r0(need).toLocaleString('en-CA')} to drop from the ${pctLabel(rateAtIncome(ti, brackets))} bracket into the ${pctLabel(rateAtIncome(th - 1, brackets))} bracket`,
         note: 'Lowers the tax rate on your top dollars of income.',
       });
     }
@@ -1172,34 +1250,48 @@ function optimizeRRSP(ret, estRoom) {
   return moves.map((m) => Object.assign(m, { delta: r0(m.newRefund - ret.refundOrBalance), roomLeft: r0(roomLeft) }));
 }
 
+/** Which registered account to prioritize, given the situation. */
+function accountPriority(ret) {
+  const p = ret.profile;
+  const mr = ret.marginalRate;
+  const tips = [];
+  if (p.firstTimeHomeBuyer && !p.ownsHome) tips.push({ account: 'FHSA', why: 'Saving toward a first home: FHSA is deductible now and tax-free out — the best of both.' });
+  if (mr >= 0.3) tips.push({ account: 'RRSP', why: `At a ${pctLabel(mr)} marginal rate, RRSP deductions give a large up-front refund.` });
+  tips.push({ account: 'TFSA', why: mr < 0.3 ? 'At a lower marginal rate, TFSA (tax-free growth) often beats an RRSP deduction.' : 'Use TFSA room for tax-free growth once RRSP/FHSA are handled.' });
+  const order = [...new Set(tips.map((t) => t.account))];
+  return { order, tips: tips.slice(0, 3) };
+}
+
 /** Rough estimates of refundable government benefits (paid separately from a refund). */
 function estimateBenefits(ret) {
   const p = ret.profile;
+  const fed = getTaxData(p.year).federal;
   const net = ret.netIncome;
   const kids = p.dependants || 0;
   const married = p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw';
+  const familyNet = net + (married ? Math.max(0, p.spouseNetIncome) : 0);
   const out = [];
 
-  // GST/HST credit (approximate 2024 base year)
-  const gstBase = 340 + (married ? 179 : 0) + kids * 179;
-  const gst = Math.max(0, gstBase - 0.05 * Math.max(0, net - 45000));
+  // GST/HST credit (approximate; reduced by 5% of family net income over ~$45k)
+  const g = fed.gstCredit;
+  const gstBase = g.single + (married ? g.base - g.single : 0) + kids * g.perChild;
+  const gst = Math.max(0, gstBase - 0.05 * Math.max(0, familyNet - 45000));
   if (gst > 20) out.push({ id: 'gst', label: 'GST/HST credit', amount: r0(gst), note: 'Quarterly, tax-free — for lower-income individuals and families.' });
 
   // Canada Carbon Rebate (fuel-charge provinces only; flat, not income-tested)
   const CCR = { AB: 900, SK: 752, MB: 600, ON: 560, NB: 380, NS: 412, PE: 440, NL: 596 };
   if (CCR[p.province]) {
     const b = CCR[p.province];
-    const ccr = b + (married ? b * 0.5 : 0) + kids * b * 0.25;
-    out.push({ id: 'ccr', label: 'Canada Carbon Rebate', amount: r0(ccr), note: 'Quarterly, tax-free — automatic when you file in an eligible province.' });
+    out.push({ id: 'ccr', label: 'Canada Carbon Rebate', amount: r0(b + (married ? b * 0.5 : 0) + kids * b * 0.25), note: 'Quarterly, tax-free — automatic when you file in an eligible province.' });
   }
 
-  // Canada Child Benefit (approximate 2024-25)
+  // Canada Child Benefit (approximate; young-child rate, phased on family net income)
   if (kids > 0) {
-    let ccb = kids * 6570;
+    const maxPer = 7787; // under-6 max; a conservative upper bound
+    let ccb = kids * maxPer;
     const rate = kids === 1 ? 0.07 : kids === 2 ? 0.135 : kids === 3 ? 0.19 : 0.23;
-    ccb -= rate * Math.max(0, net - 36502);
-    ccb = Math.max(0, ccb);
-    if (ccb > 50) out.push({ id: 'ccb', label: 'Canada Child Benefit', amount: r0(ccb), note: 'Monthly, tax-free — based on family net income and number of children.' });
+    ccb = Math.max(0, ccb - rate * Math.max(0, familyNet - 36502));
+    if (ccb > 50) out.push({ id: 'ccb', label: 'Canada Child Benefit', amount: r0(ccb), note: 'Monthly, tax-free — based on family net income and number/age of children.' });
   }
 
   return { items: out, total: r0(out.reduce((s, x) => s + x.amount, 0)) };
@@ -1211,7 +1303,6 @@ function taxCalendar(profile, now) {
   today.setHours(0, 0, 0, 0);
   const emp = (profile && profile.employmentType) || 'employed';
   const isSelf = emp === 'self-employed' || emp === 'mixed';
-
   const nextOccur = (month, day) => {
     let d = new Date(today.getFullYear(), month - 1, day);
     if (d < today) d = new Date(today.getFullYear() + 1, month - 1, day);
@@ -1227,13 +1318,9 @@ function taxCalendar(profile, now) {
     rows.push({ m: 6, d: 15, label: 'Self-employed filing deadline', tag: 'filing', note: 'Return due if you (or your spouse) had self-employment income.' });
     [[3, 15], [6, 15], [9, 15], [12, 15]].forEach(([m, d]) => rows.push({ m, d, label: 'Quarterly instalment', tag: 'instalment', note: 'CRA instalment payment, if required.' }));
   }
-
   const oneDay = 86400000;
   return rows
-    .map((r) => {
-      const date = nextOccur(r.m, r.d);
-      return { label: r.label, tag: r.tag, note: r.note, date: date.toISOString().slice(0, 10), daysAway: Math.round((date - today) / oneDay) };
-    })
+    .map((r) => { const date = nextOccur(r.m, r.d); return { label: r.label, tag: r.tag, note: r.note, date: date.toISOString().slice(0, 10), daysAway: Math.round((date - today) / oneDay) }; })
     .sort((a, b) => a.daysAway - b.daysAway)
     .slice(0, 6);
 }
@@ -1279,6 +1366,7 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
   // 4) Personalized checklist + planning tools (QOL).
   const checklist = buildChecklist(ret, documents);
   const rrspMoves = optimizeRRSP(ret, health.context.estimatedRrspRoom);
+  const accounts = accountPriority(ret);
   const benefits = estimateBenefits(ret);
   const calendar = taxCalendar(ret.profile);
 
@@ -1296,8 +1384,32 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
     advisory,
     checklist,
     rrspMoves,
+    accounts,
     benefits,
     calendar,
+  };
+}
+
+/**
+ * Fast "what-if" recomputation for the live planner. Applies overrides on top
+ * of the user's real profile + documents and returns a compact position.
+ */
+function simulate({ profile = {}, financial = {}, documents = [], year, overrides = {} } = {}) {
+  const taxYear = year || profile.year || 2024;
+  const scan = scanDocuments(documents);
+  const merged = mergeFinancial(financial, scan.financial);
+  const input = Object.assign({}, profile, merged, { year: taxYear });
+  input.rrspDeduction = (input.rrspDeduction || 0) + (+overrides.rrsp || 0);
+  input.fhsaDeduction = (input.fhsaDeduction || 0) + (+overrides.fhsa || 0);
+  input.donations = (input.donations || 0) + (+overrides.donations || 0);
+  input.employmentIncome = (input.employmentIncome || 0) + (+overrides.extraIncome || 0);
+  input.capitalGains = (input.capitalGains || 0) + (+overrides.capitalGains || 0);
+  const ret = computeReturn(input);
+  return {
+    refundOrBalance: ret.refundOrBalance, isRefund: ret.isRefund,
+    marginalRate: ret.marginalRate, averageRate: ret.averageRate,
+    taxableIncome: ret.taxableIncome, totalTax: ret.tax.total,
+    bracketFederal: ret.bracketFederal, cashflow: ret.cashflow,
   };
 }
 
@@ -1340,7 +1452,7 @@ function localApi(path, opts) {
   var method = opts.method || 'GET';
   var body = opts.body || {};
 
-  if (path === '/meta') return { provinces: PROVINCE_NAMES, slipTypes: slipTypes, year: 2024 };
+  if (path === '/meta') return { provinces: PROVINCE_NAMES, slipTypes: slipTypes, years: (typeof AVAILABLE_YEARS !== 'undefined' ? AVAILABLE_YEARS : [2024]), year: 2024 };
 
   if (path === '/auth/register') {
     var email = (body.email || '').toLowerCase().trim();
@@ -1391,6 +1503,21 @@ function localApi(path, opts) {
     me.audit = audit; save(); return { audit: audit };
   }
   if (path === '/audit' && method === 'GET') return { audit: me.audit || null };
+
+  if (path === '/simulate' && method === 'POST') {
+    var docs = me.documents.map(function (d) { return { type: d.type, fields: d.fields, text: d.text }; });
+    var result = simulate({ profile: me.profile, documents: docs, year: me.profile.year, overrides: (body && body.overrides) || {} });
+    return { result: result };
+  }
+  if (path === '/export' && method === 'GET') {
+    return { exportedAt: new Date().toISOString(), account: publicUser(me), profile: me.profile, documents: me.documents, audit: me.audit };
+  }
+  if (path === '/account' && method === 'DELETE') {
+    var users = usersDB(), idx = emailIndex();
+    delete users[me.id]; delete idx[me.email];
+    saveUsers(users); LS.set('onyx_email', idx);
+    return { ok: true };
+  }
 
   throw new Error('Unknown route: ' + path);
 }

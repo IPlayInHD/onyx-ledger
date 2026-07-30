@@ -23,7 +23,7 @@ function localApi(path, opts) {
   var method = opts.method || 'GET';
   var body = opts.body || {};
 
-  if (path === '/meta') return { provinces: PROVINCE_NAMES, slipTypes: slipTypes, year: 2024 };
+  if (path === '/meta') return { provinces: PROVINCE_NAMES, slipTypes: slipTypes, years: (typeof AVAILABLE_YEARS !== 'undefined' ? AVAILABLE_YEARS : [2024]), year: 2024 };
 
   if (path === '/auth/register') {
     var email = (body.email || '').toLowerCase().trim();
@@ -74,6 +74,21 @@ function localApi(path, opts) {
     me.audit = audit; save(); return { audit: audit };
   }
   if (path === '/audit' && method === 'GET') return { audit: me.audit || null };
+
+  if (path === '/simulate' && method === 'POST') {
+    var docs = me.documents.map(function (d) { return { type: d.type, fields: d.fields, text: d.text }; });
+    var result = simulate({ profile: me.profile, documents: docs, year: me.profile.year, overrides: (body && body.overrides) || {} });
+    return { result: result };
+  }
+  if (path === '/export' && method === 'GET') {
+    return { exportedAt: new Date().toISOString(), account: publicUser(me), profile: me.profile, documents: me.documents, audit: me.audit };
+  }
+  if (path === '/account' && method === 'DELETE') {
+    var users = usersDB(), idx = emailIndex();
+    delete users[me.id]; delete idx[me.email];
+    saveUsers(users); LS.set('onyx_email', idx);
+    return { ok: true };
+  }
 
   throw new Error('Unknown route: ' + path);
 }

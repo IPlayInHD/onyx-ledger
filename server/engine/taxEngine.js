@@ -202,6 +202,23 @@ function computeReturn(rawProfile) {
   const marginalRate = round((totalTaxFn(taxableIncome + 1000) - totalTaxFn(taxableIncome)) / 1000 * 100) / 100;
   const averageRate = totalIncome > 0 ? round((incomeTax / totalIncome) * 100) / 100 : 0;
 
+  // Federal bracket position (for visualization) + cash-flow breakdown.
+  let bracketFederal = null; let lo = 0;
+  for (const b of fed.brackets) {
+    if (taxableIncome <= b.upTo) { bracketFederal = { rate: b.rate, from: lo, upTo: b.upTo === Infinity ? null : b.upTo, toNext: b.upTo === Infinity ? null : round(b.upTo - taxableIncome) }; break; }
+    lo = b.upTo;
+  }
+  const cpp2 = 0; // (CPP is already summed in `cpp`)
+  const takeHome = round(totalIncome - incomeTax - cpp - ei);
+  const cashflow = {
+    gross: round(totalIncome),
+    federalTax: round(federalTax),
+    provincialTax: round(provincialTax),
+    cpp: round(cpp), ei: round(ei),
+    takeHome,
+    takeHomePct: totalIncome > 0 ? round((takeHome / totalIncome) * 100) / 100 : 0,
+  };
+
   return {
     year: p.year,
     province: p.province,
@@ -254,6 +271,8 @@ function computeReturn(rawProfile) {
     isRefund: refundOrBalance >= 0,
     marginalRate,
     averageRate,
+    bracketFederal,
+    cashflow,
     profile: p,
   };
 }
