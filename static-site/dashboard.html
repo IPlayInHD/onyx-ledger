@@ -69,6 +69,40 @@
   .empty .serif{font-family:var(--serif);font-size:1.3rem;color:var(--ink-2);margin-bottom:.4rem}
   .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:sp 1s linear infinite;vertical-align:-3px}
   @keyframes sp{to{transform:rotate(360deg)}}
+  /* QOL: checklist */
+  .cl-bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+  .cl-fill{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent-2),var(--accent));transition:width 1s cubic-bezier(.2,.7,.2,1)}
+  .cl-legend{font-family:var(--mono);font-size:.72rem;color:var(--ink-3);margin:.5rem 0 1rem;display:flex;gap:.7rem;flex-wrap:wrap}
+  .cl-legend .have{color:var(--pos)}.cl-legend .add{color:var(--warn)}.cl-legend .opt{color:var(--info)}
+  .checklist2{display:flex;flex-direction:column}
+  .cl-row{display:flex;align-items:flex-start;gap:.8rem;padding:.7rem 0;border-bottom:1px dashed var(--line)}
+  .cl-row:last-child{border-bottom:0}
+  .cl-ic{width:20px;height:20px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:.7rem;font-weight:800;margin-top:.1em}
+  .cl-row.provided .cl-ic{background:color-mix(in oklab,var(--pos) 24%,transparent);color:var(--pos)}
+  .cl-row.missing .cl-ic{background:color-mix(in oklab,var(--warn) 24%,transparent);color:var(--warn)}
+  .cl-row.suggested .cl-ic{background:color-mix(in oklab,var(--info) 22%,transparent);color:var(--info)}
+  .cl-b{flex:1}.cl-t{font-weight:600;font-size:.9rem}.cl-w{font-size:.82rem;color:var(--ink-2);margin-top:.1rem}
+  .cl-tag{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);flex:none;padding-top:.2em}
+  .cl-row.missing .cl-tag{color:var(--warn)}.cl-row.provided .cl-tag{color:var(--pos)}
+  /* benefits */
+  .ben-note{font-size:.78rem;color:var(--ink-3);margin:-.1rem 0 .5rem 1.4rem}
+  /* calendar */
+  .cal-row{display:flex;align-items:center;gap:1rem;padding:.7rem 0;border-bottom:1px dashed var(--line)}
+  .cal-row:last-child{border-bottom:0}
+  .cal-d{flex:none;width:58px;text-align:center;border:1px solid var(--line-2);border-radius:10px;padding:.4rem 0;display:flex;flex-direction:column;line-height:1}
+  .cal-d.soon{border-color:var(--accent);background:color-mix(in oklab,var(--accent) 10%,transparent)}
+  .cal-days{font-family:var(--serif);font-size:1.3rem;font-weight:600}.cal-u{font-family:var(--mono);font-size:.56rem;letter-spacing:.1em;color:var(--ink-3);text-transform:uppercase}
+  .cal-b{flex:1}.cal-t{font-weight:600;font-size:.9rem}.cal-n{font-size:.8rem;color:var(--ink-2)}
+  .cal-date{font-size:.74rem;color:var(--ink-3);flex:none}
+  /* report toolbar + theme toggle */
+  .rpt-tools{display:flex;gap:.6rem;justify-content:flex-end;margin:1.4rem 0 -.4rem}
+  .themebtn{background:none;border:1px solid var(--line-2);border-radius:99px;width:34px;height:34px;display:grid;place-items:center;color:var(--ink-2)}
+  .themebtn:hover{border-color:var(--accent);color:var(--accent)}
+  @media print{
+    .topbar,.intro .btn,.runstatus,.rpt-tools,#profileCard,#docsCard,.no-print{display:none!important}
+    body{background:#fff;color:#000}.card{break-inside:avoid;border-color:#ddd}
+    .sectitle{margin-top:1rem}
+  }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
@@ -78,6 +112,8 @@
   <a class="brand" href="index.html"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
   <span class="sp"></span>
   <span class="who" id="who"></span>
+  <a class="btn btn-ghost btn-sm" href="documents.html">Document guide</a>
+  <button class="themebtn" id="themeToggle" title="Toggle light / dark" aria-label="Toggle light or dark theme">◐</button>
   <button class="btn btn-ghost btn-sm" id="signout">Sign out</button>
 </div></header>
 
@@ -92,7 +128,7 @@
     <button class="btn btn-primary" id="runBtn">Run my audit</button>
   </div>
 
-  <div class="grid g2">
+  <div class="grid g2 no-print">
     <!-- PROFILE -->
     <div class="card"><div class="card-h">Your profile <span class="badge">drives eligibility</span></div>
       <div class="card-b">
@@ -102,6 +138,16 @@
           </label>
           <label class="field">Tax year
             <select id="year"><option value="2024">2024</option></select>
+          </label>
+          <label class="field">Employment type
+            <select id="employmentType">
+              <option value="employed">Employed (T4)</option>
+              <option value="self-employed">Self-employed</option>
+              <option value="mixed">Mixed (both)</option>
+              <option value="retired">Retired</option>
+              <option value="student">Student</option>
+              <option value="other">Other / none</option>
+            </select>
           </label>
           <label class="field">Age
             <input id="age" type="number" min="0" max="120" placeholder="e.g. 34" />
@@ -131,6 +177,10 @@
           <label class="check"><input id="firstTimeHomeBuyer" type="checkbox" /> First-time home buyer</label>
           <label class="check"><input id="ownsHome" type="checkbox" /> I already own a home</label>
           <label class="check"><input id="disability" type="checkbox" /> Eligible for the disability tax credit</label>
+          <label class="check"><input id="hasInvestments" type="checkbox" /> I have investments (non-registered)</label>
+          <label class="check"><input id="hasRentalIncome" type="checkbox" /> I earn rental income</label>
+          <label class="check"><input id="hasCrypto" type="checkbox" /> I hold or trade crypto</label>
+          <label class="check"><input id="hasForeignIncome" type="checkbox" /> I have foreign income/assets</label>
         </div>
         <button class="btn btn-ghost btn-sm btn-block" id="saveProfile" style="margin-top:1rem">Save profile</button>
       </div>
@@ -168,6 +218,7 @@ const money = ONYX.money;
 
 let META = { provinces: {}, slipTypes: {} };
 let DOCS = [];
+let lastAudit = null;
 
 // client-side enterable fields per slip type
 const FIELD_LABELS = {
@@ -216,7 +267,8 @@ async function loadProfile() {
   ['age','spouseNetIncome','dependants','rrspRoom','tfsaRoom'].forEach(k => { if (p[k] != null) $(k).value = p[k]; });
   if (p.province) $('province').value = p.province;
   if (p.maritalStatus) $('maritalStatus').value = p.maritalStatus;
-  ['isStudent','firstTimeHomeBuyer','ownsHome','disability'].forEach(k => { $(k).checked = !!p[k]; });
+  if (p.employmentType) $('employmentType').value = p.employmentType;
+  ['isStudent','firstTimeHomeBuyer','ownsHome','disability','hasInvestments','hasRentalIncome','hasCrypto','hasForeignIncome'].forEach(k => { $(k).checked = !!p[k]; });
 }
 
 async function saveProfile() {
@@ -224,10 +276,13 @@ async function saveProfile() {
   const patch = {
     province: $('province').value, year: 2024,
     age: num('age'), maritalStatus: $('maritalStatus').value,
+    employmentType: $('employmentType').value,
     spouseNetIncome: num('spouseNetIncome') || 0, dependants: num('dependants') || 0,
     rrspRoom: num('rrspRoom'), tfsaRoom: num('tfsaRoom'),
     isStudent: $('isStudent').checked, firstTimeHomeBuyer: $('firstTimeHomeBuyer').checked,
     ownsHome: $('ownsHome').checked, disability: $('disability').checked,
+    hasInvestments: $('hasInvestments').checked, hasRentalIncome: $('hasRentalIncome').checked,
+    hasCrypto: $('hasCrypto').checked, hasForeignIncome: $('hasForeignIncome').checked,
   };
   await ONYX.api('/profile', { method:'PUT', body: patch });
   flash('saveProfile', 'Saved ✓');
@@ -309,7 +364,39 @@ function renderReport(a) {
 
   const docs = a.documents.map(d => `<div class="doc-row"><div class="t"><div class="nm">${esc(d.name||d.label)}</div><div class="mt">${d.type} · found: ${(d.foundFields||[]).join(', ')||'—'}</div></div><span class="pill ${d.status}">${d.status.replace('_',' ')}</span><span class="mv" style="font-family:var(--mono);font-size:.72rem;color:var(--ink-3)">${Math.round((d.confidence||0)*100)}%</span></div>`).join('');
 
+  // ---- QOL builders ----
+  lastAudit = a;
+  const cl = a.checklist || { items:[], completeness:100, counts:{provided:0,missing:0,suggested:0} };
+  const clOrder = { missing:0, suggested:1, provided:2 };
+  const clItems = [...cl.items].sort((x,y)=>clOrder[x.status]-clOrder[y.status]).map(it => {
+    const icon = it.status==='provided'?'✓':it.status==='missing'?'✕':'+';
+    const tag = it.status==='provided'?'have it':it.status==='missing'?'add this':'optional';
+    return `<div class="cl-row ${it.status}"><span class="cl-ic">${icon}</span><div class="cl-b"><div class="cl-t">${esc(it.label)}</div><div class="cl-w">${esc(it.why)}</div></div><span class="cl-tag">${tag}</span></div>`;
+  }).join('');
+  const checklistHTML = cl.items.length ? `
+  <h2 class="sectitle">Documents to add <span class="k" style="font-family:var(--mono)">· ${cl.completeness}% complete</span></h2>
+  <div class="card"><div class="card-b">
+    <div class="cl-bar"><span class="cl-fill" style="width:0" data-w="${cl.completeness}"></span></div>
+    <div class="cl-legend"><span class="have">✓ ${cl.counts.provided} provided</span><span class="add">✕ ${cl.counts.missing} to add</span><span class="opt">+ ${cl.counts.suggested} optional</span></div>
+    <div class="checklist2">${clItems}</div>
+  </div></div>` : '';
+
+  const rrspHTML = (a.rrspMoves && a.rrspMoves.length) ? `<h2 class="sectitle">Smart RRSP moves</h2>` + a.rrspMoves.map(m =>
+    `<div class="opp p1"><div class="body"><span class="chip">RRSP optimizer</span><h4>${esc(m.label)}</h4><p>${esc(m.note)} New estimated ${m.newRefund>=0?'refund':'balance owing'}: <b>${money(Math.abs(m.newRefund))}</b>.</p></div><div class="impact"><span class="n">+${money(Math.abs(m.delta))}</span><span class="l">to refund</span></div></div>`).join('') : '';
+
+  const ben = a.benefits || { items:[], total:0 };
+  const benefitsHTML = ben.items.length ? `<h2 class="sectitle">Government benefits you may receive <span class="k" style="font-family:var(--mono)">· ~${money(ben.total)}/yr est.</span></h2>
+  <div class="card"><div class="card-b found">${ben.items.map(b => `<div class="f"><span class="ic-ok">◆</span> ${esc(b.label)} <span class="v">~${money(b.amount)}/yr</span></div><div class="ben-note">${esc(b.note)}</div>`).join('')}
+    <p class="disc" style="margin-top:.6rem">Rough estimates of refundable benefits, paid separately from your tax refund. The CRA determines actual amounts from your filed return.</p></div></div>` : '';
+
+  const calHTML = (a.calendar && a.calendar.length) ? `<h2 class="sectitle">Your tax calendar</h2>
+  <div class="card"><div class="card-b">${a.calendar.map(c => `<div class="cal-row"><div class="cal-d ${c.daysAway<=30?'soon':''}"><span class="cal-days">${c.daysAway}</span><span class="cal-u">days</span></div><div class="cal-b"><div class="cal-t">${esc(c.label)}</div><div class="cal-n">${esc(c.note)}</div></div><span class="cal-date mono">${c.date}</span></div>`).join('')}</div></div>` : '';
+
   $('report').innerHTML = `
+  <div class="rpt-tools no-print">
+    <button class="btn btn-ghost btn-sm" id="copyBtn">Copy summary</button>
+    <button class="btn btn-ghost btn-sm" id="printBtn">Print / Save PDF</button>
+  </div>
   <h2 class="sectitle">Tax position · ${r.provinceName} ${r.year}</h2>
   <div class="card glow"><div class="card-b"><div class="hero-pos">
     <div>
@@ -337,9 +424,11 @@ function renderReport(a) {
     </div></div>
     <div class="card"><div class="card-h">What ONYX found</div><div class="card-b found">${found || '<p class="hint">No figures extracted yet.</p>'}</div></div>
   </div>
+  ${checklistHTML}
 
   <h2 class="sectitle">Opportunities to lower your tax <span class="k" style="font-family:var(--mono)">· ${a.opportunities.length} found</span></h2>
   ${opps || '<div class="card"><div class="empty">No specific opportunities detected — your position looks well optimized.</div></div>'}
+  ${rrspHTML}
 
   <h2 class="sectitle">Advisory summary</h2>
   <div class="card glow"><div class="card-b">
@@ -347,17 +436,46 @@ function renderReport(a) {
     ${adv.priorityActions && adv.priorityActions.length ? '<div class="actions-list">'+adv.priorityActions.map((t,i)=>`<div class="a"><span class="n">0${i+1}</span> ${esc(t)}</div>`).join('')+'</div>' : ''}
     <p class="disc">${esc(adv.disclaimer)}</p>
   </div></div>
+  ${benefitsHTML}
+  ${calHTML}
 
   <h2 class="sectitle">Documents scanned</h2>
   <div class="card"><div class="card-b">${docs || '<p class="hint">No documents.</p>'}</div></div>`;
 
-  // animate dial + meters
+  // animate dial + meters + completeness bar
   requestAnimationFrame(() => {
     const d = $('hdial'); if (d) d.style.strokeDashoffset = off;
     document.querySelectorAll('.mf').forEach(m => m.style.width = m.dataset.w + '%');
+    document.querySelectorAll('.cl-fill').forEach(m => m.style.width = m.dataset.w + '%');
   });
+  // QOL toolbar handlers
+  const pb = $('printBtn'); if (pb) pb.addEventListener('click', () => window.print());
+  const cb = $('copyBtn'); if (cb) cb.addEventListener('click', copySummary);
   $('introSub').textContent = 'Your latest audit is shown below. Edit your profile or documents and re-run anytime.';
 }
+
+function copySummary() {
+  const a = lastAudit; if (!a) return;
+  const r = a.return, L = [];
+  L.push(`ONYX LEDGER — TAX AUDIT SUMMARY (${r.provinceName} ${r.year})`);
+  L.push(`Generated ${new Date(a.generatedAt).toLocaleDateString()}  ·  Educational estimate, not tax advice`);
+  L.push('');
+  L.push(`${r.isRefund ? 'Estimated refund' : 'Estimated balance owing'}: ${money(r.refundOrBalance)}`);
+  L.push(`Total income: ${money(r.income.total)}  |  Taxable: ${money(r.taxableIncome)}  |  Total tax: ${money(r.tax.total)}`);
+  L.push(`Marginal rate: ${(r.marginalRate*100).toFixed(1)}%  |  Average rate: ${(r.averageRate*100).toFixed(1)}%`);
+  L.push(`Tax Health: ${a.health.score}/100 (${a.health.band.label})`);
+  if (a.checklist) L.push(`Document completeness: ${a.checklist.completeness}% — ${a.checklist.counts.missing} to add`);
+  L.push('');
+  L.push('TOP OPPORTUNITIES:');
+  a.opportunities.slice(0,6).forEach(o => L.push(`  • ${o.title}${o.impact?` (~${money(o.impact)})`:''} [${o.citation||''}]`));
+  if (a.benefits && a.benefits.items.length) { L.push(''); L.push('ESTIMATED BENEFITS (paid separately):'); a.benefits.items.forEach(b => L.push(`  • ${b.label}: ~${money(b.amount)}/yr`)); }
+  L.push(''); L.push(a.advisory.disclaimer);
+  const text = L.join('\n');
+  const done = () => flash('copyBtn', 'Copied ✓');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done){ const t=document.createElement('textarea'); t.value=text; document.body.appendChild(t); t.select(); try{document.execCommand('copy');}catch(_){} t.remove(); done(); }
 
 /* ---------- utils + wiring ---------- */
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -369,6 +487,19 @@ $('runBtn').addEventListener('click', runAudit);
 $('addManual').addEventListener('click', addManual);
 $('mType').addEventListener('change', renderManualFields);
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-sample]'); if (b && !b.disabled) addSample(b.dataset.sample); });
+
+// theme toggle (persists; onyx.css honours [data-theme])
+(function(){
+  const saved = localStorage.getItem('onyx_theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+  $('themeToggle').addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme');
+    const isDark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    const next = isDark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('onyx_theme', next);
+  });
+})();
 
 boot();
 </script>

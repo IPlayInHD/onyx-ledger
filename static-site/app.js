@@ -1,6 +1,4 @@
-/* ONYX Ledger — static build. The full Canadian tax audit engine runs in your
-   browser; accounts & audits are saved in this browser via localStorage.
-   No server required. Generated from the tested engine in server/engine/. */
+/* ONYX Ledger — static build (engine runs in the browser; data in localStorage). */
 (function(){
 'use strict';
 
@@ -276,6 +274,12 @@ function normalizeProfile(p = {}) {
     disability: !!p.disability,
     firstTimeHomeBuyer: !!p.firstTimeHomeBuyer,
     ownsHome: !!p.ownsHome,
+    // context flags (do not affect the tax calc; drive the checklist & calendar)
+    employmentType: p.employmentType || 'employed',
+    hasInvestments: !!p.hasInvestments,
+    hasRentalIncome: !!p.hasRentalIncome,
+    hasForeignIncome: !!p.hasForeignIncome,
+    hasCrypto: !!p.hasCrypto,
     // income
     employmentIncome: n(p.employmentIncome),
     selfEmploymentIncome: n(p.selfEmploymentIncome),
@@ -1039,6 +1043,202 @@ function buildAdvisory(ret, health, opportunities) {
 }
 
 
+/* ===== engine/checklist.js ===== */
+/**
+ * ONYX Intelligence — personalized document checklist
+ * =========================================================================
+ * Compares the taxpayer's situation (profile) against what they've actually
+ * provided (extracted figures + uploaded document types) to flag the records
+ * ONYX still needs — the "documents to add" an auditor would ask for.
+ * =========================================================================
+ */
+
+function buildChecklist(ret, documents) {
+  const p = ret.profile;
+  const docTypes = new Set((documents || []).map((d) => (d.type || '').toUpperCase()));
+  const has = (t) => docTypes.has(t);
+  const i = ret.income, c = ret.credits, d = ret.deductions;
+
+  const emp = p.employmentType || 'employed';
+  const isEmployed = emp === 'employed' || emp === 'mixed';
+  const isSelf = emp === 'self-employed' || emp === 'mixed';
+  const isRetired = emp === 'retired' || (p.age && p.age >= 65 && i.pension > 0);
+
+  const item = (id, label, applies, provided, required, why) =>
+    applies ? { id, label, why, status: provided ? 'provided' : required ? 'missing' : 'suggested' } : null;
+
+  const items = [
+    item('t4', 'Employment slips (T4)', isEmployed, i.employment > 0 || has('T4'), true,
+      'Your T4 reports employment income and the tax already withheld.'),
+    item('self', 'Self-employment records', isSelf, i.selfEmployment > 0 || has('T4A'), true,
+      'Business income and expenses — invoices, receipts, and payment-processor reports.'),
+    item('pension', 'Pension slips', isRetired, i.pension > 0, isRetired,
+      'T4A(P)/OAS and any private pension statements.'),
+    item('invest', 'Investment slips (T5 / T3)', p.hasInvestments, i.interest > 0 || i.eligibleDividendsGrossed > 0 || i.nonEligibleDividendsGrossed > 0 || has('T5') || has('T3'), true,
+      'Interest, dividends, and trust income for the year.'),
+    item('t5008', 'Securities transactions (T5008)', p.hasInvestments, i.taxableCapitalGains > 0 || has('T5008'), false,
+      'If you sold investments, ONYX needs the buy/sell records to compute capital gains.'),
+    item('crypto', 'Crypto transaction exports', p.hasCrypto, i.taxableCapitalGains > 0 || i.other > 0, true,
+      'Exchange statements and wallet history — crypto disposals are taxable.'),
+    item('rental', 'Rental income & expense records', p.hasRentalIncome, i.other > 0, true,
+      'Rent received plus mortgage interest, property tax, and maintenance.'),
+    item('foreign', 'Foreign income & tax paid', p.hasForeignIncome, i.other > 0, true,
+      'Foreign slips and currency-conversion records; foreign tax paid may be creditable.'),
+    item('rrsp', 'RRSP contribution receipts', i.employment + i.selfEmployment > 0, d.rrsp > 0, false,
+      'Contributions lower your taxable income dollar-for-dollar.'),
+    item('fhsa', 'FHSA contribution receipts', p.firstTimeHomeBuyer && !p.ownsHome, d.fhsa > 0, false,
+      'Deductible like an RRSP, and withdrawals for a first home are tax-free.'),
+    item('tuition', 'Tuition certificate (T2202)', p.isStudent, c.tuition > 0, true,
+      'One of the most commonly missed credits for students.'),
+    item('medical', 'Medical receipts', true, p.medicalExpenses > 0, false,
+      'Eligible costs above 3% of net income become a credit.'),
+    item('childcare', 'Child-care receipts', p.dependants > 0, p.childCare > 0, false,
+      'Deductible so you can work or study — usually claimed by the lower-income spouse.'),
+    item('donations', 'Donation receipts', true, p.donations > 0, false,
+      'The credit rate jumps from 15% to 29% on amounts over $200.'),
+    item('disability', 'Disability certificate (T2201)', p.disability, p.disability, false,
+      'The Disability Tax Credit requires a certified T2201 on file with the CRA.'),
+    item('carryforward', 'Prior Notice of Assessment', true, p.rrspRoom != null || p.tfsaRoom != null, false,
+      'Your NOA confirms RRSP/TFSA room and any carryforward balances — it improves accuracy.'),
+    item('spouse', "Spouse's income details", p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw', p.spouseNetIncome != null, false,
+      "Needed to optimize spousal credits, pension splitting, and family claims."),
+  ].filter(Boolean);
+
+  const provided = items.filter((x) => x.status === 'provided').length;
+  const missing = items.filter((x) => x.status === 'missing').length;
+  const suggested = items.filter((x) => x.status === 'suggested').length;
+  const completeness = items.length ? Math.round((provided / items.length) * 100) : 100;
+
+  return { items, completeness, counts: { provided, missing, suggested, applicable: items.length } };
+}
+
+
+/* ===== engine/planner.js ===== */
+/**
+ * ONYX Intelligence — planning tools (QOL features)
+ *   - optimizeRRSP : solve the RRSP contribution to erase a balance owing or
+ *                    drop into a lower tax bracket (recomputed with the engine)
+ *   - estimateBenefits : rough estimates of refundable government benefits
+ *                    (GST/HST credit, Canada Carbon Rebate, Canada Child Benefit)
+ *   - taxCalendar : the taxpayer's next key CRA deadlines, with live countdowns
+ * All estimates are clearly labelled; benefits use simplified formulas.
+ * =========================================================================
+ */
+
+
+const r0 = (n) => Math.round(n);
+const ceilTo = (n, step) => Math.ceil(n / step) * step;
+
+/** Solve useful RRSP contributions using the real engine. */
+function optimizeRRSP(ret, estRoom) {
+  const base = ret.profile;
+  const roomLeft = Math.max(0, (estRoom || 0) - base.rrspDeduction);
+  const moves = [];
+  if (roomLeft < 500 || (base.employmentIncome + base.selfEmploymentIncome) <= 0) return moves;
+
+  const recompute = (extra) =>
+    computeReturn(Object.assign({}, base, { rrspDeduction: base.rrspDeduction + Math.min(extra, roomLeft) }));
+
+  // 1) Erase a balance owing.
+  if (!ret.isRefund && ret.refundOrBalance < -1) {
+    const guess = Math.min(roomLeft, ceilTo(Math.abs(ret.refundOrBalance) / Math.max(ret.marginalRate, 0.15), 100));
+    const after = recompute(guess);
+    moves.push({
+      type: 'erase', contribution: r0(Math.min(guess, roomLeft)),
+      newRefund: after.refundOrBalance,
+      label: `Contribute about $${r0(Math.min(guess, roomLeft)).toLocaleString('en-CA')} to wipe out your balance owing`,
+      note: 'Brings your estimated balance close to zero at your marginal rate.',
+    });
+  }
+
+  // 2) Drop into the next-lower federal bracket.
+  const thresholds = [55867, 111733, 173205, 246752];
+  const rateAbove = { 55867: '20.5%', 111733: '26%', 173205: '29%', 246752: '33%' };
+  const rateBelow = { 55867: '15%', 111733: '20.5%', 173205: '26%', 246752: '29%' };
+  const ti = ret.taxableIncome;
+  const th = thresholds.filter((t) => t < ti - 1).pop();
+  if (th) {
+    const need = ceilTo(ti - th, 100);
+    if (need > 0 && need <= roomLeft) {
+      const after = recompute(need);
+      moves.push({
+        type: 'bracket', contribution: r0(need), newRefund: after.refundOrBalance,
+        label: `Contribute $${r0(need).toLocaleString('en-CA')} to drop from the ${rateAbove[th]} bracket into the ${rateBelow[th]} bracket`,
+        note: 'Lowers the tax rate on your top dollars of income.',
+      });
+    }
+  }
+
+  return moves.map((m) => Object.assign(m, { delta: r0(m.newRefund - ret.refundOrBalance), roomLeft: r0(roomLeft) }));
+}
+
+/** Rough estimates of refundable government benefits (paid separately from a refund). */
+function estimateBenefits(ret) {
+  const p = ret.profile;
+  const net = ret.netIncome;
+  const kids = p.dependants || 0;
+  const married = p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw';
+  const out = [];
+
+  // GST/HST credit (approximate 2024 base year)
+  const gstBase = 340 + (married ? 179 : 0) + kids * 179;
+  const gst = Math.max(0, gstBase - 0.05 * Math.max(0, net - 45000));
+  if (gst > 20) out.push({ id: 'gst', label: 'GST/HST credit', amount: r0(gst), note: 'Quarterly, tax-free — for lower-income individuals and families.' });
+
+  // Canada Carbon Rebate (fuel-charge provinces only; flat, not income-tested)
+  const CCR = { AB: 900, SK: 752, MB: 600, ON: 560, NB: 380, NS: 412, PE: 440, NL: 596 };
+  if (CCR[p.province]) {
+    const b = CCR[p.province];
+    const ccr = b + (married ? b * 0.5 : 0) + kids * b * 0.25;
+    out.push({ id: 'ccr', label: 'Canada Carbon Rebate', amount: r0(ccr), note: 'Quarterly, tax-free — automatic when you file in an eligible province.' });
+  }
+
+  // Canada Child Benefit (approximate 2024-25)
+  if (kids > 0) {
+    let ccb = kids * 6570;
+    const rate = kids === 1 ? 0.07 : kids === 2 ? 0.135 : kids === 3 ? 0.19 : 0.23;
+    ccb -= rate * Math.max(0, net - 36502);
+    ccb = Math.max(0, ccb);
+    if (ccb > 50) out.push({ id: 'ccb', label: 'Canada Child Benefit', amount: r0(ccb), note: 'Monthly, tax-free — based on family net income and number of children.' });
+  }
+
+  return { items: out, total: r0(out.reduce((s, x) => s + x.amount, 0)) };
+}
+
+/** The taxpayer's next key CRA deadlines from today, with countdowns. */
+function taxCalendar(profile, now) {
+  const today = now ? new Date(now) : new Date();
+  today.setHours(0, 0, 0, 0);
+  const emp = (profile && profile.employmentType) || 'employed';
+  const isSelf = emp === 'self-employed' || emp === 'mixed';
+
+  const nextOccur = (month, day) => {
+    let d = new Date(today.getFullYear(), month - 1, day);
+    if (d < today) d = new Date(today.getFullYear() + 1, month - 1, day);
+    return d;
+  };
+  const rows = [
+    { m: 1, d: 1, label: 'New TFSA, FHSA & RRSP room', tag: 'planning', note: 'A fresh year of contribution room opens.' },
+    { m: 3, d: 1, label: 'RRSP contribution deadline', tag: 'rrsp', note: 'Last day to contribute for the prior tax year.' },
+    { m: 4, d: 30, label: 'Filing deadline & balance due', tag: 'filing', note: 'Return due for most individuals; any balance owing is due today.' },
+    { m: 12, d: 31, label: 'Year-end tax moves & donations', tag: 'planning', note: 'Last day for donations and most in-year tax moves.' },
+  ];
+  if (isSelf) {
+    rows.push({ m: 6, d: 15, label: 'Self-employed filing deadline', tag: 'filing', note: 'Return due if you (or your spouse) had self-employment income.' });
+    [[3, 15], [6, 15], [9, 15], [12, 15]].forEach(([m, d]) => rows.push({ m, d, label: 'Quarterly instalment', tag: 'instalment', note: 'CRA instalment payment, if required.' }));
+  }
+
+  const oneDay = 86400000;
+  return rows
+    .map((r) => {
+      const date = nextOccur(r.m, r.d);
+      return { label: r.label, tag: r.tag, note: r.note, date: date.toISOString().slice(0, 10), daysAway: Math.round((date - today) / oneDay) };
+    })
+    .sort((a, b) => a.daysAway - b.daysAway)
+    .slice(0, 6);
+}
+
+
 /* ===== engine/index.js ===== */
 /**
  * ONYX Intelligence — engine entry point
@@ -1076,6 +1276,12 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
   const found = whatWeFound(ret, scan.summary);
   const advisory = buildAdvisory(ret, health, opportunities);
 
+  // 4) Personalized checklist + planning tools (QOL).
+  const checklist = buildChecklist(ret, documents);
+  const rrspMoves = optimizeRRSP(ret, health.context.estimatedRrspRoom);
+  const benefits = estimateBenefits(ret);
+  const calendar = taxCalendar(ret.profile);
+
   return {
     generatedAt: new Date().toISOString(),
     taxYear,
@@ -1088,6 +1294,10 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
     found,
     opportunities,
     advisory,
+    checklist,
+    rrspMoves,
+    benefits,
+    calendar,
   };
 }
 
@@ -1157,7 +1367,7 @@ function localApi(path, opts) {
   if (path === '/me') return { user: publicUser(me) };
   if (path === '/profile' && method === 'GET') return { profile: me.profile };
   if (path === '/profile' && method === 'PUT') {
-    ['province','year','age','maritalStatus','spouseNetIncome','dependants','isStudent','disability','firstTimeHomeBuyer','ownsHome','rrspRoom','tfsaRoom']
+    ['province','year','age','maritalStatus','spouseNetIncome','dependants','isStudent','disability','firstTimeHomeBuyer','ownsHome','rrspRoom','tfsaRoom','employmentType','hasInvestments','hasRentalIncome','hasForeignIncome','hasCrypto']
       .forEach(function (f) { if (f in body) me.profile[f] = body[f]; });
     save(); return { profile: me.profile };
   }

@@ -84,6 +84,40 @@ const textAudit = runAudit({
 near(textAudit.return.income.employment, 72500, 0.01, 'OCR text scan pulled Box 14 employment income');
 near(textAudit.return.taxWithheld, 12340, 0.01, 'OCR text scan pulled Box 22 tax withheld');
 
+// ---- 8b. QOL: checklist, RRSP optimizer, benefits, calendar ----
+const { buildChecklist } = require('../engine/checklist');
+const { optimizeRRSP, estimateBenefits, taxCalendar } = require('../engine/planner');
+
+// Self-employed investor with no docs → checklist flags missing self-employment + investment records
+const selfAudit = runAudit({
+  profile: { province: 'ON', year: 2024, employmentType: 'self-employed', hasInvestments: true, maritalStatus: 'single' },
+  financial: { selfEmploymentIncome: 0 },
+});
+ok(selfAudit.checklist.items.some((x) => x.id === 'self' && x.status === 'missing'), 'checklist flags missing self-employment records');
+ok(selfAudit.checklist.items.some((x) => x.id === 'invest' && x.status === 'missing'), 'checklist flags missing investment slips');
+ok(selfAudit.checklist.completeness >= 0 && selfAudit.checklist.completeness <= 100, `checklist completeness in range (${selfAudit.checklist.completeness}%)`);
+
+// RRSP optimizer erases a balance owing
+const owing = computeReturn({ province: 'ON', year: 2024, employmentIncome: 95000, taxWithheld: 12000 });
+ok(!owing.isRefund, 'setup: $95k with low withholding owes tax');
+const moves = optimizeRRSP(owing, 20000);
+ok(moves.length > 0, `RRSP optimizer returns moves (${moves.length})`);
+ok(moves.some((m) => m.type === 'erase') || moves.some((m) => m.type === 'bracket'), 'optimizer suggests erase-owing and/or bracket-drop');
+const eraseMove = moves.find((m) => m.type === 'erase');
+if (eraseMove) ok(eraseMove.newRefund > owing.refundOrBalance, 'erase move improves the balance');
+
+// Benefits: a family gets CCB + GST estimates
+const family = computeReturn({ province: 'ON', year: 2024, employmentIncome: 42000, dependants: 2, maritalStatus: 'married', spouseNetIncome: 0 });
+const ben = estimateBenefits(family);
+ok(ben.items.some((b) => b.id === 'ccb'), 'benefits estimate includes Canada Child Benefit for a family');
+ok(ben.total > 0, `benefits total > 0 ($${ben.total})`);
+
+// Calendar: returns upcoming, future-dated deadlines
+const cal = taxCalendar({ employmentType: 'self-employed' });
+ok(cal.length > 0 && cal.every((c) => c.daysAway >= 0), 'calendar returns only upcoming deadlines');
+ok(cal.some((c) => c.tag === 'instalment'), 'self-employed calendar includes instalment deadlines (personalized)');
+ok(taxCalendar({ employmentType: 'employed' }).every((c) => c.tag !== 'instalment'), 'employee calendar omits instalments');
+
 // ---- 9. Every province computes without error ----
 for (const code of Object.keys(getTaxData(2024).provinces)) {
   const r = computeReturn({ province: code, year: 2024, employmentIncome: 75000, cppContrib: 3867.5, eiContrib: 1049.12, taxWithheld: 12000 });

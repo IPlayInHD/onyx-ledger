@@ -10,6 +10,8 @@ const { computeReturn, normalizeProfile } = require('./taxEngine');
 const { scanDocuments } = require('./extract');
 const { computeTaxHealth } = require('./scoring');
 const { findOpportunities, whatWeFound, buildAdvisory } = require('./advisory');
+const { buildChecklist } = require('./checklist');
+const { optimizeRRSP, estimateBenefits, taxCalendar } = require('./planner');
 const { getTaxData, PROVINCE_NAMES } = require('./taxData');
 
 /**
@@ -40,6 +42,12 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
   const found = whatWeFound(ret, scan.summary);
   const advisory = buildAdvisory(ret, health, opportunities);
 
+  // 4) Personalized checklist + planning tools (QOL).
+  const checklist = buildChecklist(ret, documents);
+  const rrspMoves = optimizeRRSP(ret, health.context.estimatedRrspRoom);
+  const benefits = estimateBenefits(ret);
+  const calendar = taxCalendar(ret.profile);
+
   return {
     generatedAt: new Date().toISOString(),
     taxYear,
@@ -52,6 +60,10 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
     found,
     opportunities,
     advisory,
+    checklist,
+    rrspMoves,
+    benefits,
+    calendar,
   };
 }
 

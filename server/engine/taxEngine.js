@@ -77,6 +77,12 @@ function normalizeProfile(p = {}) {
     disability: !!p.disability,
     firstTimeHomeBuyer: !!p.firstTimeHomeBuyer,
     ownsHome: !!p.ownsHome,
+    // context flags (do not affect the tax calc; drive the checklist & calendar)
+    employmentType: p.employmentType || 'employed',
+    hasInvestments: !!p.hasInvestments,
+    hasRentalIncome: !!p.hasRentalIncome,
+    hasForeignIncome: !!p.hasForeignIncome,
+    hasCrypto: !!p.hasCrypto,
     // income
     employmentIncome: n(p.employmentIncome),
     selfEmploymentIncome: n(p.selfEmploymentIncome),

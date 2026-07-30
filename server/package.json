@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/engine.test.js"
+    "test": "node test/engine.test.js",
+    "build:static": "node scripts/build-static.cjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
