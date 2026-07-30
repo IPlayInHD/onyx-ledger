@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Onyx Ledger — AI Tax Audit for Canadians</title>
+<meta name="description" content="Onyx Ledger reads your tax slips, audits your return against Canadian federal and provincial rules, scores your Tax Health, and shows you — in plain language — how to legally pay less." />
+<link rel="stylesheet" href="onyx.css" />
+<style>
+  .hero{padding:clamp(3rem,8vw,6rem) 0 clamp(2.5rem,6vw,4rem);position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;inset:-20% 0 auto 30%;height:70%;
+    background:radial-gradient(60% 60% at 70% 20%,rgba(227,190,134,.14),transparent 70%);pointer-events:none}
+  .eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;color:var(--accent)}
+  h1.big{font-family:var(--serif);font-weight:500;line-height:1.03;letter-spacing:-.02em;font-size:clamp(2.4rem,1.5rem + 4vw,4.2rem);margin:.7rem 0 0;text-wrap:balance;max-width:16ch}
+  h1.big .glow{background:linear-gradient(100deg,var(--accent-hi),var(--accent) 55%,var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p.lead{font-size:clamp(1.05rem,1rem + .5vw,1.28rem);color:var(--ink-2);max-width:56ch;margin-top:1.3rem}
+  .cta{display:flex;gap:.9rem;flex-wrap:wrap;margin-top:2rem}
+  .trust{display:flex;flex-wrap:wrap;gap:.5rem 1.4rem;margin-top:1.6rem;font-family:var(--mono);font-size:.76rem;color:var(--ink-3)}
+  .trust .t{color:var(--accent)}
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:0 0 4rem}
+  @media (max-width:820px){.steps{grid-template-columns:1fr 1fr}}@media (max-width:480px){.steps{grid-template-columns:1fr}}
+  .step .n{font-family:var(--mono);font-size:.72rem;color:var(--accent)}
+  .step h3{font-family:var(--serif);font-size:1.15rem;font-weight:600;margin:.5rem 0 .35rem}
+  .step p{font-size:.9rem;color:var(--ink-2)}
+  .foot{border-top:1px solid var(--line);padding:2rem 0;color:var(--ink-3);font-size:.8rem}
+  .foot .disc{max-width:80ch;line-height:1.6}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap topbar-in">
+  <a class="brand" href="index.html"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
+  <span class="sp"></span>
+  <a class="btn btn-ghost btn-sm" href="login.html">Sign in</a>
+  <a class="btn btn-primary btn-sm" href="signup.html">Create account</a>
+</div></header>
+
+<section class="hero"><div class="wrap">
+  <span class="eyebrow">AI Tax Audit · Canada · 2024</span>
+  <h1 class="big">See how to <span class="glow">legally pay less</span> tax.</h1>
+  <p class="lead">Onyx Ledger reads your slips, audits your return against current federal and provincial rules, scores your Tax Health, and shows you — in plain language — every credit and deduction you may be leaving behind. We don't file for you. We make sure you know what you're owed.</p>
+  <div class="cta">
+    <a class="btn btn-primary" href="signup.html">Run my free audit &nbsp;→</a>
+    <a class="btn btn-ghost" href="login.html">I have an account</a>
+  </div>
+  <div class="trust">
+    <span><span class="t">✦</span> Federal + all 13 provinces &amp; territories</span>
+    <span><span class="t">✦</span> Every figure traces to a rule</span>
+    <span><span class="t">✦</span> Encrypted &amp; securely processed</span>
+  </div>
+</div></section>
+
+<div class="wrap">
+  <div class="steps">
+    <div class="card"><div class="card-b step"><div class="n">STEP 01</div><h3>Create an account</h3><p>Set up your profile — province, age, and situation drive which credits you qualify for.</p></div></div>
+    <div class="card"><div class="card-b step"><div class="n">STEP 02</div><h3>Add your documents</h3><p>Upload or enter your T4, T5, tuition, RRSP, medical and donation slips. ONYX reads and verifies each one.</p></div></div>
+    <div class="card"><div class="card-b step"><div class="n">STEP 03</div><h3>Get your audit</h3><p>A full tax position, a 0–100 Tax Health score, and prioritized, cited opportunities to lower your tax.</p></div></div>
+    <div class="card"><div class="card-b step"><div class="n">STEP 04</div><h3>Act with confidence</h3><p>Understand exactly what you're eligible for before you file — with a professional, when needed.</p></div></div>
+  </div>
+</div>
+
+<footer class="foot"><div class="wrap">
+  <p class="disc">Onyx Ledger provides educational tax analysis and estimates generated from the information you provide. It is not tax advice, an audit-risk assessment, or a filed return, and it is not affiliated with or endorsed by the Canada Revenue Agency. Confirm your specifics with the CRA or a licensed tax professional before acting. Tax constants reflect the 2024 tax year.</p>
+  <p style="margin-top:1rem">© 2026 Onyx Ledger · Powered by ONYX Intelligence</p>
+</div></footer>
+<script src="app.js"></script>
+<script>if (ONYX.token()) { document.querySelectorAll('a[href="signup.html"],a[href="login.html"]').forEach(a=>{a.href='dashboard.html';}); }</script>
+</body>
+</html>
