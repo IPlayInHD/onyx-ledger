@@ -49,6 +49,8 @@ fs.writeFileSync(path.join(OUT, '_headers'),
   '  X-Frame-Options: SAMEORIGIN\n' +
   '  Referrer-Policy: no-referrer\n' +
   '  Permissions-Policy: geolocation=(), microphone=(), camera=()\n');
+// Google Search Console site-verification file (safe to keep public).
+fs.writeFileSync(path.join(OUT, 'google1fa21b3bb8fd787b.html'), 'google-site-verification: google1fa21b3bb8fd787b.html\n');
 fs.mkdirSync(path.join(OUT, '.well-known'), { recursive: true });
 fs.writeFileSync(path.join(OUT, '.well-known', 'security.txt'),
   'Contact: mailto:security@onyxledger.ca\n' +
