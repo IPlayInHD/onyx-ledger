@@ -33,7 +33,7 @@ ${engine}
 ${client}
 })();
 `);
-const pages = ['index.html','app.html','copilot.html','tax-health-score.html','signup.html','login.html','dashboard.html','documents.html'];
+const pages = ['index.html','app.html','copilot.html','tax-health-score.html','signup.html','login.html','dashboard.html','documents.html','about.html','privacy.html'];
 for (const f of pages) {
   let src = fs.readFileSync(path.join(SRC, 'public', f), 'utf8');
   if (!src.includes('rel="icon"')) src = src.replace('</head>', '  ' + ICON + '\n</head>');

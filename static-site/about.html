@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>About — Onyx Ledger</title>
+<meta name="description" content="Onyx Ledger is an independent educational tax-intelligence tool for Canadians. It helps you understand your taxes and legally reduce them. It does not file taxes and is not affiliated with the Canada Revenue Agency." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="onyx.css" />
+<style>
+  .doc-wrap{max-width:800px}
+  .doc-wrap h1{font-family:var(--serif);font-weight:500;font-size:clamp(2rem,1.5rem + 2.4vw,3rem);letter-spacing:-.02em;margin:.6rem 0 0}
+  .doc-wrap h2{font-family:var(--serif);font-size:1.35rem;font-weight:600;margin:2rem 0 .6rem}
+  .doc-wrap p{color:var(--ink-2);margin:.7rem 0;line-height:1.7}
+  .doc-wrap ul{color:var(--ink-2);line-height:1.7;padding-left:1.1rem}
+  .callout{border:1px solid color-mix(in oklab,var(--accent) 40%,transparent);border-radius:var(--r);background:radial-gradient(120% 80% at 100% 0%,rgba(227,190,134,.1),transparent 60%),var(--bg-2);padding:1.1rem 1.3rem;margin:1.4rem 0;display:flex;gap:.8rem;align-items:flex-start}
+  .callout svg{width:20px;height:20px;color:var(--accent);flex:none;margin-top:.15em}
+  .callout b{color:var(--ink)}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap topbar-in">
+  <a class="brand" href="index.html"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
+  <span class="sp"></span>
+  <a class="btn btn-ghost btn-sm" href="privacy.html">Privacy</a>
+  <a class="btn btn-primary btn-sm" href="signup.html">Try it free</a>
+</div></header>
+
+<div class="wrap doc-wrap" style="padding-top:clamp(2rem,5vw,3.4rem);padding-bottom:4rem">
+  <span class="k">About</span>
+  <h1>An independent tool that helps you understand your taxes.</h1>
+
+  <div class="callout">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 8v5M12 16h.01"/><circle cx="12" cy="12" r="9"/></svg>
+    <p style="margin:0"><b>Onyx Ledger is an independent educational service. It is not a government website and is not affiliated with, endorsed by, or connected to the Canada Revenue Agency (CRA).</b> It does not file your taxes.</p>
+  </div>
+
+  <p>Onyx Ledger — powered by ONYX Intelligence — reads the tax information you provide, computes an estimate of your federal and provincial tax position, scores your Tax Health, and explains, in plain language, the credits and deductions you may be eligible for. The goal is education: helping Canadians understand their taxes and legally reduce them, not replacing a licensed professional or the CRA's own services.</p>
+
+  <h2>What it does — and doesn't</h2>
+  <ul>
+    <li><b>Does:</b> estimate your tax position, find potential deductions and credits, explain the reasoning, and help you plan.</li>
+    <li><b>Doesn't:</b> file your return, submit anything to the CRA, or provide legal or professional tax advice.</li>
+    <li>Every figure is an <b>educational estimate</b>. Confirm your specifics with the CRA or a licensed tax professional before acting.</li>
+  </ul>
+
+  <h2>Your data</h2>
+  <p>We take privacy seriously and ask only for what's needed to produce your estimate. In this demo build, your information stays in your own browser and is never uploaded. Read the full <a href="privacy.html" style="color:var(--accent)">Privacy notice</a>.</p>
+
+  <h2>Contact</h2>
+  <p>Questions or feedback? Email <a href="mailto:hello@onyxledger.ca" style="color:var(--accent)">hello@onyxledger.ca</a>.</p>
+
+  <p style="margin-top:2.5rem;font-size:.8rem;color:var(--ink-3)">© 2026 Onyx Ledger · Powered by ONYX Intelligence · Not affiliated with the Canada Revenue Agency.</p>
+</div>
+<script src="app.js" onerror="void 0"></script>
+</body>
+</html>

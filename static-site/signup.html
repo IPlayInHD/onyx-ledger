@@ -3,8 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Create your account — Onyx Ledger</title>
+<title>Create your local demo profile — Onyx Ledger</title>
 <link rel="stylesheet" href="onyx.css" />
+<style>
+  .localnote{border:1px solid color-mix(in oklab,var(--pos) 40%,transparent);background:color-mix(in oklab,var(--pos) 7%,transparent);
+    border-radius:var(--r);padding:.85rem 1rem;margin-bottom:1.2rem;font-size:.82rem;color:var(--ink-2);display:flex;gap:.6ch;align-items:flex-start}
+  .localnote svg{width:16px;height:16px;color:var(--pos);flex:none;margin-top:.15em}
+  .localnote b{color:var(--ink)}
+</style>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -12,26 +18,30 @@
   <div class="authcard card glow">
     <div class="card-b">
       <a class="brand" href="index.html" style="margin-bottom:1.2rem"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
-      <h1 class="auth-h">Create your account</h1>
-      <p class="auth-sub">Start your free tax audit. No card required.</p>
+      <h1 class="auth-h">Create your demo profile</h1>
+      <p class="auth-sub">Independent educational tool — not the CRA. No card required.</p>
+      <div class="localnote">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span>Your profile is saved <b>only in this browser</b> — nothing is uploaded. Please use a demo passcode, <b>not a real password</b>, and never enter your SIN.</span>
+      </div>
       <form id="form" novalidate>
         <div class="grid" style="gap:.9rem">
-          <label class="field">Full name
-            <input id="name" type="text" autocomplete="name" placeholder="Alex Chen" />
+          <label class="field">Name or nickname
+            <input id="name" type="text" autocomplete="off" placeholder="Alex" />
           </label>
           <label class="field">Email
-            <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+            <input id="email" type="email" autocomplete="off" placeholder="you@example.com" required />
           </label>
-          <label class="field">Password
+          <label class="field">Demo passcode
             <input id="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" required />
-            <span class="hint">8+ characters. Choose something unique.</span>
+            <span class="hint">Locks this local demo. Don't reuse a real password.</span>
           </label>
         </div>
         <p class="err" id="err"></p>
-        <button class="btn btn-primary btn-block" id="submit" type="submit">Create account &amp; continue</button>
+        <button class="btn btn-primary btn-block" id="submit" type="submit">Create demo profile &amp; continue</button>
       </form>
-      <div class="secnote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg> Your information is encrypted and securely processed.</div>
-      <p class="auth-alt">Already have an account? <a href="login.html">Sign in</a></p>
+      <div class="secnote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/></svg> Stored in your browser · <a href="privacy.html" style="color:var(--accent)">Privacy</a> · <a href="about.html" style="color:var(--accent)">About</a></div>
+      <p class="auth-alt">Already started? <a href="login.html">Sign in</a></p>
     </div>
   </div>
 </div>
@@ -42,13 +52,13 @@
   form.addEventListener('submit', async (e) => {
     e.preventDefault(); err.textContent = '';
     const name = name0(), email = document.getElementById('email').value.trim(), password = document.getElementById('password').value;
-    if (!email || !password) { err.textContent = 'Email and password are required.'; return; }
-    if (password.length < 8) { err.textContent = 'Password must be at least 8 characters.'; return; }
-    submit.disabled = true; submit.textContent = 'Creating account…';
+    if (!email || !password) { err.textContent = 'Email and a demo passcode are required.'; return; }
+    if (password.length < 8) { err.textContent = 'Passcode must be at least 8 characters.'; return; }
+    submit.disabled = true; submit.textContent = 'Creating…';
     try {
       const { token, user } = await ONYX.api('/auth/register', { method: 'POST', body: { name, email, password } });
       ONYX.setAuth(token, user); location.href = 'dashboard.html';
-    } catch (ex) { err.textContent = ex.message; submit.disabled = false; submit.textContent = 'Create account & continue'; }
+    } catch (ex) { err.textContent = ex.message; submit.disabled = false; submit.textContent = 'Create demo profile & continue'; }
   });
   function name0(){ return document.getElementById('name').value.trim(); }
 </script>

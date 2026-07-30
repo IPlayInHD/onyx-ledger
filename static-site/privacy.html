@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy — Onyx Ledger</title>
+<meta name="description" content="How Onyx Ledger handles your information. In the demo build, everything stays in your browser and is never uploaded. We never ask for your SIN and never sell your data." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="onyx.css" />
+<style>
+  .doc-wrap{max-width:800px}
+  .doc-wrap h1{font-family:var(--serif);font-weight:500;font-size:clamp(2rem,1.5rem + 2.4vw,3rem);letter-spacing:-.02em;margin:.6rem 0 0}
+  .doc-wrap h2{font-family:var(--serif);font-size:1.3rem;font-weight:600;margin:1.9rem 0 .5rem}
+  .doc-wrap p{color:var(--ink-2);margin:.6rem 0;line-height:1.7}
+  .doc-wrap ul{color:var(--ink-2);line-height:1.7;padding-left:1.1rem}
+  .doc-wrap b{color:var(--ink)}
+  .callout{border:1px solid color-mix(in oklab,var(--pos) 40%,transparent);border-radius:var(--r);background:color-mix(in oklab,var(--pos) 7%,transparent);padding:1.1rem 1.3rem;margin:1.4rem 0;display:flex;gap:.8rem;align-items:flex-start}
+  .callout svg{width:20px;height:20px;color:var(--pos);flex:none;margin-top:.15em}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap topbar-in">
+  <a class="brand" href="index.html"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
+  <span class="sp"></span>
+  <a class="btn btn-ghost btn-sm" href="about.html">About</a>
+  <a class="btn btn-primary btn-sm" href="signup.html">Try it free</a>
+</div></header>
+
+<div class="wrap doc-wrap" style="padding-top:clamp(2rem,5vw,3.4rem);padding-bottom:4rem">
+  <span class="k">Privacy</span>
+  <h1>Your information is yours.</h1>
+
+  <div class="callout">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+    <p style="margin:0"><b>In this demo build, your account and every figure you enter are stored only in your own browser (local storage). Nothing is uploaded to a server, sent to us, or shared with anyone — including the CRA.</b> Clear your browser data, or use the “Delete my account” button, and it's gone.</p>
+  </div>
+
+  <h2>What we ask for</h2>
+  <p>Only what's needed to produce your estimate: an email and passcode to hold your local demo profile, and the tax figures you choose to enter (income, deductions, credits). You decide what to provide.</p>
+
+  <h2>What we never ask for</h2>
+  <ul>
+    <li><b>Your Social Insurance Number (SIN).</b> Onyx Ledger does not need it and you should never enter it here.</li>
+    <li>Banking logins, card numbers, or government credentials.</li>
+    <li>Real documents in the demo — sample data and manual figures are enough to see how it works.</li>
+  </ul>
+
+  <h2>How it's handled</h2>
+  <ul>
+    <li><b>Demo (this site):</b> stored in your browser only, never transmitted.</li>
+    <li><b>Hosted app version:</b> data is encrypted in transit and at rest, you can export or delete it anytime, and it is never sold.</li>
+    <li>No advertising trackers. No selling of personal data. Ever.</li>
+  </ul>
+
+  <h2>Not the CRA</h2>
+  <p>Onyx Ledger is an independent educational service, not a government website, and is not affiliated with or endorsed by the Canada Revenue Agency. It does not file your taxes. See <a href="about.html" style="color:var(--accent)">About</a>.</p>
+
+  <h2>Contact</h2>
+  <p>Privacy questions? Email <a href="mailto:privacy@onyxledger.ca" style="color:var(--accent)">privacy@onyxledger.ca</a>.</p>
+
+  <p style="margin-top:2.5rem;font-size:.8rem;color:var(--ink-3)">© 2026 Onyx Ledger · Educational estimates only · Not affiliated with the Canada Revenue Agency.</p>
+</div>
+<script src="app.js" onerror="void 0"></script>
+</body>
+</html>
