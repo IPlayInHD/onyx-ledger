@@ -59,10 +59,11 @@ the `onyx-ledger` blob store.
 ## Good to know
 
 - **Local dev** is unchanged: `cd server && npm start` → http://localhost:4000.
-- **Marketing/demo pages** at the repo root (`index.html`, `app.html`, `copilot.html`,
-  `tax-health-score.html`) are *not* part of this Netlify site (it publishes
-  `server/public`). To host those too, deploy them as a second Netlify site, or tell me
-  and I'll fold them into this one under a path.
+- **One complete site.** The publish directory `server/public` now contains everything:
+  the marketing landing (`/`), the interactive demos (`/app.html`, `/copilot.html`,
+  `/tax-health-score.html`), and the real product (`/signup.html`, `/login.html`,
+  `/dashboard.html`). The homepage's "Start free" / plan CTAs funnel into the real
+  signup → dashboard → audit flow.
 - **Scanned-image OCR** still needs an OCR provider wired into the `ocrProvider` interface
   in `server/engine/extract.js`; today it scans structured entries and text/PDF-text slips.
 - **This does not file taxes** and is not affiliated with the CRA — it's educational.
