@@ -1,0 +1,26 @@
+# Netlify deployment config for Onyx Ledger
+# Publishes the app frontend (server/public) and runs the Express tax-audit
+# API as a serverless function, with persistence on Netlify Blobs.
+
+[build]
+  base = "server"
+  command = "npm install"
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Route all API traffic to the Express function.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# Everything else is served as static files from the publish directory;
+# unknown paths fall back to the app's landing page.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
