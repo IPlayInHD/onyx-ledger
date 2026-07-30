@@ -1,4 +1,4 @@
 node_modules/
 data/db.json
 *.log
-dashboard-preview.png
+*-preview.png
