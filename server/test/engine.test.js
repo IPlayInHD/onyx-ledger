@@ -137,6 +137,31 @@ const { accountPriority } = require('../engine/planner');
 const ap = accountPriority(computeReturn({ province: 'ON', year: 2024, employmentIncome: 90000, firstTimeHomeBuyer: true, ownsHome: false }));
 ok(ap.order.includes('FHSA') && ap.order.includes('RRSP'), 'account priority recommends FHSA + RRSP for a high-earning first-time buyer');
 
+// ---- 8d. Robustness & property tests ----
+const junk = computeReturn({ province: 'ON', year: 2024, employmentIncome: 'not a number', cppContrib: NaN, taxWithheld: -500, dependants: -3 });
+ok(isFinite(junk.tax.total) && isFinite(junk.refundOrBalance), 'garbage input yields finite numbers');
+ok(junk.profile.taxWithheld === 0 && junk.profile.dependants === 0, 'negative inputs are clamped to 0');
+const zeroRet = computeReturn({ province: 'BC', year: 2024 });
+ok(zeroRet.tax.total === 0 && zeroRet.income.total === 0, 'all-zero return: no income, no tax, no NaN');
+const huge = computeReturn({ province: 'AB', year: 2025, employmentIncome: 5000000, taxWithheld: 0 });
+ok(isFinite(huge.tax.total) && huge.tax.total > 0 && huge.tax.total < huge.income.total, 'very high income stays sane');
+
+['ON', 'QC', 'AB', 'NS', 'BC'].forEach((prov) => {
+  let prevTax = -1;
+  [20000, 50000, 90000, 150000, 300000].forEach((inc) => {
+    const r = computeReturn({ province: prov, year: 2024, employmentIncome: inc, taxWithheld: 0 });
+    ok(r.tax.total >= prevTax - 0.01, `${prov}: tax is monotonic in income at $${inc}`);
+    ok(r.marginalRate + 0.02 >= r.averageRate, `${prov} $${inc}: marginal >= average`);
+    ok(r.tax.federal >= 0 && r.tax.provincial >= 0 && r.credits.federalValue >= 0, `${prov} $${inc}: no negative tax/credits`);
+    prevTax = r.tax.total;
+  });
+});
+
+const emptyAudit = runAudit({ profile: { province: 'MB', year: 2025 }, documents: [] });
+ok(emptyAudit.health && emptyAudit.checklist && emptyAudit.calendar && emptyAudit.benefits, 'empty audit still returns all sections');
+const cleanSim = require('../engine').simulate({ profile: { province: 'ON', year: 2024, employmentIncome: 80000 }, overrides: { rrsp: -99999, extraIncome: 'x' } });
+ok(isFinite(cleanSim.refundOrBalance) && cleanSim.taxableIncome === 80000, 'simulate ignores hostile overrides and stays finite');
+
 // ---- 9. Every province computes without error ----
 for (const code of Object.keys(getTaxData(2024).provinces)) {
   const r = computeReturn({ province: code, year: 2024, employmentIncome: 75000, cppContrib: 3867.5, eiContrib: 1049.12, taxWithheld: 12000 });

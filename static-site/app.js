@@ -320,14 +320,20 @@ function healthPremium(taxableIncome, table) {
  * defaulting anything missing to 0 / sensible values.
  */
 function normalizeProfile(p = {}) {
-  const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+  // Coerce to a finite number (bad input -> 0), and a non-negative variant so a
+  // stray negative slip value can never invert the tax math. Amounts are also
+  // capped to a sane maximum to keep the engine stable on absurd input.
+  const CAP = 1e9;
+  const num = (v) => { const x = typeof v === 'number' ? v : parseFloat(v); return isFinite(x) ? Math.max(-CAP, Math.min(CAP, x)) : 0; };
+  const n = num;
+  const nn = (v) => Math.max(0, num(v));
   return {
     year: p.year || 2024,
     province: (p.province || 'ON').toUpperCase(),
-    age: n(p.age) || null,
+    age: (() => { const a = nn(p.age); return a > 0 && a < 130 ? Math.round(a) : null; })(),
     maritalStatus: p.maritalStatus || 'single',
-    spouseNetIncome: n(p.spouseNetIncome),
-    dependants: n(p.dependants),
+    spouseNetIncome: nn(p.spouseNetIncome),
+    dependants: Math.min(20, Math.round(nn(p.dependants))),
     isStudent: !!p.isStudent,
     disability: !!p.disability,
     firstTimeHomeBuyer: !!p.firstTimeHomeBuyer,
@@ -338,34 +344,34 @@ function normalizeProfile(p = {}) {
     hasRentalIncome: !!p.hasRentalIncome,
     hasForeignIncome: !!p.hasForeignIncome,
     hasCrypto: !!p.hasCrypto,
-    // income
-    employmentIncome: n(p.employmentIncome),
-    selfEmploymentIncome: n(p.selfEmploymentIncome),
-    interestIncome: n(p.interestIncome),
-    eligibleDividends: n(p.eligibleDividends),
-    nonEligibleDividends: n(p.nonEligibleDividends),
-    capitalGains: n(p.capitalGains), // actual gain; engine applies inclusion rate
-    pensionIncome: n(p.pensionIncome),
-    otherIncome: n(p.otherIncome),
+    // income (non-negative; capital gains may be a net loss, so it stays signed)
+    employmentIncome: nn(p.employmentIncome),
+    selfEmploymentIncome: nn(p.selfEmploymentIncome),
+    interestIncome: nn(p.interestIncome),
+    eligibleDividends: nn(p.eligibleDividends),
+    nonEligibleDividends: nn(p.nonEligibleDividends),
+    capitalGains: n(p.capitalGains), // actual gain/loss; engine applies inclusion rate
+    pensionIncome: nn(p.pensionIncome),
+    otherIncome: nn(p.otherIncome),
     // deductions
-    rrspDeduction: n(p.rrspDeduction),
-    fhsaDeduction: n(p.fhsaDeduction),
-    unionDues: n(p.unionDues),
-    childCare: n(p.childCare),
-    movingExpenses: n(p.movingExpenses),
-    employmentExpenses: n(p.employmentExpenses),
-    otherDeductions: n(p.otherDeductions),
+    rrspDeduction: nn(p.rrspDeduction),
+    fhsaDeduction: nn(p.fhsaDeduction),
+    unionDues: nn(p.unionDues),
+    childCare: nn(p.childCare),
+    movingExpenses: nn(p.movingExpenses),
+    employmentExpenses: nn(p.employmentExpenses),
+    otherDeductions: nn(p.otherDeductions),
     // credits / receipts
-    tuition: n(p.tuition),
-    medicalExpenses: n(p.medicalExpenses),
-    donations: n(p.donations),
+    tuition: nn(p.tuition),
+    medicalExpenses: nn(p.medicalExpenses),
+    donations: nn(p.donations),
     // withheld / contributed
-    cppContrib: n(p.cppContrib),
-    eiContrib: n(p.eiContrib),
-    taxWithheld: n(p.taxWithheld),
+    cppContrib: nn(p.cppContrib),
+    eiContrib: nn(p.eiContrib),
+    taxWithheld: nn(p.taxWithheld),
     // planning context (used by advisory)
-    rrspRoom: p.rrspRoom == null ? null : n(p.rrspRoom),
-    tfsaRoom: p.tfsaRoom == null ? null : n(p.tfsaRoom),
+    rrspRoom: p.rrspRoom == null ? null : nn(p.rrspRoom),
+    tfsaRoom: p.tfsaRoom == null ? null : nn(p.tfsaRoom),
   };
 }
 
@@ -1399,11 +1405,12 @@ function simulate({ profile = {}, financial = {}, documents = [], year, override
   const scan = scanDocuments(documents);
   const merged = mergeFinancial(financial, scan.financial);
   const input = Object.assign({}, profile, merged, { year: taxYear });
-  input.rrspDeduction = (input.rrspDeduction || 0) + (+overrides.rrsp || 0);
-  input.fhsaDeduction = (input.fhsaDeduction || 0) + (+overrides.fhsa || 0);
-  input.donations = (input.donations || 0) + (+overrides.donations || 0);
-  input.employmentIncome = (input.employmentIncome || 0) + (+overrides.extraIncome || 0);
-  input.capitalGains = (input.capitalGains || 0) + (+overrides.capitalGains || 0);
+  const ov = (v) => Math.max(0, Math.min(1e7, +v || 0)); // clamp what-if inputs to a sane range
+  input.rrspDeduction = (input.rrspDeduction || 0) + ov(overrides.rrsp);
+  input.fhsaDeduction = (input.fhsaDeduction || 0) + ov(overrides.fhsa);
+  input.donations = (input.donations || 0) + ov(overrides.donations);
+  input.employmentIncome = (input.employmentIncome || 0) + ov(overrides.extraIncome);
+  input.capitalGains = (input.capitalGains || 0) + ov(overrides.capitalGains);
   const ret = computeReturn(input);
   return {
     refundOrBalance: ret.refundOrBalance, isRefund: ret.isRefund,

@@ -78,11 +78,12 @@ function simulate({ profile = {}, financial = {}, documents = [], year, override
   const scan = scanDocuments(documents);
   const merged = mergeFinancial(financial, scan.financial);
   const input = Object.assign({}, profile, merged, { year: taxYear });
-  input.rrspDeduction = (input.rrspDeduction || 0) + (+overrides.rrsp || 0);
-  input.fhsaDeduction = (input.fhsaDeduction || 0) + (+overrides.fhsa || 0);
-  input.donations = (input.donations || 0) + (+overrides.donations || 0);
-  input.employmentIncome = (input.employmentIncome || 0) + (+overrides.extraIncome || 0);
-  input.capitalGains = (input.capitalGains || 0) + (+overrides.capitalGains || 0);
+  const ov = (v) => Math.max(0, Math.min(1e7, +v || 0)); // clamp what-if inputs to a sane range
+  input.rrspDeduction = (input.rrspDeduction || 0) + ov(overrides.rrsp);
+  input.fhsaDeduction = (input.fhsaDeduction || 0) + ov(overrides.fhsa);
+  input.donations = (input.donations || 0) + ov(overrides.donations);
+  input.employmentIncome = (input.employmentIncome || 0) + ov(overrides.extraIncome);
+  input.capitalGains = (input.capitalGains || 0) + ov(overrides.capitalGains);
   const ret = computeReturn(input);
   return {
     refundOrBalance: ret.refundOrBalance, isRefund: ret.isRefund,
