@@ -122,11 +122,27 @@ function runConsistencyChecks(ret) {
       'You indicated you are a student, but no tuition (T2202) was captured — one of the most commonly missed credits.');
   }
 
-  // C5 — out-of-scope income (explicit liability guard)
-  if (p.hasRentalIncome) {
-    add('scope-rental', 'flag', 'Rental income is not modelled',
-      'You indicated rental income. This engine does not yet model rental income and expenses, so it is excluded from the estimate — add it with a professional before relying on the number.');
+  // C5 — rental income: now modelled (net rents). Reconcile declared vs entered.
+  const rentalNet = (p.rentalIncome || 0) - (p.rentalExpenses || 0);
+  if (p.hasRentalIncome || p.rentalIncome > 0) {
+    if ((p.rentalIncome || 0) === 0 && (p.rentalExpenses || 0) === 0) {
+      add('scope-rental', 'review', 'Rental declared but not entered',
+        'You indicated rental income but none was entered. Add your gross rents and operating expenses so the net rental income is included.');
+    } else {
+      add('scope-rental', 'pass', 'Rental income is included',
+        `Net rental income of ${asuCash(rentalNet)} is included as ordinary income. Capital cost allowance (depreciation) is optional and not auto-applied.`);
+    }
   }
+
+  // Self-employment: now modelled with self-employed CPP + business expenses.
+  if (p.selfEmploymentIncome > 0) {
+    add('scope-selfemp', p.selfEmploymentExpenses > 0 ? 'pass' : 'review', 'Self-employment is included',
+      p.selfEmploymentExpenses > 0
+        ? 'Net self-employment income and self-employed CPP (both employer and employee portions, Schedule 8) are modelled. GST/HST and capital cost allowance are not — confirm those separately.'
+        : 'Self-employment income and self-employed CPP are modelled, but no business expenses were entered. If you have any (supplies, vehicle, home office), enter them — they reduce your income directly.');
+  }
+
+  // Still genuinely out of scope — disclosed, never silently dropped.
   if (p.hasForeignIncome) {
     add('scope-foreign', 'flag', 'Foreign income is not modelled',
       'Foreign income and the foreign tax credit are not modelled here and are excluded from the estimate.');
@@ -134,10 +150,6 @@ function runConsistencyChecks(ret) {
   if (p.hasCrypto) {
     add('scope-crypto', 'review', 'Crypto dispositions need manual entry',
       'Gains and losses from crypto dispositions are not detected automatically — enter the net capital gain manually so it is included.');
-  }
-  if (p.selfEmploymentIncome > 0) {
-    add('scope-selfemp', 'review', 'Self-employment is simplified',
-      'Self-employment income is taxed as ordinary income here. CPP on self-employment (both employer and employee portions) and detailed business-expense deductions are not separately modelled.');
   }
 
   // C6 — internal tie-out (federal + provincial reconcile to total; nothing negative)
@@ -165,7 +177,8 @@ function buildAssumptions(ret, engine) {
   if (Math.max(0, p.capitalGains) > 0) a.push({ text: 'Capital gains use the 50% inclusion rate; capital-loss carryforwards are not modelled.' });
   if (p.eligibleDividends + p.nonEligibleDividends > 0) a.push({ text: 'The provincial dividend tax credit is approximated; the federal DTC is applied precisely.' });
   if (p.age && p.age >= 65) a.push({ text: 'The age amount is applied federally and approximated provincially.' });
-  if (p.selfEmploymentIncome > 0) a.push({ text: 'Self-employment income is taxed as ordinary income; self-employed CPP and business expenses are entered by you, not derived.' });
+  if (p.selfEmploymentIncome > 0) a.push({ text: 'Self-employment income is net of the business expenses you entered; self-employed CPP (both portions) is computed on Schedule 8. GST/HST and capital cost allowance (depreciation) are not modelled.' });
+  if ((p.rentalIncome || 0) > 0 || (p.rentalExpenses || 0) > 0) a.push({ text: 'Rental income is included as gross rents minus the operating expenses you entered; capital cost allowance is optional and not auto-applied.' });
   if (engine && engine.federalVerified && !engine.provinceVerified && p.year === 2025) {
     a.push({ text: `2025 ${ret.provinceName} provincial rates are indexed estimates pending verification against the province's published amounts (federal figures are CRA-verified).` });
   }

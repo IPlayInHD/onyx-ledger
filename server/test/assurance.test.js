@@ -38,11 +38,17 @@ ok(has(npChecks, 'withholding', 'review'), 'zero withholding on high income is f
 const overCpp = computeReturn({ province: 'ON', year: 2025, employmentIncome: 90000, cppContrib: 6000, eiContrib: 1077.48, taxWithheld: 15000 });
 ok(has(runConsistencyChecks(overCpp), 'cpp', 'flag'), 'CPP above the maximum is flagged');
 
-// 4) Out-of-scope income is disclosed, not silently dropped.
-const scoped = computeReturn({ province: 'BC', year: 2025, employmentIncome: 60000, cppContrib: 3388, eiContrib: 984, taxWithheld: 9000, hasRentalIncome: true, hasForeignIncome: true });
-const scopedChecks = runConsistencyChecks(scoped);
-ok(has(scopedChecks, 'scope-rental', 'flag'), 'rental income is disclosed as out of scope');
-ok(has(scopedChecks, 'scope-foreign', 'flag'), 'foreign income is disclosed as out of scope');
+// 4) Genuinely out-of-scope income is disclosed as a flag; foreign stays out of scope.
+const scoped = computeReturn({ province: 'BC', year: 2025, employmentIncome: 60000, cppContrib: 3388, eiContrib: 984, taxWithheld: 9000, hasForeignIncome: true });
+ok(has(runConsistencyChecks(scoped), 'scope-foreign', 'flag'), 'foreign income is disclosed as out of scope');
+
+// 4b) Rental & self-employment are now modelled, not dropped.
+const rental = computeReturn({ province: 'ON', year: 2025, employmentIncome: 70000, cppContrib: 3867.5, eiContrib: 1077.48, taxWithheld: 12000, rentalIncome: 24000, rentalExpenses: 9000 });
+ok(rental.income.rental === 15000, 'net rental income is included in the return');
+ok(has(runConsistencyChecks(rental), 'scope-rental', 'pass'), 'entered rental income reconciles (no longer a flag)');
+const selfEmp = computeReturn({ province: 'ON', year: 2025, selfEmploymentIncome: 60000 });
+ok(selfEmp.tax.cppPayableSE > 6000, `self-employed CPP (both portions) is computed (${selfEmp.tax.cppPayableSE})`);
+ok(selfEmp.deductions.selfEmployedCpp > 3000, 'half the self-employed CPP is deducted');
 
 // 5) Confidence is monotonic: clean > messy.
 const messy = runAudit({

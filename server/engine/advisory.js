@@ -329,6 +329,37 @@ function findOpportunities(ret, health) {
     });
   }
 
+  // 20) Self-employment: deduct every eligible business expense --------------
+  if (p.selfEmploymentIncome > 0) {
+    const noExp = !p.selfEmploymentExpenses;
+    push({
+      id: 'self-emp-expenses', category: 'Deductions', priority: noExp ? 1 : 3,
+      title: noExp ? 'Deduct your business expenses' : 'Keep claiming every business expense',
+      mechanism: 'Lowers your taxable income',
+      where: 'Form T2125 (business income & expenses) on your return',
+      how: 'Track and deduct supplies, a reasonable share of vehicle costs, phone/internet, professional fees, and business-use-of-home (a portion of rent/utilities). Consider capital cost allowance on equipment.',
+      why: noExp
+        ? 'No business expenses were entered. Every eligible expense comes straight off your self-employment income, so it saves tax at your full marginal rate — and reduces your self-employed CPP too.'
+        : 'Each eligible expense reduces your self-employment income directly, lowering both income tax and the self-employed CPP you owe on it.',
+      impact: noExp ? money(Math.min(p.selfEmploymentIncome * 0.1, 8000) * (mr + 0.06)) : null,
+      impactLabel: noExp ? 'est. tax + CPP saved' : 'ongoing deduction',
+      citation: 'Income Tax Act s.9 / s.18 · Business income & expenses (T2125)',
+    });
+  }
+
+  // 21) Rental: deduct expenses & consider CCA -------------------------------
+  if (p.rentalIncome > 0 || ret.income.rental !== 0) {
+    push({
+      id: 'rental-expenses', category: 'Deductions', priority: 3,
+      title: 'Deduct your rental expenses (and consider CCA)',
+      mechanism: 'Lowers your taxable income',
+      where: 'Form T776 (statement of real-estate rentals)',
+      how: 'Deduct mortgage interest, property tax, insurance, repairs, condo fees, and management. Capital cost allowance (depreciation) can further reduce net rental income — but plan it, as it can be recaptured on sale.',
+      why: 'Rental income is taxed on the net amount, so every eligible expense reduces it directly at your marginal rate. CCA is optional and best used deliberately.',
+      impactLabel: 'deduction / timing', citation: 'Income Tax Act s.20(1)(a) · Rental expenses & CCA (T776)',
+    });
+  }
+
   // Sort: quantified impact first (desc) within priority, then qualitative.
   out.sort((a, b) => (a.priority - b.priority) || ((b.impact || 0) - (a.impact || 0)));
   return out;
@@ -339,7 +370,8 @@ function whatWeFound(ret, docSummary) {
   const f = [];
   const i = ret.income;
   if (i.employment > 0) f.push({ ok: true, label: 'Employment income', value: fmt(i.employment) });
-  if (i.selfEmployment > 0) f.push({ ok: true, label: 'Self-employment income', value: fmt(i.selfEmployment) });
+  if (i.selfEmployment !== 0) f.push({ ok: true, label: 'Self-employment (net)', value: fmt(i.selfEmployment) });
+  if (i.rental !== 0) f.push({ ok: true, label: 'Rental income (net)', value: fmt(i.rental) });
   if (i.interest > 0 || i.eligibleDividendsGrossed > 0) f.push({ ok: true, label: 'Investment income', value: fmt(i.interest + i.eligibleDividendsGrossed + i.nonEligibleDividendsGrossed) });
   if (ret.taxWithheld > 0) f.push({ ok: true, label: 'Tax already paid', value: fmt(ret.taxWithheld) });
   if (ret.deductions.rrsp > 0) f.push({ ok: true, label: 'RRSP contributions', value: fmt(ret.deductions.rrsp) });

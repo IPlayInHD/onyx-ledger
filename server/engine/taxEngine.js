@@ -98,6 +98,11 @@ function normalizeProfile(p = {}) {
     capitalGains: n(p.capitalGains), // actual gain/loss; engine applies inclusion rate
     pensionIncome: nn(p.pensionIncome),
     otherIncome: nn(p.otherIncome),
+    // self-employment business expenses (reduce gross self-employment income)
+    selfEmploymentExpenses: nn(p.selfEmploymentExpenses),
+    // rental (gross rents + operating expenses; net can be a deductible loss)
+    rentalIncome: nn(p.rentalIncome),
+    rentalExpenses: nn(p.rentalExpenses),
     // deductions
     rrspDeduction: nn(p.rrspDeduction),
     fhsaDeduction: nn(p.fhsaDeduction),
@@ -140,21 +145,39 @@ function computeReturn(rawProfile) {
   const taxableCapitalGains = p.capitalGains * fed.capitalGainsInclusion;
   const grossedElig = p.eligibleDividends * (1 + fed.eligibleDiv.grossUp);
   const grossedNonElig = p.nonEligibleDividends * (1 + fed.nonEligibleDiv.grossUp);
+  // Self-employment net of business expenses; rental net of operating expenses.
+  // Both are ordinary income and may be a deductible loss (kept signed).
+  const netSelfEmployment = p.selfEmploymentIncome - p.selfEmploymentExpenses;
+  const netRental = p.rentalIncome - p.rentalExpenses;
+
+  // ---- Self-employed CPP (Schedule 8) ----
+  // The self-employed pay BOTH the employee and employer halves (2× the rate) on
+  // the pensionable earnings not already covered by employment. Half is a
+  // deduction (line 22200); half earns the CPP credit like an employee's share.
+  const cppCeiling = fed.cpp.max + fed.cpp.cpp2.max;
+  const empCppBase = clampPos(Math.min(p.employmentIncome, fed.cpp.maxPensionable) - fed.cpp.exemption);
+  const totCppBase = clampPos(Math.min(p.employmentIncome + clampPos(netSelfEmployment), fed.cpp.maxPensionable) - fed.cpp.exemption);
+  const seCppBase = clampPos(totCppBase - empCppBase);
+  const seCppTotal = round(seCppBase * fed.cpp.rate * 2);
+  const seCppDeduction = round(seCppTotal / 2);
+  const seCppCredit = seCppTotal / 2;
 
   const totalIncome =
-    p.employmentIncome + p.selfEmploymentIncome + p.interestIncome +
-    grossedElig + grossedNonElig + taxableCapitalGains + p.pensionIncome + p.otherIncome;
+    p.employmentIncome + netSelfEmployment + p.interestIncome +
+    grossedElig + grossedNonElig + taxableCapitalGains + p.pensionIncome + p.otherIncome + netRental;
 
   // ---- Deductions ----
   const totalDeductions =
     p.rrspDeduction + p.fhsaDeduction + p.unionDues + p.childCare +
-    p.movingExpenses + p.employmentExpenses + p.otherDeductions;
+    p.movingExpenses + p.employmentExpenses + p.otherDeductions + seCppDeduction;
 
   const netIncome = clampPos(totalIncome - totalDeductions);
   const taxableIncome = netIncome; // documented proxy
 
   // ---- Shared non-refundable credit amounts ----
-  const cpp = Math.min(p.cppContrib, fed.cpp.max + fed.cpp.cpp2.max);
+  // Employee CPP contributions plus the employee-equivalent half of self-employed CPP.
+  const employeeCpp = Math.min(p.cppContrib, cppCeiling);
+  const cpp = Math.min(p.cppContrib + seCppCredit, cppCeiling);
   const ei = Math.min(p.eiContrib, fed.ei.max);
   const canadaEmployment = p.employmentIncome > 0 ? Math.min(fed.canadaEmployment, p.employmentIncome) : 0;
   const pensionCredit = Math.min(fed.pensionIncomeMax, p.pensionIncome);
@@ -198,7 +221,10 @@ function computeReturn(rawProfile) {
 
   // ---- Totals ----
   const incomeTax = round(federalTax + provincialTax);
-  const refundOrBalance = round(p.taxWithheld - incomeTax); // + = refund, - = owing
+  // Self-employed CPP is payable with the return (line 42100), on top of income tax.
+  const cppPayableSE = seCppTotal;
+  const totalPayable = round(incomeTax + cppPayableSE);
+  const refundOrBalance = round(p.taxWithheld - totalPayable); // + = refund, - = owing
 
   // ---- Rates ----
   const totalTaxFn = (ti) =>
@@ -214,13 +240,13 @@ function computeReturn(rawProfile) {
     if (taxableIncome <= b.upTo) { bracketFederal = { rate: b.rate, from: lo, upTo: b.upTo === Infinity ? null : b.upTo, toNext: b.upTo === Infinity ? null : round(b.upTo - taxableIncome) }; break; }
     lo = b.upTo;
   }
-  const cpp2 = 0; // (CPP is already summed in `cpp`)
-  const takeHome = round(totalIncome - incomeTax - cpp - ei);
+  const cppCash = round(employeeCpp + cppPayableSE); // actual CPP out of pocket
+  const takeHome = round(totalIncome - incomeTax - cppCash - ei);
   const cashflow = {
     gross: round(totalIncome),
     federalTax: round(federalTax),
     provincialTax: round(provincialTax),
-    cpp: round(cpp), ei: round(ei),
+    cpp: cppCash, ei: round(ei),
     takeHome,
     takeHomePct: totalIncome > 0 ? round((takeHome / totalIncome) * 100) / 100 : 0,
   };
@@ -231,19 +257,21 @@ function computeReturn(rawProfile) {
     provinceName: PROVINCE_NAMES[p.province] || p.province,
     income: {
       employment: round(p.employmentIncome),
-      selfEmployment: round(p.selfEmploymentIncome),
+      selfEmployment: round(netSelfEmployment),
       interest: round(p.interestIncome),
       eligibleDividendsGrossed: round(grossedElig),
       nonEligibleDividendsGrossed: round(grossedNonElig),
       taxableCapitalGains: round(taxableCapitalGains),
       pension: round(p.pensionIncome),
+      rental: round(netRental),
       other: round(p.otherIncome),
       total: round(totalIncome),
     },
     deductions: {
       rrsp: round(p.rrspDeduction), fhsa: round(p.fhsaDeduction), unionDues: round(p.unionDues),
       childCare: round(p.childCare), moving: round(p.movingExpenses),
-      employment: round(p.employmentExpenses), other: round(p.otherDeductions),
+      employment: round(p.employmentExpenses), selfEmployedCpp: seCppDeduction,
+      other: round(p.otherDeductions),
       total: round(totalDeductions),
     },
     netIncome: round(netIncome),
@@ -271,6 +299,8 @@ function computeReturn(rawProfile) {
       healthPremium: round(ohp),
       provincial: round(provincialTax),
       total: incomeTax,
+      cppPayableSE: round(cppPayableSE),
+      totalPayable,
     },
     taxWithheld: round(p.taxWithheld),
     refundOrBalance,
