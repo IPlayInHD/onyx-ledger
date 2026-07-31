@@ -125,6 +125,39 @@
   .calc-row.tot{font-weight:700;border-bottom:0;border-top:1px solid var(--line-2);margin-top:.2rem;padding-top:.5rem}
   .calc-row .v{font-family:var(--mono)}
   .calc-sub{font-family:var(--mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:.9rem 0 .2rem}
+  /* ---- audit outline: income + deductions/credits explainers ---- */
+  .lead{font-size:.9rem;color:var(--ink-2);line-height:1.6;margin:0 0 1rem}
+  .lead b{color:var(--ink)}
+  .aud-row{display:grid;grid-template-columns:1fr auto;gap:.2rem 1rem;padding:.6rem 0;border-bottom:1px dashed var(--line)}
+  .aud-row:last-child{border-bottom:0}
+  .aud-row .nm{font-weight:600;font-size:.9rem}
+  .aud-row .amt{font-family:var(--mono);font-size:.9rem;color:var(--ink);text-align:right;white-space:nowrap}
+  .aud-row .desc{grid-column:1;font-size:.8rem;color:var(--ink-3);line-height:1.5}
+  .aud-row .tag{grid-column:2;grid-row:2;justify-self:end;font-family:var(--mono);font-size:.58rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);align-self:end}
+  .aud-row.sub .amt{color:var(--ink-2)}
+  .aud-row.tot{border-bottom:0;border-top:1px solid var(--line-2);margin-top:.3rem;padding-top:.7rem}
+  .aud-row.tot .nm{font-family:var(--serif);font-size:1.02rem}
+  .aud-row.tot .amt{font-size:1.05rem;font-weight:700}
+  .aud-row.neg .amt{color:var(--pos)}
+  .aud-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  @media(max-width:720px){.aud-grid{grid-template-columns:1fr}}
+  .aud-grid .card-h{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem}
+  .aud-grid .card-h .worth{font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+  /* ---- ways to save: grouped, structured opportunity cards ---- */
+  .save-intro{font-size:.9rem;color:var(--ink-2);line-height:1.6;margin:0 0 1.1rem}
+  .save-intro b{color:var(--ink)}
+  .save-grp{margin:1.4rem 0 .3rem;display:flex;align-items:center;gap:.7ch}
+  .save-grp h3{font-family:var(--serif);font-size:1.12rem;font-weight:600;margin:0}
+  .save-grp .ct{font-family:var(--mono);font-size:.66rem;color:var(--ink-3)}
+  .save-grp .ln{flex:1;height:1px;background:var(--line)}
+  .opp .mech{display:inline-block;font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-2);border:1px solid color-mix(in oklab,var(--accent) 35%,transparent);border-radius:999px;padding:.22em .6em;margin:.45rem 0 .1rem;background:color-mix(in oklab,var(--accent) 7%,transparent)}
+  .opp .whw{margin-top:.7rem;display:flex;flex-direction:column;gap:.5rem}
+  .opp .whw .r{display:grid;grid-template-columns:58px 1fr;gap:.7rem;align-items:baseline}
+  .opp .whw .r .lbl{font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding-top:.15em}
+  .opp .whw .r.where .lbl{color:var(--accent)}
+  .opp .whw .r .tx{font-size:.86rem;color:var(--ink-2);line-height:1.5}
+  .opp .whw .r.where .tx{color:var(--ink);font-weight:600}
+  @media(max-width:520px){.opp .whw .r{grid-template-columns:1fr}.opp .whw .r .lbl{padding-top:0}}
   /* account priority + data controls */
   .acct{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem}
   .acct .a{border:1px solid var(--line-2);border-radius:99px;padding:.3em .8em;font-family:var(--mono);font-size:.74rem;color:var(--ink-2)}
@@ -440,13 +473,31 @@ function renderReport(a) {
 
   const found = a.found.map(f => `<div class="f"><span class="${f.ok?'ic-ok':'ic-warn'}">${f.ok?'✓':'⚠'}</span> ${esc(f.label)} <span class="v">${esc(String(f.value))}</span></div>`).join('');
 
-  const opps = a.opportunities.map(o => {
+  // Structured opportunity card: each move spells out WHERE / HOW / WHY + impact.
+  const oppRow = (cls, lbl, tx) => tx ? `<div class="r ${cls}"><span class="lbl">${lbl}</span><span class="tx">${esc(tx)}</span></div>` : '';
+  const oppCard = (o) => {
     const imp = o.impact ? `<div class="impact"><span class="n">${money(o.impact)}</span><span class="l">${esc(o.impactLabel||'est.')}</span></div>`
-      : (o.impactLabel ? `<div class="impact"><span class="n" style="font-size:.78rem;color:var(--info)">${esc(o.impactLabel)}</span></div>` : '');
+      : (o.impactLabel ? `<div class="impact"><span class="n" style="font-size:.72rem;color:var(--info)">${esc(o.impactLabel)}</span></div>` : '');
     return `<div class="opp ${o.priority===1?'p1':''}"><div class="body">
-      <span class="chip">${esc(o.category)}</span><h4>${esc(o.title)}</h4><p>${esc(o.detail)}</p>
+      ${o.mechanism?`<span class="mech">${esc(o.mechanism)}</span>`:''}
+      <h4>${esc(o.title)}</h4>
+      <div class="whw">
+        ${oppRow('where','Where',o.where)}
+        ${oppRow('how','How',o.how)}
+        ${oppRow('why','Why',o.why)}
+      </div>
       <div class="cite">${esc(o.citation||'')}</div></div>${imp}</div>`;
-  }).join('');
+  };
+  // Group by category, preserving the priority-sorted order within each group.
+  const oppGroups = [];
+  a.opportunities.forEach(o => {
+    let g = oppGroups.find(x => x.cat === o.category);
+    if (!g) { g = { cat: o.category, items: [] }; oppGroups.push(g); }
+    g.items.push(o);
+  });
+  const oppsHTML = oppGroups.map(g => `
+    <div class="save-grp"><h3>${esc(g.cat)}</h3><span class="ct">${g.items.length} ${g.items.length===1?'move':'moves'}</span><span class="ln"></span></div>
+    ${g.items.map(oppCard).join('')}`).join('');
 
   const docs = a.documents.map(d => `<div class="doc-row"><div class="t"><div class="nm">${esc(d.name||d.label)}</div><div class="mt">${d.type} · found: ${(d.foundFields||[]).join(', ')||'—'}</div></div><span class="pill ${d.status}">${d.status.replace('_',' ')}</span><span class="mv" style="font-family:var(--mono);font-size:.72rem;color:var(--ink-3)">${Math.round((d.confidence||0)*100)}%</span></div>`).join('');
 
@@ -513,9 +564,74 @@ function renderReport(a) {
     <p class="hint" style="margin-top:.8rem">Drag to preview the estimated impact. This never changes your saved data.</p>
   </div></div>`;
 
+  // ---- audit outline: income explainer ----
+  const inc = r.income;
+  const incRow = (nm, amt, desc, tag) => amt > 0 ? `<div class="aud-row"><span class="nm">${nm}</span><span class="amt">${money(amt)}</span><span class="desc">${desc}</span>${tag?`<span class="tag">${tag}</span>`:''}</div>` : '';
+  const incRows = [
+    incRow('Employment income', inc.employment, 'Salary and wages from your T4 — every dollar is taxable.', 'Fully taxed'),
+    incRow('Self-employment income', inc.selfEmployment, 'Net business or freelance income — fully taxable.', 'Fully taxed'),
+    incRow('Interest income', inc.interest, 'Interest from savings, GICs and bonds — fully taxable.', 'Fully taxed'),
+    incRow('Eligible dividends', inc.eligibleDividendsGrossed, 'Grossed-up ×1.38 for the calculation, then largely offset by the dividend tax credit.', 'Grossed-up'),
+    incRow('Non-eligible dividends', inc.nonEligibleDividendsGrossed, 'Grossed-up ×1.15, then partly offset by the dividend tax credit.', 'Grossed-up'),
+    incRow('Capital gains (taxable half)', inc.taxableCapitalGains, 'Only 50% of a capital gain is taxable — this is that taxable half.', '50% taxed'),
+    incRow('Pension income', inc.pension, 'Pension and registered withdrawals — fully taxable (splitting may apply).', 'Fully taxed'),
+    incRow('Other income', inc.other, 'Other reported income — fully taxable.', 'Fully taxed'),
+  ].join('');
+  const incomeHTML = `<h2 class="sectitle">Your taxable income, explained</h2>
+  <div class="card"><div class="card-b">
+    <p class="lead">Here's exactly how your <b>${money(r.taxableIncome)}</b> of taxable income is built — and why not every dollar is taxed the same way. Capital gains are only half-taxable, and dividends are grossed up but then largely refunded by a credit.</p>
+    ${incRows || '<p class="hint">No income captured yet. Add documents and run your audit.</p>'}
+    <div class="aud-row sub"><span class="nm">Total income</span><span class="amt">${money(inc.total)}</span></div>
+    <div class="aud-row neg"><span class="nm">− Deductions (detailed below)</span><span class="amt">−${money(r.deductions.total)}</span></div>
+    <div class="aud-row tot"><span class="nm">Taxable income</span><span class="amt">${money(r.taxableIncome)}</span></div>
+  </div></div>`;
+
+  // ---- audit outline: deductions vs credits explainer ----
+  const d = r.deductions, cr2 = r.credits;
+  const dRow = (nm, amt, desc) => amt > 0 ? `<div class="aud-row"><span class="nm">${nm}</span><span class="amt">−${money(amt)}</span><span class="desc">${desc}</span></div>` : '';
+  const dRows = [
+    dRow('RRSP contributions', d.rrsp, 'Comes straight off your income before tax is calculated.'),
+    dRow('FHSA contributions', d.fhsa, 'Deductible like an RRSP; withdrawals for a first home are tax-free.'),
+    dRow('Union &amp; professional dues', d.unionDues, 'Required dues are deductible.'),
+    dRow('Child care expenses', d.childCare, 'Lets you work or study; usually claimed by the lower earner.'),
+    dRow('Moving expenses', d.moving, 'Eligible costs of moving at least 40 km for work or school.'),
+    dRow('Employment expenses', d.employment, 'Work costs backed by a signed Form T2200.'),
+    dRow('Other deductions', d.other, 'Other amounts that reduce your income.'),
+  ].join('');
+  const cRow = (nm, amt, desc) => amt > 0 ? `<div class="aud-row"><span class="nm">${nm}</span><span class="amt">${money(amt)}</span><span class="desc">${desc}</span></div>` : '';
+  const cRows = [
+    cRow('Basic personal amount', cr2.basicPersonalAmount, 'The tax-free base every filer receives.'),
+    cRow('CPP &amp; EI contributions', cr2.cppEi, 'Your mandatory payroll contributions earn a credit.'),
+    cRow('Canada employment amount', cr2.canadaEmployment, 'An automatic credit for employees.'),
+    cRow('Tuition', cr2.tuition, 'From your T2202 — transferable and carries forward.'),
+    cRow('Medical (above the 3% floor)', cr2.medicalEligible, 'Only the portion above 3% of net income counts.'),
+    cRow('Age amount', cr2.ageAmount, 'For filers 65+ (reduced as income rises).'),
+    cRow('Pension amount', cr2.pension, 'A credit on eligible pension income.'),
+    cRow('Disability amount', cr2.disability, 'The disability tax credit (with an approved T2201).'),
+    cRow('Spousal amount', cr2.spousal, "Available when your spouse's income is below the basic amount."),
+    cRow('Donations', cr2.donations, 'Worth more above $200 — pool and carry forward to boost it.'),
+  ].join('');
+  const credValue = money((cr2.federalValue || 0) + (cr2.provincialValue || 0));
+  const dedCredHTML = `<h2 class="sectitle">Your deductions &amp; credits, explained</h2>
+  <div class="card"><div class="card-b">
+    <p class="lead">There are two different ways to pay less tax — and they work differently. A <b>deduction</b> lowers the income you're taxed on, so it's worth your marginal rate (about <b>${(r.marginalRate*100).toFixed(0)}%</b> for you). A <b>credit</b> lowers the tax bill itself, and most are worth about <b>15%</b> federally plus a provincial amount. Here's what's already working in your return.</p>
+  </div></div>
+  <div class="aud-grid">
+    <div class="card"><div class="card-h"><span>Deductions</span><span class="worth">worth ~${(r.marginalRate*100).toFixed(0)}% each</span></div><div class="card-b">
+      <p class="small muted" style="margin:0 0 .5rem">Money taken off your income before tax:</p>
+      ${dRows || '<p class="hint">No deductions claimed yet — see "Ways to save" below for where to add them.</p>'}
+      <div class="aud-row tot neg"><span class="nm">Total deductions</span><span class="amt">−${money(d.total)}</span></div>
+    </div></div>
+    <div class="card"><div class="card-h"><span>Non-refundable credits</span><span class="worth">reduce tax directly</span></div><div class="card-b">
+      <p class="small muted" style="margin:0 0 .5rem">Amounts claimed — each worth ~15% federally plus a provincial amount:</p>
+      ${cRows || '<p class="hint">No credits captured yet.</p>'}
+      <div class="aud-row tot neg"><span class="nm">Combined credit value</span><span class="amt">−${credValue}</span></div>
+    </div></div>
+  </div>`;
+
   const t = r.tax, cr = r.credits;
   const eng = a.engine || {};
-  const calcHTML = `<h2 class="sectitle">How this was calculated</h2>
+  const calcHTML = `<h2 class="sectitle">The full math, line by line</h2>
   <div class="card calc"><div class="card-b">
     <p class="small" style="margin:0 0 .7rem;color:var(--ink-3)">Computed by <b style="color:var(--ink)">ONYX engine v${eng.version||'1.0.0'}</b> · ${esc(eng.dataStatus||(r.year+' constants'))} ${eng.dataVerified?'<span style="color:var(--pos)">✓ verified</span>':'<span style="color:var(--warn)">preliminary</span>'} · <a href="methodology.html" style="color:var(--accent)">Methodology &amp; sources →</a></p>
     <details>
@@ -579,6 +695,8 @@ function renderReport(a) {
   </div></div></div>
   ${r.year===2025?`<p class="hint" style="margin:.5rem 0 0">Note: 2025 federal figures are verified vs the CRA (incl. the July 2025 rate cut to a blended 14.5%). ${eng.provinceVerified?`2025 ${esc(r.provinceName)} provincial figures are verified against the official published amounts.`:`2025 ${esc(r.provinceName)} provincial figures are preliminary indexed estimates pending verification.`}</p>`:''}
   ${flowHTML}
+  ${incomeHTML}
+  ${dedCredHTML}
 
   <div class="grid g2" style="margin-top:1rem">
     <div class="card"><div class="card-h">Tax Health breakdown</div><div class="card-b">${meters}
@@ -588,8 +706,9 @@ function renderReport(a) {
   </div>
   ${checklistHTML}
 
-  <h2 class="sectitle">Opportunities to lower your tax <span class="k" style="font-family:var(--mono)">· ${a.opportunities.length} found</span></h2>
-  ${opps || '<div class="card"><div class="empty">No specific opportunities detected — your position looks well optimized.</div></div>'}
+  <h2 class="sectitle">Ways to save — where to put your money <span class="k" style="font-family:var(--mono)">· ${a.opportunities.length} found</span></h2>
+  <div class="card"><div class="card-b"><p class="save-intro">Each move below tells you <b>where</b> to put your money, <b>how</b> to do it, and <b>why</b> it lowers your tax — grouped by the kind of strategy. The dollar figure is an estimate of what it could save at your rate. Start with the ones marked as priorities.</p></div></div>
+  ${oppsHTML || '<div class="card"><div class="empty">No specific opportunities detected — your position looks well optimized.</div></div>'}
   ${rrspHTML}
   ${acctHTML}
   ${wfHTML}
@@ -677,8 +796,16 @@ function buildSummaryText(a) {
   L.push(`Tax Health: ${a.health.score}/100 (${a.health.band.label})`);
   if (a.checklist) L.push(`Document completeness: ${a.checklist.completeness}% — ${a.checklist.counts.missing} to add`);
   L.push('');
-  L.push('TOP OPPORTUNITIES:');
-  a.opportunities.slice(0,6).forEach(o => L.push(`  • ${o.title}${o.impact?` (~${money(o.impact)})`:''} [${o.citation||''}]`));
+  L.push('WAYS TO SAVE — WHERE TO PUT YOUR MONEY:');
+  let lastCat = null;
+  a.opportunities.slice(0,8).forEach(o => {
+    if (o.category !== lastCat) { L.push(''); L.push(`  [${(o.category||'').toUpperCase()}]`); lastCat = o.category; }
+    L.push(`  • ${o.title}${o.impact?` (~${money(o.impact)})`:o.impactLabel?` (${o.impactLabel})`:''}`);
+    if (o.where) L.push(`      Where: ${o.where}`);
+    if (o.how) L.push(`      How:   ${o.how}`);
+    if (o.why) L.push(`      Why:   ${o.why}`);
+    if (o.citation) L.push(`      Ref:   ${o.citation}`);
+  });
   if (a.benefits && a.benefits.items.length) { L.push(''); L.push('ESTIMATED BENEFITS (paid separately):'); a.benefits.items.forEach(b => L.push(`  • ${b.label}: ~${money(b.amount)}/yr`)); }
   L.push(''); L.push(a.advisory.disclaimer);
   return L.join('\n');

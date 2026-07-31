@@ -958,7 +958,14 @@ function findOpportunities(ret, health) {
   const mr = ret.marginalRate || 0.3; // marginal rate as a decimal
   const out = [];
 
-  const push = (o) => out.push(Object.assign({ impact: null, impactLabel: null, priority: 3 }, o));
+  // Every opportunity answers four questions for the user:
+  //   category   — the kind of move (drives grouping in the UI)
+  //   mechanism  — a short tag for HOW it saves tax (what actually happens)
+  //   where      — WHERE to put the money / which account, line, or person
+  //   how        — the concrete step to take (with amounts/deadlines)
+  //   why        — WHY it lowers your tax, in plain language
+  const cash = (n) => '$' + money(n).toLocaleString('en-CA');
+  const push = (o) => out.push(Object.assign({ impact: null, impactLabel: null, priority: 3, mechanism: '' }, o));
 
   // 1) Unused RRSP room -----------------------------------------------------
   const estRoom = health.context.estimatedRrspRoom;
@@ -967,9 +974,12 @@ function findOpportunities(ret, health) {
   if (roomLeft > 1000 && (p.employmentIncome + p.selfEmploymentIncome) > 0) {
     const suggested = Math.min(roomLeft, Math.max(2000, ret.taxableIncome * 0.1));
     push({
-      id: 'rrsp', category: 'Registered savings', priority: 1,
+      id: 'rrsp', category: 'Registered accounts', priority: 1,
       title: 'Contribute to your RRSP',
-      detail: `You appear to have about $${money(roomLeft).toLocaleString('en-CA')} of unused RRSP room. A contribution of roughly $${money(suggested).toLocaleString('en-CA')} could reduce your taxable income and, at your marginal rate, potentially lower your tax by the amount shown.`,
+      mechanism: 'Lowers your taxable income',
+      where: 'Your RRSP (Registered Retirement Savings Plan)',
+      how: `Contribute about ${cash(suggested)} before the deadline (the first 60 days of the year). You appear to have roughly ${cash(roomLeft)} of unused room.`,
+      why: `Every dollar you put in is subtracted from the income you're taxed on, so at your ${Math.round(mr * 100)}% marginal rate it comes straight off your tax bill. The money then grows sheltered until you withdraw it in retirement, usually at a lower rate.`,
       impact: money(suggested * mr), impactLabel: 'est. tax reduction',
       citation: 'Income Tax Act s.146 · RRSP deduction limit',
     });
@@ -979,9 +989,12 @@ function findOpportunities(ret, health) {
   if (p.firstTimeHomeBuyer && !p.ownsHome) {
     const room = Math.max(0, data.federal.fhsaAnnual - p.fhsaDeduction);
     if (room > 0) push({
-      id: 'fhsa', category: 'Registered savings', priority: 1,
+      id: 'fhsa', category: 'Registered accounts', priority: 1,
       title: 'Open or top up a First Home Savings Account (FHSA)',
-      detail: `As a first-time home buyer you can contribute up to $${data.federal.fhsaAnnual.toLocaleString('en-CA')}/year to an FHSA. Contributions are deductible like an RRSP, and qualifying withdrawals for a home are tax-free — a rare combination.`,
+      mechanism: 'Deductible going in, tax-free coming out',
+      where: 'A First Home Savings Account (FHSA)',
+      how: `Open an FHSA and contribute up to ${cash(room)} this year (annual limit ${cash(data.federal.fhsaAnnual)}).`,
+      why: 'It is the best of both worlds: contributions are deductible like an RRSP — lowering your taxable income now — and qualifying withdrawals to buy your first home come out completely tax-free.',
       impact: money(room * mr), impactLabel: 'est. tax reduction',
       citation: 'Income Tax Act s.146.6 · FHSA',
     });
@@ -990,9 +1003,12 @@ function findOpportunities(ret, health) {
   // 3) TFSA sheltering ------------------------------------------------------
   if (p.interestIncome + p.eligibleDividends + p.nonEligibleDividends > 500 && (p.tfsaRoom == null || p.tfsaRoom > 5000)) {
     push({
-      id: 'tfsa', category: 'Registered savings', priority: 2,
+      id: 'tfsa', category: 'Registered accounts', priority: 2,
       title: 'Shelter investment income in a TFSA',
-      detail: 'You are reporting taxable investment income. Holding those investments inside a TFSA would let the growth and income compound completely tax-free. Consider using available TFSA room first.',
+      mechanism: 'Tax-free growth, forever',
+      where: 'A Tax-Free Savings Account (TFSA)',
+      how: 'Move your interest- and dividend-paying investments inside your TFSA, using available room first.',
+      why: 'You are paying tax on this investment income every single year. Held inside a TFSA, the same growth and income are 100% tax-free — permanently.',
       impactLabel: 'tax-free growth',
       citation: 'Income Tax Act s.146.2 · TFSA',
     });
@@ -1001,17 +1017,23 @@ function findOpportunities(ret, health) {
   // 4) Tuition — claim / transfer / carry forward --------------------------
   if (p.tuition > 0) {
     push({
-      id: 'tuition', category: 'Credits', priority: 2,
+      id: 'tuition', category: 'Tax credits', priority: 2,
       title: 'Use your tuition credit fully',
-      detail: `Your $${money(p.tuition).toLocaleString('en-CA')} tuition earns a 15% federal credit plus a provincial amount. If you don't need it all this year, up to $5,000 can be transferred to a parent, grandparent, or spouse, and the rest carries forward indefinitely.`,
+      mechanism: 'Cuts your tax directly',
+      where: 'Your return — or transfer up to $5,000 to a parent, grandparent, or spouse',
+      how: `Claim your ${cash(p.tuition)} of tuition. If you don't need it all this year, transfer up to $5,000 to a supporting family member and carry the remainder forward.`,
+      why: 'Tuition is a credit that reduces tax dollar-for-dollar at ~15% federally plus a provincial amount. Unused tuition is never lost — it transfers or carries forward indefinitely.',
       impact: money(p.tuition * 0.15), impactLabel: 'est. federal credit',
       citation: 'Income Tax Act s.118.5 / s.118.9 · Tuition',
     });
   } else if (p.isStudent) {
     push({
-      id: 'tuition-missing', category: 'Credits', priority: 2,
+      id: 'tuition-missing', category: 'Tax credits', priority: 2,
       title: 'Add your T2202 tuition certificate',
-      detail: 'You indicated you are a student but no tuition has been captured. Download your T2202 from your school\'s portal — the tuition credit is one of the most commonly missed by students.',
+      mechanism: 'Cuts your tax directly',
+      where: "Your school's student portal (the T2202 slip)",
+      how: 'Download your T2202 from your school and add it to your documents so the credit is captured.',
+      why: 'You indicated you are a student but no tuition was found. The tuition credit is one of the most commonly missed by students — it lowers your tax directly, and any unused part carries forward.',
       impactLabel: 'missing credit', citation: 'Income Tax Act s.118.5',
     });
   }
@@ -1020,16 +1042,22 @@ function findOpportunities(ret, health) {
   if (p.medicalExpenses > 0) {
     const married = p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw';
     if (married) push({
-      id: 'medical-pool', category: 'Credits', priority: 2,
+      id: 'medical-pool', category: 'Tax credits', priority: 2,
       title: 'Claim medical expenses on the lower-income spouse',
-      detail: 'Medical expenses are reduced by 3% of the claimant\'s net income (up to a cap). Claiming the whole family\'s eligible expenses on the lower-income spouse shrinks that 3% reduction and usually yields a larger credit.',
+      mechanism: 'Cuts your tax directly',
+      where: "The lower-income spouse's return",
+      how: "Total the whole family's eligible medical receipts and claim them on whichever spouse has the lower net income.",
+      why: 'Medical expenses only count above 3% of the claimant\'s net income. Putting them on the lower earner shrinks that 3% floor, so more of your receipts convert into an actual credit.',
       impact: money(Math.min(p.medicalExpenses, 2000) * 0.03 * (ret.marginalRate)), impactLabel: 'est. additional credit',
       citation: 'Income Tax Act s.118.2 · Medical expense credit',
     });
     if (ret.credits.medicalEligible <= 0) push({
-      id: 'medical-threshold', category: 'Credits', priority: 3,
+      id: 'medical-threshold', category: 'Tax credits', priority: 3,
       title: 'Your medical expenses are below the threshold',
-      detail: `Only medical costs above $${money(ret.credits.medicalThreshold).toLocaleString('en-CA')} (3% of net income) count this year. You can claim any 12-month period ending in the tax year — grouping receipts into one window can push you over the threshold.`,
+      mechanism: 'Timing move',
+      where: 'A single 12-month claim window',
+      how: `Group receipts into one 12-month period ending in the tax year to push past the ${cash(ret.credits.medicalThreshold)} threshold.`,
+      why: 'Only medical costs above 3% of your net income count this year. Bunching two years of expenses into one claim period can lift you over that line so they finally count.',
       impactLabel: 'timing', citation: 'Income Tax Act s.118.2',
     });
   }
@@ -1037,9 +1065,12 @@ function findOpportunities(ret, health) {
   // 6) Donations — pooling & carry-forward ---------------------------------
   if (p.donations > 0) {
     push({
-      id: 'donations', category: 'Credits', priority: 3,
+      id: 'donations', category: 'Tax credits', priority: 3,
       title: 'Optimize your charitable donations',
-      detail: 'The donation credit jumps from 15% to 29% (federal) on amounts over $200. Pooling both spouses\' donations on one return, or carrying donations forward up to 5 years to cross $200 in a single year, increases the credit.',
+      mechanism: 'Cuts your tax directly',
+      where: 'One spouse\'s return (pooled), or carried forward up to 5 years',
+      how: 'Combine both spouses\' donation receipts on a single return, or save smaller donations and claim them together once they exceed $200.',
+      why: 'The federal credit jumps from 15% to 29% on the portion above $200 — so pooling everything into one larger claim is worth noticeably more than scattering it.',
       impact: money(Math.max(0, p.donations - 200) * 0.14), impactLabel: 'est. extra credit',
       citation: 'Income Tax Act s.118.1 · Charitable donations',
     });
@@ -1048,9 +1079,12 @@ function findOpportunities(ret, health) {
   // 7) Pension income splitting --------------------------------------------
   if ((p.pensionIncome > 0) && (p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw')) {
     push({
-      id: 'pension-split', category: 'Planning', priority: 1,
+      id: 'pension-split', category: 'Income splitting', priority: 1,
       title: 'Split eligible pension income with your spouse',
-      detail: 'Up to 50% of eligible pension income can be allocated to a lower-income spouse, moving it into a lower tax bracket and potentially preserving age-based credits. This is elected on the return each year.',
+      mechanism: 'Moves income to a lower tax bracket',
+      where: "Your spouse's return (up to 50% of eligible pension income)",
+      how: 'Elect on your return each year to move up to half of your eligible pension income onto your lower-income spouse.',
+      why: 'It shifts income out of your higher bracket into your spouse\'s lower one, trims the household tax bill, and can help preserve age-based credits.',
       impact: money(Math.min(p.pensionIncome * 0.5, 20000) * (ret.marginalRate * 0.4)), impactLabel: 'est. household saving',
       citation: 'Income Tax Act s.60.03 · Pension income splitting',
     });
@@ -1060,9 +1094,12 @@ function findOpportunities(ret, health) {
   const workingIncome = p.employmentIncome + p.selfEmploymentIncome;
   if (workingIncome > 3000 && ret.netIncome < data.federal.cwb.familyPhaseOut) {
     push({
-      id: 'cwb', category: 'Benefits', priority: 2,
+      id: 'cwb', category: 'Government benefits', priority: 2,
       title: 'You may qualify for the Canada Workers Benefit',
-      detail: 'The CWB is a refundable credit for lower-income workers — it pays out even if you owe no tax. Filing a return (and the Schedule 6) is all it takes to receive it.',
+      mechanism: 'Refundable — pays out even at $0 tax',
+      where: 'Filed on Schedule 6 of your return',
+      how: 'File your return with Schedule 6 — even if you owe no tax at all.',
+      why: 'The CWB is a refundable credit for lower-income workers: the government pays it to you even when your tax is zero. Filing is all it takes to receive it.',
       impactLabel: 'refundable benefit', citation: 'Income Tax Act s.122.7 · CWB',
     });
   }
@@ -1072,7 +1109,10 @@ function findOpportunities(ret, health) {
     push({
       id: 'childcare', category: 'Deductions', priority: 2,
       title: 'Claim your child care expenses',
-      detail: 'Eligible child care costs (daycare, day camps, before/after-school care) are deductible so you can work or study — generally claimed by the lower-income spouse. This is a deduction, not just a credit, so it reduces income directly.',
+      mechanism: 'Lowers your taxable income',
+      where: "The lower-income spouse's return (line 21400)",
+      how: 'Gather daycare, day-camp and before/after-school receipts and claim them, generally on the lower-earning spouse.',
+      why: 'Child care is a deduction, not just a credit — it comes straight off your income before tax is calculated, so it is worth your full marginal rate.',
       impactLabel: 'missing deduction', citation: 'Income Tax Act s.63 · Child care expenses',
     });
   }
@@ -1080,9 +1120,12 @@ function findOpportunities(ret, health) {
   // 10) Child benefit --------------------------------------------------------
   if (p.dependants > 0) {
     push({
-      id: 'ccb', category: 'Benefits', priority: 3,
-      title: 'Make sure you\'re receiving the Canada Child Benefit',
-      detail: 'The CCB is a tax-free monthly payment based on family net income and number of children. It is only paid if you (and your spouse) file a return every year.',
+      id: 'ccb', category: 'Government benefits', priority: 3,
+      title: "Make sure you're receiving the Canada Child Benefit",
+      mechanism: 'Tax-free monthly payment',
+      where: 'Paid monthly by the CRA once you file',
+      how: 'Make sure both you and your spouse file a return every year to keep the payments flowing.',
+      why: 'The CCB is a tax-free monthly payment based on family net income and number of children — but the CRA only pays it if your returns are filed.',
       impactLabel: 'tax-free benefit', citation: 'Income Tax Act s.122.6 · CCB',
     });
   }
@@ -1092,7 +1135,10 @@ function findOpportunities(ret, health) {
     push({
       id: 'employment-exp', category: 'Deductions', priority: 3,
       title: 'Check whether you can claim employment expenses',
-      detail: 'If your employer requires you to pay for work expenses (home office, supplies, a vehicle) and signs a Form T2200, those costs may be deductible. Many employees who work from home never ask for the form.',
+      mechanism: 'Lowers your taxable income',
+      where: 'Your return (line 22900), backed by a signed Form T2200',
+      how: 'Ask your employer to sign Form T2200, then claim eligible home-office, supplies or vehicle costs.',
+      why: 'If your job requires you to pay for these, they are deductible — reducing your taxable income at your full marginal rate. Many work-from-home employees simply never ask for the form.',
       impactLabel: 'potential deduction', citation: 'Income Tax Act s.8 · Employment expenses / T2200',
     });
   }
@@ -1100,9 +1146,12 @@ function findOpportunities(ret, health) {
   // 12) Spousal amount -------------------------------------------------------
   if ((p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw') && p.spouseNetIncome < data.federal.bpa.max && ret.credits.spousal > 0) {
     push({
-      id: 'spousal', category: 'Credits', priority: 3,
+      id: 'spousal', category: 'Tax credits', priority: 3,
       title: 'Spousal amount is available',
-      detail: `Because your spouse's net income is below the basic personal amount, you can claim the spousal amount — worth roughly 15% of the shortfall federally, plus a provincial amount. This has been reflected in your estimate.`,
+      mechanism: 'Cuts your tax directly',
+      where: 'Your return (the spousal amount)',
+      how: 'Already applied in your estimate — claim the spousal amount because your spouse\'s income is below the basic personal amount.',
+      why: 'It gives you a credit worth about 15% federally (plus a provincial amount) of the gap between your spouse\'s income and the basic personal amount.',
       impact: money(ret.credits.spousal * 0.15), impactLabel: 'est. federal credit',
       citation: 'Income Tax Act s.118(1)(a) · Spousal amount',
     });
@@ -1111,9 +1160,12 @@ function findOpportunities(ret, health) {
   // 13) Capital gains / loss planning ---------------------------------------
   if (p.capitalGains > 0) {
     push({
-      id: 'capgains', category: 'Planning', priority: 3,
+      id: 'capgains', category: 'Income splitting', priority: 3,
       title: 'Consider tax-loss harvesting',
-      detail: 'Only 50% of a capital gain is taxable, but capital losses can offset gains. Realizing an unrealized loss before year-end (mindful of the 30-day superficial-loss rule) can reduce the tax on this year\'s gains.',
+      mechanism: 'Offsets taxable gains',
+      where: 'Your non-registered (taxable) investment account',
+      how: 'Before year-end, consider selling an investment that is down to realize the loss — then wait 30 days before rebuying it (the superficial-loss rule).',
+      why: 'Only 50% of a capital gain is taxable, and capital losses cancel out capital gains. Harvesting a loss trims the tax on this year\'s taxable gains.',
       impactLabel: 'planning', citation: 'Income Tax Act s.38–40 · Capital gains/losses',
     });
   }
@@ -1121,9 +1173,12 @@ function findOpportunities(ret, health) {
   // 14) Balance owing / instalments -----------------------------------------
   if (!ret.isRefund && Math.abs(ret.refundOrBalance) > 3000) {
     push({
-      id: 'instalments', category: 'Compliance', priority: 1,
+      id: 'instalments', category: 'Cash-flow & compliance', priority: 1,
       title: 'Plan for your balance owing',
-      detail: `Your estimate shows about $${money(Math.abs(ret.refundOrBalance)).toLocaleString('en-CA')} owing. If this recurs, CRA may require quarterly instalments. Setting money aside now (and considering an RRSP contribution before the deadline) softens the bill.`,
+      mechanism: 'Avoids interest & instalment surprises',
+      where: 'A separate savings buffer (and possibly CRA instalments)',
+      how: `Set money aside for the ~${cash(Math.abs(ret.refundOrBalance))} owing, and consider an RRSP contribution before the deadline to shrink it.`,
+      why: 'A recurring balance owing can trigger mandatory quarterly instalments. Planning ahead avoids CRA interest and a cash-flow crunch at filing time.',
       impactLabel: 'cash-flow', citation: 'Income Tax Act s.156 · Instalments',
     });
   }
@@ -1136,9 +1191,12 @@ function findOpportunities(ret, health) {
   // 15) Spousal RRSP — split income into retirement --------------------------
   if (married && incomeGap > 15000 && (p.employmentIncome + p.selfEmploymentIncome) > 0) {
     push({
-      id: 'spousal-rrsp', category: 'Planning', priority: 1,
+      id: 'spousal-rrsp', category: 'Income splitting', priority: 1,
       title: 'Use a spousal RRSP to split future income',
-      detail: 'Because you earn more than your spouse, contributing to a spousal RRSP lets you take the deduction now at your higher rate, while the withdrawals are taxed in your spouse’s hands later — usually at a lower rate. It uses your own RRSP room, so it stacks with your regular RRSP.',
+      mechanism: 'Deduct now high, withdraw later low',
+      where: 'A spousal RRSP (you contribute, your spouse owns it)',
+      how: 'Contribute to a spousal RRSP using your own RRSP room — it stacks on top of your regular RRSP contributions.',
+      why: 'You take the deduction now at your higher rate; the money is later withdrawn and taxed in your spouse\'s hands at their lower rate. Net result: less household tax over time.',
       impact: money(Math.min(roomLeft || 6000, 6000) * Math.max(mr - 0.2, 0.05)), impactLabel: 'est. household saving',
       citation: 'Income Tax Act s.146(5.1) · Spousal RRSP',
     });
@@ -1147,9 +1205,12 @@ function findOpportunities(ret, health) {
   // 16) Home Buyers' Plan — stack with FHSA ----------------------------------
   if (p.firstTimeHomeBuyer && !p.ownsHome) {
     push({
-      id: 'hbp', category: 'Registered savings', priority: 2,
+      id: 'hbp', category: 'Registered accounts', priority: 2,
       title: 'Stack the Home Buyers’ Plan with your FHSA',
-      detail: 'As a first-time buyer you can also withdraw up to $60,000 from your RRSP tax-free under the Home Buyers’ Plan (repaid over 15 years). Combined with an FHSA, that’s a much larger tax-advantaged down payment — and RRSP contributions still give you a deduction on the way in.',
+      mechanism: 'Tax-free withdrawal for a home',
+      where: 'Your RRSP (a Home Buyers’ Plan withdrawal)',
+      how: 'As a first-time buyer, withdraw up to $60,000 from your RRSP tax-free for a down payment (repaid over 15 years) — stacked on top of your FHSA.',
+      why: 'You still get the deduction when you contribute, then pull the money out tax-free for the home. Combined with an FHSA it builds a much larger tax-advantaged down payment.',
       impactLabel: 'tax-free withdrawal', citation: 'Income Tax Act s.146.01 · Home Buyers’ Plan',
     });
   }
@@ -1158,9 +1219,12 @@ function findOpportunities(ret, health) {
   if (hasInvestments && (p.donations > 0 || p.capitalGains > 0)) {
     const avoided = p.capitalGains > 0 ? money(p.capitalGains * data.federal.capitalGainsInclusion * mr) : null;
     push({
-      id: 'donate-securities', category: 'Credits', priority: 2,
+      id: 'donate-securities', category: 'Tax credits', priority: 2,
       title: 'Donate appreciated stock instead of cash',
-      detail: 'Donating publicly-traded shares or ETFs directly to a registered charity eliminates the capital-gains tax on them entirely, and you still get the full donation credit on the fair market value — one of the most tax-efficient ways to give.',
+      mechanism: 'Erases the gains tax + full credit',
+      where: 'Directly to the charity — in shares, not cash',
+      how: 'Transfer appreciated publicly-traded stock or ETFs straight to a registered charity, rather than selling them and donating the cash.',
+      why: 'Donating shares in-kind eliminates the capital-gains tax on them entirely, and you still receive the full donation credit on their market value — the single most tax-efficient way to give.',
       impact: avoided, impactLabel: avoided ? 'est. gains tax avoided' : 'gains-tax-free giving',
       citation: 'Income Tax Act s.38(a.1) · Gifts of listed securities',
     });
@@ -1169,9 +1233,12 @@ function findOpportunities(ret, health) {
   // 18) Prescribed-rate loan — split investment income -----------------------
   if (married && mr >= 0.4 && p.spouseNetIncome < ret.netIncome * 0.5 && hasInvestments) {
     push({
-      id: 'income-splitting-loan', category: 'Planning', priority: 3,
+      id: 'income-splitting-loan', category: 'Income splitting', priority: 3,
       title: 'Split investment income with a prescribed-rate loan',
-      detail: 'With a large income gap and taxable investments, lending money to your lower-income spouse at the CRA’s prescribed rate lets the investment income be taxed in their hands, at a lower rate — a legitimate way around the attribution rules. Best set up with a professional.',
+      mechanism: 'Moves investment income to a lower rate',
+      where: 'A documented loan to your lower-income spouse at the CRA prescribed rate',
+      how: 'Lend money to your spouse at the CRA’s prescribed rate (properly documented) and have them invest it. Best set up with a professional.',
+      why: 'The investment income is then taxed in your spouse\'s lower bracket instead of yours — a legitimate way around the income-attribution rules.',
       impactLabel: 'household saving', citation: 'Income Tax Act s.74.5(2) · Prescribed-rate loan',
     });
   }
@@ -1181,7 +1248,10 @@ function findOpportunities(ret, health) {
     push({
       id: 'carrying-charges', category: 'Deductions', priority: 3,
       title: 'Deduct investment interest & carrying charges',
-      detail: 'Interest on money borrowed to earn investment income is generally tax-deductible, as are eligible investment-management and accounting fees. If you have an investment loan or advisory fees, track them — they reduce your taxable income directly.',
+      mechanism: 'Lowers your taxable income',
+      where: 'Your return (carrying charges, line 22100)',
+      how: 'Track interest on investment loans and eligible investment-management or accounting fees, and claim them.',
+      why: 'Interest on money borrowed to earn investment income — plus eligible advisory fees — is deductible, reducing your taxable income directly.',
       impactLabel: 'potential deduction', citation: 'Income Tax Act s.20(1)(c) · Interest & carrying charges',
     });
   }
