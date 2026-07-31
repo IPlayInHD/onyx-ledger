@@ -375,7 +375,7 @@ function buildAdvisory(ret, health, opportunities) {
     averageRate: ret.averageRate,
     priorityActions: next,
     disclaimer:
-      'This is an educational estimate generated from the information provided, not tax advice, an audit-risk assessment, or a filed return. Figures use current federal and provincial parameters but simplify parts of the calculation. Confirm your specifics with the CRA or a licensed tax professional before acting. ONYX does not file your return and is not affiliated with the CRA.',
+      'ONYX runs the CRA’s published federal and provincial method and reconciles your figures the way an accountant would before sign-off — see Assurance & reliability above for this audit’s confidence score and cross-checks. Treat it as a professional-grade analysis of the information you provided; its reliability follows that confidence score. It is not a return filed with the CRA — ONYX does not transmit returns, which requires NETFILE certification — so confirm the specifics before you file. ONYX is not affiliated with the CRA.',
   };
 }
 

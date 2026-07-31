@@ -11,7 +11,7 @@ const OUT = path.join(__dirname, '..', '..', 'static-site');
 const ICON = `<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />`;
 
 fs.mkdirSync(OUT, { recursive: true });
-const order = ['taxData','taxEngine','extract','scoring','advisory','checklist','planner','verify','index'];
+const order = ['taxData','taxEngine','extract','scoring','advisory','checklist','planner','verify','assurance','index'];
 let engine = '';
 for (const m of order) {
   const lines = fs.readFileSync(path.join(SRC, 'engine', m + '.js'), 'utf8').split('\n');
