@@ -43,7 +43,7 @@
   <p>Trust should be earned, not asserted. This page documents exactly how the engine turns your figures into an estimate, the sources behind every constant, how the calculation is verified, and where it deliberately simplifies. Nothing here is a black box.</p>
 
   <div class="warn">
-    <p style="margin:0"><b>Onyx Ledger is not CRA-certified filing software and does not file your taxes.</b> In Canada, software that transmits a return to the CRA must pass <b>NETFILE certification</b> — an annual program with the CRA's own test cases. This tool produces <b>educational estimates</b> to help you understand and plan. Always confirm with the CRA or a licensed professional before you file.</p>
+    <p style="margin:0"><b>Onyx Ledger produces a professional-grade, reconciled analysis — it does not file your taxes.</b> In Canada, software that <i>transmits</i> a return to the CRA must pass <b>NETFILE certification</b>. Onyx computes and reconciles your return using the CRA's published method and shows a per-audit confidence score, but it does not transmit anything to the CRA. That one boundary is deliberate and is the honest limit of any tool that isn't NETFILE-certified — always confirm with the CRA or a licensed professional before you file.</p>
   </div>
 
   <h2>Engine &amp; data version</h2>
@@ -77,13 +77,23 @@
     <li><b>Deterministic:</b> the engine is pure — the same inputs always yield the same result, with no hidden state.</li>
   </ul>
 
+  <h2>How each audit reconciles itself — the assurance layer</h2>
+  <p>Verifying the engine isn't enough; the <i>data</i> for your specific return has to hold together too. Before every audit is shown, Onyx runs the same reconciliation a tax accountant would before signing off, and turns it into a <b>confidence score</b> you can see:</p>
+  <ul>
+    <li><b>Payroll reconciliation:</b> CPP, EI and withholding are re-derived from your employment income and reconciled against your slips. Blanks, amounts over the annual maximum (recoverable over-contributions), and figures that don't match are flagged.</li>
+    <li><b>Internal tie-out:</b> federal + provincial tax must reconcile exactly to the total, and no tax or credit may be negative — checked on every audit.</li>
+    <li><b>Coverage &amp; scope:</b> what you told us about your situation (investments, rental, foreign, crypto, self-employment, student) is compared with what was captured, and anything the engine doesn't model is <b>disclosed</b> rather than silently omitted.</li>
+    <li><b>Confidence score:</b> those checks, your documentation quality, and the data-verification status combine into a 0–100 reliability score for <i>your</i> audit, with the drivers shown. A sparse, unreconciled return scores low on purpose; a complete, fully-reconciled one scores high.</li>
+    <li><b>Assumptions ledger:</b> only the modelling assumptions that actually affect your numbers are listed, so nothing is hidden.</li>
+  </ul>
+
   <h2>Documented limitations</h2>
   <ul>
     <li>Net income is used as a proxy for taxable income (no loss carryovers or specialized deductions).</li>
     <li>Provincial dividend tax credits and some province-specific amounts are approximated.</li>
     <li>Image OCR requires an OCR provider; the demo reads structured entries and text.</li>
     <li>Benefit estimates (GST/HST, Canada Carbon Rebate, CCB) use simplified formulas.</li>
-    <li>It is an estimate — not a filed return, not tax advice, and not CRA-certified.</li>
+    <li>It is a reconciled analysis with a stated confidence level — not a return transmitted to the CRA, and not NETFILE-certified for filing.</li>
   </ul>
 
   <h2>Want authoritative numbers?</h2>
