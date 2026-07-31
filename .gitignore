@@ -1,3 +1,7 @@
 node_modules/
 .netlify/
 *.log
+# Build artifacts / generated deliverables
+*.zip
+server/data/db.json
+server/dashboard-preview.png
