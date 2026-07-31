@@ -233,7 +233,42 @@ function indexProvinces(base, factor) {
   return out;
 }
 const PROVINCES_2025 = indexProvinces(PROVINCES_2024, 1.028);
-// Alberta 2025: new 8% bracket on the first $60,000 (credits still valued at 10%).
+// By default, indexed 2025 figures are preliminary estimates until confirmed
+// against each jurisdiction's published amounts.
+for (const code of Object.keys(PROVINCES_2025)) PROVINCES_2025[code].verified2025 = false;
+
+// ---------------------------------------------------------------------------
+// 2025 provincial figures VERIFIED against official sources (ON, BC, AB, QC —
+// the four most populous jurisdictions). Each carries verified2025: true.
+// ---------------------------------------------------------------------------
+
+// Ontario 2025 — verified vs CRA provincial rates. Note the top two bracket
+// thresholds ($150,000 / $220,000) are NOT indexed; only the first two are.
+PROVINCES_2025.ON = {
+  name: 'Ontario',
+  brackets: [
+    { upTo: 52886, rate: 0.0505 }, { upTo: 105775, rate: 0.0915 }, { upTo: 150000, rate: 0.1116 },
+    { upTo: 220000, rate: 0.1216 }, { upTo: Infinity, rate: 0.1316 },
+  ],
+  bpa: 12747, creditRate: 0.0505,
+  surtax: [ { over: 5710, rate: 0.20 }, { over: 7307, rate: 0.36 } ],
+  healthPremium: PROVINCES_2024.ON.healthPremium,
+  verified2025: true,
+};
+
+// British Columbia 2025 — verified vs CRA provincial rates.
+PROVINCES_2025.BC = {
+  name: 'British Columbia',
+  brackets: [
+    { upTo: 49279, rate: 0.0506 }, { upTo: 98560, rate: 0.077 }, { upTo: 113158, rate: 0.105 },
+    { upTo: 137407, rate: 0.1229 }, { upTo: 186306, rate: 0.147 }, { upTo: 259829, rate: 0.168 },
+    { upTo: Infinity, rate: 0.205 },
+  ],
+  bpa: 12932, creditRate: 0.0506,
+  verified2025: true,
+};
+
+// Alberta 2025 — verified. New 8% bracket on the first $60,000 (credits at 10%).
 PROVINCES_2025.AB = {
   name: 'Alberta',
   brackets: [
@@ -241,6 +276,19 @@ PROVINCES_2025.AB = {
     { upTo: 241974, rate: 0.13 }, { upTo: 362961, rate: 0.14 }, { upTo: Infinity, rate: 0.15 },
   ],
   bpa: 22323, creditRate: 0.10,
+  verified2025: true,
+};
+
+// Quebec 2025 — verified vs Revenu Québec published brackets (credits at 14%).
+PROVINCES_2025.QC = {
+  name: 'Quebec',
+  brackets: [
+    { upTo: 53255, rate: 0.14 }, { upTo: 106495, rate: 0.19 }, { upTo: 129590, rate: 0.24 },
+    { upTo: Infinity, rate: 0.2575 },
+  ],
+  bpa: 18571, creditRate: 0.14,
+  abatement: 0.165,
+  verified2025: true,
 };
 
 const TAX_DATA = {
@@ -1420,7 +1468,7 @@ const ENGINE_VERSION = '1.0.0';
 
 const DATA_STATUS = {
   2024: { label: 'Constants verified for the 2024 tax year', verified: true },
-  2025: { label: 'Federal verified vs CRA (incl. the July 2025 rate cut to a blended 14.5%); provincial figures preliminary (indexed)', verified: false },
+  2025: { label: 'Federal verified vs CRA (incl. the July 2025 rate cut to a blended 14.5%); ON, BC, AB & QC provincial figures verified vs official sources, other provinces preliminary (indexed)', verified: true },
 };
 
 // Each expected value is computed with the published CRA method; see methodology.html.
@@ -1447,11 +1495,13 @@ const REFERENCE_CASES = [
     expect: { federal: 14090.92, provincial: 5655.12, total: 19746.04 },
   },
   {
-    // FEDERAL-ONLY anchor for 2025 (verified rate): the July 2025 cut → blended 14.5%.
-    name: 'Federal · employee · $60,000 · 2025 (blended 14.5%)',
+    // Full 2025 anchor: federal (blended 14.5% from the July 2025 cut) + Ontario
+    // (verified 2025 provincial brackets, credits, and health premium).
+    name: 'Ontario · employee · $60,000 · 2025 (blended 14.5%)',
     input: { province: 'ON', year: 2025, employmentIncome: 60000, cppContrib: 3361.75, eiContrib: 984 },
     // Federal: 14.5%×57,375 + 20.5%×2,625 = 8,857.50; credits 14.5%×(16,129+3,361.75+984+1,471)=3,182.13 → 5,675.37
-    expect: { federal: 5675.37 },
+    // Ontario: 5.05%×52,886 + 9.15%×7,114 = 3,321.67; credits 5.05%×(12,747+3,361.75+984)=863.18 → 2,458.49; +$600 health premium = 3,058.49
+    expect: { federal: 5675.37, provincial: 3058.49, total: 8733.86 },
   },
 ];
 
@@ -1530,12 +1580,7 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
     province: ret.province,
     provinceName: ret.provinceName,
     // provenance: which engine + data produced this audit (shown to the user)
-    engine: {
-      version: ENGINE_VERSION,
-      dataStatus: (DATA_STATUS[taxYear] || {}).label || `${taxYear} constants`,
-      dataVerified: !!(DATA_STATUS[taxYear] || {}).verified,
-      methodologyUrl: 'methodology.html',
-    },
+    engine: provenance(taxYear, ret.province, ret.provinceName),
     return: stripInternal(ret),
     health,
     documents: scan.documents,
@@ -1572,6 +1617,35 @@ function simulate({ profile = {}, financial = {}, documents = [], year, override
     marginalRate: ret.marginalRate, averageRate: ret.averageRate,
     taxableIncome: ret.taxableIncome, totalTax: ret.tax.total,
     bracketFederal: ret.bracketFederal, cashflow: ret.cashflow,
+  };
+}
+
+/**
+ * Build the provenance stamp for an audit. For 2025, the federal figures are
+ * CRA-verified but provincial verification is per-jurisdiction: a province is
+ * only "verified" once confirmed against its published amounts (verified2025).
+ * dataVerified therefore requires BOTH the year's federal status AND, for that
+ * province, its own verification flag.
+ */
+function provenance(taxYear, province, provinceName) {
+  const status = DATA_STATUS[taxYear] || {};
+  const provData = (getTaxData(taxYear).provinces || {})[province] || {};
+  // 2024 constants are fully verified; 2025 depends on the province.
+  const provinceVerified = taxYear === 2025 ? !!provData.verified2025 : !!status.verified;
+  const dataVerified = !!status.verified && provinceVerified;
+  let dataStatus = status.label || `${taxYear} constants`;
+  if (taxYear === 2025) {
+    dataStatus += provinceVerified
+      ? ` — ${provinceName} provincial figures verified vs official source`
+      : ` — ${provinceName} provincial figures preliminary (indexed estimate)`;
+  }
+  return {
+    version: ENGINE_VERSION,
+    dataStatus,
+    dataVerified,
+    provinceVerified,
+    federalVerified: !!status.verified,
+    methodologyUrl: 'methodology.html',
   };
 }
 

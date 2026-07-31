@@ -24,7 +24,7 @@ const ENGINE_VERSION = '1.0.0';
 
 const DATA_STATUS = {
   2024: { label: 'Constants verified for the 2024 tax year', verified: true },
-  2025: { label: 'Federal verified vs CRA (incl. the July 2025 rate cut to a blended 14.5%); provincial figures preliminary (indexed)', verified: false },
+  2025: { label: 'Federal verified vs CRA (incl. the July 2025 rate cut to a blended 14.5%); ON, BC, AB & QC provincial figures verified vs official sources, other provinces preliminary (indexed)', verified: true },
 };
 
 // Each expected value is computed with the published CRA method; see methodology.html.
@@ -51,11 +51,13 @@ const REFERENCE_CASES = [
     expect: { federal: 14090.92, provincial: 5655.12, total: 19746.04 },
   },
   {
-    // FEDERAL-ONLY anchor for 2025 (verified rate): the July 2025 cut → blended 14.5%.
-    name: 'Federal · employee · $60,000 · 2025 (blended 14.5%)',
+    // Full 2025 anchor: federal (blended 14.5% from the July 2025 cut) + Ontario
+    // (verified 2025 provincial brackets, credits, and health premium).
+    name: 'Ontario · employee · $60,000 · 2025 (blended 14.5%)',
     input: { province: 'ON', year: 2025, employmentIncome: 60000, cppContrib: 3361.75, eiContrib: 984 },
     // Federal: 14.5%×57,375 + 20.5%×2,625 = 8,857.50; credits 14.5%×(16,129+3,361.75+984+1,471)=3,182.13 → 5,675.37
-    expect: { federal: 5675.37 },
+    // Ontario: 5.05%×52,886 + 9.15%×7,114 = 3,321.67; credits 5.05%×(12,747+3,361.75+984)=863.18 → 2,458.49; +$600 health premium = 3,058.49
+    expect: { federal: 5675.37, provincial: 3058.49, total: 8733.86 },
   },
 ];
 

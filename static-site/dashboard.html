@@ -539,7 +539,7 @@ function renderReport(a) {
     <div class="calc-row"><span>Tax withheld / already paid</span><span class="v">−${money(r.taxWithheld)}</span></div>
     <div class="calc-row tot"><span>${r.isRefund?'Estimated refund':'Estimated balance owing'}</span><span class="v">${money(Math.abs(r.refundOrBalance))}</span></div>
     <div class="calc-sub">Assumptions</div>
-    <p class="hint" style="line-height:1.65">Uses ${r.year} federal &amp; provincial parameters. Net income is used as a proxy for taxable income (no loss carryovers or specialized deductions). Capital gains at 50% inclusion. Provincial dividend credits and some province-specific amounts are approximated.${r.year===2025?' 2025 provincial figures are indexed estimates pending verification.':''} These are educational estimates, not a filed return.</p>
+    <p class="hint" style="line-height:1.65">Uses ${r.year} federal &amp; provincial parameters. Net income is used as a proxy for taxable income (no loss carryovers or specialized deductions). Capital gains at 50% inclusion. Provincial dividend credits and some province-specific amounts are approximated.${r.year===2025?(eng.provinceVerified?` 2025 ${esc(r.provinceName)} provincial figures are verified against the official published amounts.`:` 2025 ${esc(r.provinceName)} provincial figures are preliminary indexed estimates pending verification.`):''} These are educational estimates, not a filed return.</p>
   </details></div></div>`;
 
   const dataHTML = `<h2 class="sectitle">Your data</h2>
@@ -577,7 +577,7 @@ function renderReport(a) {
       <span class="band" style="color:${tone};margin-top:.6rem">● ${h.band.label}</span>
     </div>
   </div></div></div>
-  ${r.year===2025?`<p class="hint" style="margin:.5rem 0 0">Note: 2025 federal figures are verified vs the CRA (incl. the July 2025 rate cut to a blended 14.5%). 2025 provincial figures are preliminary indexed estimates pending verification.</p>`:''}
+  ${r.year===2025?`<p class="hint" style="margin:.5rem 0 0">Note: 2025 federal figures are verified vs the CRA (incl. the July 2025 rate cut to a blended 14.5%). ${eng.provinceVerified?`2025 ${esc(r.provinceName)} provincial figures are verified against the official published amounts.`:`2025 ${esc(r.provinceName)} provincial figures are preliminary indexed estimates pending verification.`}</p>`:''}
   ${flowHTML}
 
   <div class="grid g2" style="margin-top:1rem">

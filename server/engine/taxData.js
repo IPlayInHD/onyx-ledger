@@ -229,7 +229,42 @@ function indexProvinces(base, factor) {
   return out;
 }
 const PROVINCES_2025 = indexProvinces(PROVINCES_2024, 1.028);
-// Alberta 2025: new 8% bracket on the first $60,000 (credits still valued at 10%).
+// By default, indexed 2025 figures are preliminary estimates until confirmed
+// against each jurisdiction's published amounts.
+for (const code of Object.keys(PROVINCES_2025)) PROVINCES_2025[code].verified2025 = false;
+
+// ---------------------------------------------------------------------------
+// 2025 provincial figures VERIFIED against official sources (ON, BC, AB, QC —
+// the four most populous jurisdictions). Each carries verified2025: true.
+// ---------------------------------------------------------------------------
+
+// Ontario 2025 — verified vs CRA provincial rates. Note the top two bracket
+// thresholds ($150,000 / $220,000) are NOT indexed; only the first two are.
+PROVINCES_2025.ON = {
+  name: 'Ontario',
+  brackets: [
+    { upTo: 52886, rate: 0.0505 }, { upTo: 105775, rate: 0.0915 }, { upTo: 150000, rate: 0.1116 },
+    { upTo: 220000, rate: 0.1216 }, { upTo: Infinity, rate: 0.1316 },
+  ],
+  bpa: 12747, creditRate: 0.0505,
+  surtax: [ { over: 5710, rate: 0.20 }, { over: 7307, rate: 0.36 } ],
+  healthPremium: PROVINCES_2024.ON.healthPremium,
+  verified2025: true,
+};
+
+// British Columbia 2025 — verified vs CRA provincial rates.
+PROVINCES_2025.BC = {
+  name: 'British Columbia',
+  brackets: [
+    { upTo: 49279, rate: 0.0506 }, { upTo: 98560, rate: 0.077 }, { upTo: 113158, rate: 0.105 },
+    { upTo: 137407, rate: 0.1229 }, { upTo: 186306, rate: 0.147 }, { upTo: 259829, rate: 0.168 },
+    { upTo: Infinity, rate: 0.205 },
+  ],
+  bpa: 12932, creditRate: 0.0506,
+  verified2025: true,
+};
+
+// Alberta 2025 — verified. New 8% bracket on the first $60,000 (credits at 10%).
 PROVINCES_2025.AB = {
   name: 'Alberta',
   brackets: [
@@ -237,6 +272,19 @@ PROVINCES_2025.AB = {
     { upTo: 241974, rate: 0.13 }, { upTo: 362961, rate: 0.14 }, { upTo: Infinity, rate: 0.15 },
   ],
   bpa: 22323, creditRate: 0.10,
+  verified2025: true,
+};
+
+// Quebec 2025 — verified vs Revenu Québec published brackets (credits at 14%).
+PROVINCES_2025.QC = {
+  name: 'Quebec',
+  brackets: [
+    { upTo: 53255, rate: 0.14 }, { upTo: 106495, rate: 0.19 }, { upTo: 129590, rate: 0.24 },
+    { upTo: Infinity, rate: 0.2575 },
+  ],
+  bpa: 18571, creditRate: 0.14,
+  abatement: 0.165,
+  verified2025: true,
 };
 
 const TAX_DATA = {

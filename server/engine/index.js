@@ -56,12 +56,7 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
     province: ret.province,
     provinceName: ret.provinceName,
     // provenance: which engine + data produced this audit (shown to the user)
-    engine: {
-      version: ENGINE_VERSION,
-      dataStatus: (DATA_STATUS[taxYear] || {}).label || `${taxYear} constants`,
-      dataVerified: !!(DATA_STATUS[taxYear] || {}).verified,
-      methodologyUrl: 'methodology.html',
-    },
+    engine: provenance(taxYear, ret.province, ret.provinceName),
     return: stripInternal(ret),
     health,
     documents: scan.documents,
@@ -98,6 +93,35 @@ function simulate({ profile = {}, financial = {}, documents = [], year, override
     marginalRate: ret.marginalRate, averageRate: ret.averageRate,
     taxableIncome: ret.taxableIncome, totalTax: ret.tax.total,
     bracketFederal: ret.bracketFederal, cashflow: ret.cashflow,
+  };
+}
+
+/**
+ * Build the provenance stamp for an audit. For 2025, the federal figures are
+ * CRA-verified but provincial verification is per-jurisdiction: a province is
+ * only "verified" once confirmed against its published amounts (verified2025).
+ * dataVerified therefore requires BOTH the year's federal status AND, for that
+ * province, its own verification flag.
+ */
+function provenance(taxYear, province, provinceName) {
+  const status = DATA_STATUS[taxYear] || {};
+  const provData = (getTaxData(taxYear).provinces || {})[province] || {};
+  // 2024 constants are fully verified; 2025 depends on the province.
+  const provinceVerified = taxYear === 2025 ? !!provData.verified2025 : !!status.verified;
+  const dataVerified = !!status.verified && provinceVerified;
+  let dataStatus = status.label || `${taxYear} constants`;
+  if (taxYear === 2025) {
+    dataStatus += provinceVerified
+      ? ` — ${provinceName} provincial figures verified vs official source`
+      : ` — ${provinceName} provincial figures preliminary (indexed estimate)`;
+  }
+  return {
+    version: ENGINE_VERSION,
+    dataStatus,
+    dataVerified,
+    provinceVerified,
+    federalVerified: !!status.verified,
+    methodologyUrl: 'methodology.html',
   };
 }
 
