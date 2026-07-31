@@ -101,6 +101,22 @@ const SLIP_MAP = {
     fields: { childCare: [/(?:total|amount)[^0-9]{0,12}([\d,]+\.?\d*)/i] },
     expected: ['childCare'],
   },
+  T2125: {
+    label: 'T2125 — Business / Self-employment Income',
+    fields: {
+      selfEmploymentIncome: [/gross[^0-9]{0,16}([\d,]+\.?\d*)/i, /(?:business|self[- ]?employment) income[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      selfEmploymentExpenses: [/(?:total )?expenses[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['selfEmploymentIncome'],
+  },
+  T776: {
+    label: 'T776 — Statement of Real Estate Rentals',
+    fields: {
+      rentalIncome: [/gross rents?[^0-9]{0,12}([\d,]+\.?\d*)/i, /rental income[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      rentalExpenses: [/(?:total )?expenses[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['rentalIncome'],
+  },
 };
 
 const num = (s) => (s == null ? null : parseFloat(String(s).replace(/[, $]/g, '')));
@@ -175,8 +191,9 @@ function scanDocuments(docs = [], ocrProvider = defaultOcr) {
   const financial = {};
   const results = [];
   const ADDITIVE = new Set([
-    'employmentIncome', 'selfEmploymentIncome', 'interestIncome', 'eligibleDividends',
-    'nonEligibleDividends', 'capitalGains', 'pensionIncome', 'otherIncome',
+    'employmentIncome', 'selfEmploymentIncome', 'selfEmploymentExpenses', 'interestIncome',
+    'eligibleDividends', 'nonEligibleDividends', 'capitalGains', 'pensionIncome', 'otherIncome',
+    'rentalIncome', 'rentalExpenses',
     'rrspDeduction', 'fhsaDeduction', 'unionDues', 'childCare', 'movingExpenses',
     'employmentExpenses', 'otherDeductions', 'tuition', 'medicalExpenses', 'donations',
     'cppContrib', 'eiContrib', 'taxWithheld',

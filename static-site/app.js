@@ -406,6 +406,11 @@ function normalizeProfile(p = {}) {
     capitalGains: n(p.capitalGains), // actual gain/loss; engine applies inclusion rate
     pensionIncome: nn(p.pensionIncome),
     otherIncome: nn(p.otherIncome),
+    // self-employment business expenses (reduce gross self-employment income)
+    selfEmploymentExpenses: nn(p.selfEmploymentExpenses),
+    // rental (gross rents + operating expenses; net can be a deductible loss)
+    rentalIncome: nn(p.rentalIncome),
+    rentalExpenses: nn(p.rentalExpenses),
     // deductions
     rrspDeduction: nn(p.rrspDeduction),
     fhsaDeduction: nn(p.fhsaDeduction),
@@ -448,21 +453,39 @@ function computeReturn(rawProfile) {
   const taxableCapitalGains = p.capitalGains * fed.capitalGainsInclusion;
   const grossedElig = p.eligibleDividends * (1 + fed.eligibleDiv.grossUp);
   const grossedNonElig = p.nonEligibleDividends * (1 + fed.nonEligibleDiv.grossUp);
+  // Self-employment net of business expenses; rental net of operating expenses.
+  // Both are ordinary income and may be a deductible loss (kept signed).
+  const netSelfEmployment = p.selfEmploymentIncome - p.selfEmploymentExpenses;
+  const netRental = p.rentalIncome - p.rentalExpenses;
+
+  // ---- Self-employed CPP (Schedule 8) ----
+  // The self-employed pay BOTH the employee and employer halves (2× the rate) on
+  // the pensionable earnings not already covered by employment. Half is a
+  // deduction (line 22200); half earns the CPP credit like an employee's share.
+  const cppCeiling = fed.cpp.max + fed.cpp.cpp2.max;
+  const empCppBase = clampPos(Math.min(p.employmentIncome, fed.cpp.maxPensionable) - fed.cpp.exemption);
+  const totCppBase = clampPos(Math.min(p.employmentIncome + clampPos(netSelfEmployment), fed.cpp.maxPensionable) - fed.cpp.exemption);
+  const seCppBase = clampPos(totCppBase - empCppBase);
+  const seCppTotal = round(seCppBase * fed.cpp.rate * 2);
+  const seCppDeduction = round(seCppTotal / 2);
+  const seCppCredit = seCppTotal / 2;
 
   const totalIncome =
-    p.employmentIncome + p.selfEmploymentIncome + p.interestIncome +
-    grossedElig + grossedNonElig + taxableCapitalGains + p.pensionIncome + p.otherIncome;
+    p.employmentIncome + netSelfEmployment + p.interestIncome +
+    grossedElig + grossedNonElig + taxableCapitalGains + p.pensionIncome + p.otherIncome + netRental;
 
   // ---- Deductions ----
   const totalDeductions =
     p.rrspDeduction + p.fhsaDeduction + p.unionDues + p.childCare +
-    p.movingExpenses + p.employmentExpenses + p.otherDeductions;
+    p.movingExpenses + p.employmentExpenses + p.otherDeductions + seCppDeduction;
 
   const netIncome = clampPos(totalIncome - totalDeductions);
   const taxableIncome = netIncome; // documented proxy
 
   // ---- Shared non-refundable credit amounts ----
-  const cpp = Math.min(p.cppContrib, fed.cpp.max + fed.cpp.cpp2.max);
+  // Employee CPP contributions plus the employee-equivalent half of self-employed CPP.
+  const employeeCpp = Math.min(p.cppContrib, cppCeiling);
+  const cpp = Math.min(p.cppContrib + seCppCredit, cppCeiling);
   const ei = Math.min(p.eiContrib, fed.ei.max);
   const canadaEmployment = p.employmentIncome > 0 ? Math.min(fed.canadaEmployment, p.employmentIncome) : 0;
   const pensionCredit = Math.min(fed.pensionIncomeMax, p.pensionIncome);
@@ -506,7 +529,10 @@ function computeReturn(rawProfile) {
 
   // ---- Totals ----
   const incomeTax = round(federalTax + provincialTax);
-  const refundOrBalance = round(p.taxWithheld - incomeTax); // + = refund, - = owing
+  // Self-employed CPP is payable with the return (line 42100), on top of income tax.
+  const cppPayableSE = seCppTotal;
+  const totalPayable = round(incomeTax + cppPayableSE);
+  const refundOrBalance = round(p.taxWithheld - totalPayable); // + = refund, - = owing
 
   // ---- Rates ----
   const totalTaxFn = (ti) =>
@@ -522,13 +548,13 @@ function computeReturn(rawProfile) {
     if (taxableIncome <= b.upTo) { bracketFederal = { rate: b.rate, from: lo, upTo: b.upTo === Infinity ? null : b.upTo, toNext: b.upTo === Infinity ? null : round(b.upTo - taxableIncome) }; break; }
     lo = b.upTo;
   }
-  const cpp2 = 0; // (CPP is already summed in `cpp`)
-  const takeHome = round(totalIncome - incomeTax - cpp - ei);
+  const cppCash = round(employeeCpp + cppPayableSE); // actual CPP out of pocket
+  const takeHome = round(totalIncome - incomeTax - cppCash - ei);
   const cashflow = {
     gross: round(totalIncome),
     federalTax: round(federalTax),
     provincialTax: round(provincialTax),
-    cpp: round(cpp), ei: round(ei),
+    cpp: cppCash, ei: round(ei),
     takeHome,
     takeHomePct: totalIncome > 0 ? round((takeHome / totalIncome) * 100) / 100 : 0,
   };
@@ -539,19 +565,21 @@ function computeReturn(rawProfile) {
     provinceName: PROVINCE_NAMES[p.province] || p.province,
     income: {
       employment: round(p.employmentIncome),
-      selfEmployment: round(p.selfEmploymentIncome),
+      selfEmployment: round(netSelfEmployment),
       interest: round(p.interestIncome),
       eligibleDividendsGrossed: round(grossedElig),
       nonEligibleDividendsGrossed: round(grossedNonElig),
       taxableCapitalGains: round(taxableCapitalGains),
       pension: round(p.pensionIncome),
+      rental: round(netRental),
       other: round(p.otherIncome),
       total: round(totalIncome),
     },
     deductions: {
       rrsp: round(p.rrspDeduction), fhsa: round(p.fhsaDeduction), unionDues: round(p.unionDues),
       childCare: round(p.childCare), moving: round(p.movingExpenses),
-      employment: round(p.employmentExpenses), other: round(p.otherDeductions),
+      employment: round(p.employmentExpenses), selfEmployedCpp: seCppDeduction,
+      other: round(p.otherDeductions),
       total: round(totalDeductions),
     },
     netIncome: round(netIncome),
@@ -579,6 +607,8 @@ function computeReturn(rawProfile) {
       healthPremium: round(ohp),
       provincial: round(provincialTax),
       total: incomeTax,
+      cppPayableSE: round(cppPayableSE),
+      totalPayable,
     },
     taxWithheld: round(p.taxWithheld),
     refundOrBalance,
@@ -703,6 +733,22 @@ const SLIP_MAP = {
     fields: { childCare: [/(?:total|amount)[^0-9]{0,12}([\d,]+\.?\d*)/i] },
     expected: ['childCare'],
   },
+  T2125: {
+    label: 'T2125 — Business / Self-employment Income',
+    fields: {
+      selfEmploymentIncome: [/gross[^0-9]{0,16}([\d,]+\.?\d*)/i, /(?:business|self[- ]?employment) income[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      selfEmploymentExpenses: [/(?:total )?expenses[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['selfEmploymentIncome'],
+  },
+  T776: {
+    label: 'T776 — Statement of Real Estate Rentals',
+    fields: {
+      rentalIncome: [/gross rents?[^0-9]{0,12}([\d,]+\.?\d*)/i, /rental income[^0-9]{0,12}([\d,]+\.?\d*)/i],
+      rentalExpenses: [/(?:total )?expenses[^0-9]{0,12}([\d,]+\.?\d*)/i],
+    },
+    expected: ['rentalIncome'],
+  },
 };
 
 const num = (s) => (s == null ? null : parseFloat(String(s).replace(/[, $]/g, '')));
@@ -777,8 +823,9 @@ function scanDocuments(docs = [], ocrProvider = defaultOcr) {
   const financial = {};
   const results = [];
   const ADDITIVE = new Set([
-    'employmentIncome', 'selfEmploymentIncome', 'interestIncome', 'eligibleDividends',
-    'nonEligibleDividends', 'capitalGains', 'pensionIncome', 'otherIncome',
+    'employmentIncome', 'selfEmploymentIncome', 'selfEmploymentExpenses', 'interestIncome',
+    'eligibleDividends', 'nonEligibleDividends', 'capitalGains', 'pensionIncome', 'otherIncome',
+    'rentalIncome', 'rentalExpenses',
     'rrspDeduction', 'fhsaDeduction', 'unionDues', 'childCare', 'movingExpenses',
     'employmentExpenses', 'otherDeductions', 'tuition', 'medicalExpenses', 'donations',
     'cppContrib', 'eiContrib', 'taxWithheld',
@@ -1256,6 +1303,37 @@ function findOpportunities(ret, health) {
     });
   }
 
+  // 20) Self-employment: deduct every eligible business expense --------------
+  if (p.selfEmploymentIncome > 0) {
+    const noExp = !p.selfEmploymentExpenses;
+    push({
+      id: 'self-emp-expenses', category: 'Deductions', priority: noExp ? 1 : 3,
+      title: noExp ? 'Deduct your business expenses' : 'Keep claiming every business expense',
+      mechanism: 'Lowers your taxable income',
+      where: 'Form T2125 (business income & expenses) on your return',
+      how: 'Track and deduct supplies, a reasonable share of vehicle costs, phone/internet, professional fees, and business-use-of-home (a portion of rent/utilities). Consider capital cost allowance on equipment.',
+      why: noExp
+        ? 'No business expenses were entered. Every eligible expense comes straight off your self-employment income, so it saves tax at your full marginal rate — and reduces your self-employed CPP too.'
+        : 'Each eligible expense reduces your self-employment income directly, lowering both income tax and the self-employed CPP you owe on it.',
+      impact: noExp ? money(Math.min(p.selfEmploymentIncome * 0.1, 8000) * (mr + 0.06)) : null,
+      impactLabel: noExp ? 'est. tax + CPP saved' : 'ongoing deduction',
+      citation: 'Income Tax Act s.9 / s.18 · Business income & expenses (T2125)',
+    });
+  }
+
+  // 21) Rental: deduct expenses & consider CCA -------------------------------
+  if (p.rentalIncome > 0 || ret.income.rental !== 0) {
+    push({
+      id: 'rental-expenses', category: 'Deductions', priority: 3,
+      title: 'Deduct your rental expenses (and consider CCA)',
+      mechanism: 'Lowers your taxable income',
+      where: 'Form T776 (statement of real-estate rentals)',
+      how: 'Deduct mortgage interest, property tax, insurance, repairs, condo fees, and management. Capital cost allowance (depreciation) can further reduce net rental income — but plan it, as it can be recaptured on sale.',
+      why: 'Rental income is taxed on the net amount, so every eligible expense reduces it directly at your marginal rate. CCA is optional and best used deliberately.',
+      impactLabel: 'deduction / timing', citation: 'Income Tax Act s.20(1)(a) · Rental expenses & CCA (T776)',
+    });
+  }
+
   // Sort: quantified impact first (desc) within priority, then qualitative.
   out.sort((a, b) => (a.priority - b.priority) || ((b.impact || 0) - (a.impact || 0)));
   return out;
@@ -1266,7 +1344,8 @@ function whatWeFound(ret, docSummary) {
   const f = [];
   const i = ret.income;
   if (i.employment > 0) f.push({ ok: true, label: 'Employment income', value: fmt(i.employment) });
-  if (i.selfEmployment > 0) f.push({ ok: true, label: 'Self-employment income', value: fmt(i.selfEmployment) });
+  if (i.selfEmployment !== 0) f.push({ ok: true, label: 'Self-employment (net)', value: fmt(i.selfEmployment) });
+  if (i.rental !== 0) f.push({ ok: true, label: 'Rental income (net)', value: fmt(i.rental) });
   if (i.interest > 0 || i.eligibleDividendsGrossed > 0) f.push({ ok: true, label: 'Investment income', value: fmt(i.interest + i.eligibleDividendsGrossed + i.nonEligibleDividendsGrossed) });
   if (ret.taxWithheld > 0) f.push({ ok: true, label: 'Tax already paid', value: fmt(ret.taxWithheld) });
   if (ret.deductions.rrsp > 0) f.push({ ok: true, label: 'RRSP contributions', value: fmt(ret.deductions.rrsp) });
@@ -1723,11 +1802,27 @@ function runConsistencyChecks(ret) {
       'You indicated you are a student, but no tuition (T2202) was captured — one of the most commonly missed credits.');
   }
 
-  // C5 — out-of-scope income (explicit liability guard)
-  if (p.hasRentalIncome) {
-    add('scope-rental', 'flag', 'Rental income is not modelled',
-      'You indicated rental income. This engine does not yet model rental income and expenses, so it is excluded from the estimate — add it with a professional before relying on the number.');
+  // C5 — rental income: now modelled (net rents). Reconcile declared vs entered.
+  const rentalNet = (p.rentalIncome || 0) - (p.rentalExpenses || 0);
+  if (p.hasRentalIncome || p.rentalIncome > 0) {
+    if ((p.rentalIncome || 0) === 0 && (p.rentalExpenses || 0) === 0) {
+      add('scope-rental', 'review', 'Rental declared but not entered',
+        'You indicated rental income but none was entered. Add your gross rents and operating expenses so the net rental income is included.');
+    } else {
+      add('scope-rental', 'pass', 'Rental income is included',
+        `Net rental income of ${asuCash(rentalNet)} is included as ordinary income. Capital cost allowance (depreciation) is optional and not auto-applied.`);
+    }
   }
+
+  // Self-employment: now modelled with self-employed CPP + business expenses.
+  if (p.selfEmploymentIncome > 0) {
+    add('scope-selfemp', p.selfEmploymentExpenses > 0 ? 'pass' : 'review', 'Self-employment is included',
+      p.selfEmploymentExpenses > 0
+        ? 'Net self-employment income and self-employed CPP (both employer and employee portions, Schedule 8) are modelled. GST/HST and capital cost allowance are not — confirm those separately.'
+        : 'Self-employment income and self-employed CPP are modelled, but no business expenses were entered. If you have any (supplies, vehicle, home office), enter them — they reduce your income directly.');
+  }
+
+  // Still genuinely out of scope — disclosed, never silently dropped.
   if (p.hasForeignIncome) {
     add('scope-foreign', 'flag', 'Foreign income is not modelled',
       'Foreign income and the foreign tax credit are not modelled here and are excluded from the estimate.');
@@ -1735,10 +1830,6 @@ function runConsistencyChecks(ret) {
   if (p.hasCrypto) {
     add('scope-crypto', 'review', 'Crypto dispositions need manual entry',
       'Gains and losses from crypto dispositions are not detected automatically — enter the net capital gain manually so it is included.');
-  }
-  if (p.selfEmploymentIncome > 0) {
-    add('scope-selfemp', 'review', 'Self-employment is simplified',
-      'Self-employment income is taxed as ordinary income here. CPP on self-employment (both employer and employee portions) and detailed business-expense deductions are not separately modelled.');
   }
 
   // C6 — internal tie-out (federal + provincial reconcile to total; nothing negative)
@@ -1766,7 +1857,8 @@ function buildAssumptions(ret, engine) {
   if (Math.max(0, p.capitalGains) > 0) a.push({ text: 'Capital gains use the 50% inclusion rate; capital-loss carryforwards are not modelled.' });
   if (p.eligibleDividends + p.nonEligibleDividends > 0) a.push({ text: 'The provincial dividend tax credit is approximated; the federal DTC is applied precisely.' });
   if (p.age && p.age >= 65) a.push({ text: 'The age amount is applied federally and approximated provincially.' });
-  if (p.selfEmploymentIncome > 0) a.push({ text: 'Self-employment income is taxed as ordinary income; self-employed CPP and business expenses are entered by you, not derived.' });
+  if (p.selfEmploymentIncome > 0) a.push({ text: 'Self-employment income is net of the business expenses you entered; self-employed CPP (both portions) is computed on Schedule 8. GST/HST and capital cost allowance (depreciation) are not modelled.' });
+  if ((p.rentalIncome || 0) > 0 || (p.rentalExpenses || 0) > 0) a.push({ text: 'Rental income is included as gross rents minus the operating expenses you entered; capital cost allowance is optional and not auto-applied.' });
   if (engine && engine.federalVerified && !engine.provinceVerified && p.year === 2025) {
     a.push({ text: `2025 ${ret.provinceName} provincial rates are indexed estimates pending verification against the province's published amounts (federal figures are CRA-verified).` });
   }

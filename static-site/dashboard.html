@@ -363,6 +363,8 @@ const FIELD_LABELS = {
   T5008: [['capitalGains','Net capital gain']],
   T4E: [['otherIncome','Total benefits (Box 14)'],['taxWithheld','Tax deducted (Box 22)']],
   CHILDCARE: [['childCare','Total child care paid']],
+  T2125: [['selfEmploymentIncome','Gross self-employment / business income'],['selfEmploymentExpenses','Total business expenses']],
+  T776: [['rentalIncome','Gross rents received'],['rentalExpenses','Total rental expenses']],
 };
 // one-click sample presets
 const SAMPLES = {
@@ -372,6 +374,8 @@ const SAMPLES = {
   RRSP: { rrspDeduction:3000 },
   DONATION: { donations:500 },
   MEDICAL: { medicalExpenses:1850 },
+  T2125: { selfEmploymentIncome:45000, selfEmploymentExpenses:9000 },
+  T776: { rentalIncome:24000, rentalExpenses:9000 },
 };
 
 async function boot() {
@@ -446,7 +450,7 @@ function docRow(d) {
 }
 
 async function addSample(type) { await ONYX.api('/documents', { method:'POST', body: { type, fields: SAMPLES[type], name: sampleName(type) } }); await loadDocs(); markStale(); }
-function sampleName(t){ return ({T4:'T4 — Employer income',T5:'T5 — Investment income',T2202:'T2202 — Tuition',RRSP:'RRSP receipt',DONATION:'Donation receipt',MEDICAL:'Medical receipts'})[t] || t; }
+function sampleName(t){ return ({T4:'T4 — Employer income',T5:'T5 — Investment income',T2202:'T2202 — Tuition',RRSP:'RRSP receipt',DONATION:'Donation receipt',MEDICAL:'Medical receipts',T2125:'T2125 — Self-employment',T776:'T776 — Rental'})[t] || t; }
 async function delDoc(id) { await ONYX.api('/documents/'+id, { method:'DELETE' }); await loadDocs(); markStale(); }
 
 function renderManualFields() {
@@ -632,7 +636,8 @@ function renderReport(a) {
   const incRow = (nm, amt, desc, tag) => amt > 0 ? `<div class="aud-row"><span class="nm">${nm}</span><span class="amt">${money(amt)}</span><span class="desc">${desc}</span>${tag?`<span class="tag">${tag}</span>`:''}</div>` : '';
   const incRows = [
     incRow('Employment income', inc.employment, 'Salary and wages from your T4 — every dollar is taxable.', 'Fully taxed'),
-    incRow('Self-employment income', inc.selfEmployment, 'Net business or freelance income — fully taxable.', 'Fully taxed'),
+    incRow('Self-employment (net)', inc.selfEmployment, 'Business/freelance income after your expenses — fully taxable, and self-employed CPP applies.', 'Fully taxed'),
+    incRow('Rental income (net)', inc.rental, 'Rents received minus your operating expenses — fully taxable as ordinary income.', 'Fully taxed'),
     incRow('Interest income', inc.interest, 'Interest from savings, GICs and bonds — fully taxable.', 'Fully taxed'),
     incRow('Eligible dividends', inc.eligibleDividendsGrossed, 'Grossed-up ×1.38 for the calculation, then largely offset by the dividend tax credit.', 'Grossed-up'),
     incRow('Non-eligible dividends', inc.nonEligibleDividendsGrossed, 'Grossed-up ×1.15, then partly offset by the dividend tax credit.', 'Grossed-up'),
@@ -659,6 +664,7 @@ function renderReport(a) {
     dRow('Child care expenses', d.childCare, 'Lets you work or study; usually claimed by the lower earner.'),
     dRow('Moving expenses', d.moving, 'Eligible costs of moving at least 40 km for work or school.'),
     dRow('Employment expenses', d.employment, 'Work costs backed by a signed Form T2200.'),
+    dRow('Self-employed CPP (½)', d.selfEmployedCpp, 'Half of your self-employed CPP is deductible (line 22200).'),
     dRow('Other deductions', d.other, 'Other amounts that reduce your income.'),
   ].join('');
   const cRow = (nm, amt, desc) => amt > 0 ? `<div class="aud-row"><span class="nm">${nm}</span><span class="amt">${money(amt)}</span><span class="desc">${desc}</span></div>` : '';
@@ -715,6 +721,7 @@ function renderReport(a) {
     <div class="calc-row tot"><span>Provincial tax</span><span class="v">${money(t.provincial)}</span></div>
     <div class="calc-sub">Result</div>
     <div class="calc-row"><span>Total income tax</span><span class="v">${money(t.total)}</span></div>
+    ${t.cppPayableSE>0?`<div class="calc-row"><span>CPP payable — self-employment (Schedule 8)</span><span class="v">+${money(t.cppPayableSE)}</span></div><div class="calc-row tot"><span>Total payable</span><span class="v">${money(t.totalPayable)}</span></div>`:''}
     <div class="calc-row"><span>Tax withheld / already paid</span><span class="v">−${money(r.taxWithheld)}</span></div>
     <div class="calc-row tot"><span>${r.isRefund?'Estimated refund':'Estimated balance owing'}</span><span class="v">${money(Math.abs(r.refundOrBalance))}</span></div>
     <div class="calc-sub">Assumptions</div>
