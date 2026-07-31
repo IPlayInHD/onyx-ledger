@@ -201,6 +201,64 @@ function findOpportunities(ret, health) {
     });
   }
 
+  // ---- Coach-style strategies (established Canadian tax-saving moves) ----
+  const married = p.maritalStatus === 'married' || p.maritalStatus === 'commonlaw';
+  const incomeGap = ret.netIncome - (married ? p.spouseNetIncome : ret.netIncome);
+  const hasInvestments = p.hasInvestments || (p.interestIncome + p.eligibleDividends + p.nonEligibleDividends) > 0 || p.capitalGains > 0;
+
+  // 15) Spousal RRSP — split income into retirement --------------------------
+  if (married && incomeGap > 15000 && (p.employmentIncome + p.selfEmploymentIncome) > 0) {
+    push({
+      id: 'spousal-rrsp', category: 'Planning', priority: 1,
+      title: 'Use a spousal RRSP to split future income',
+      detail: 'Because you earn more than your spouse, contributing to a spousal RRSP lets you take the deduction now at your higher rate, while the withdrawals are taxed in your spouse’s hands later — usually at a lower rate. It uses your own RRSP room, so it stacks with your regular RRSP.',
+      impact: money(Math.min(roomLeft || 6000, 6000) * Math.max(mr - 0.2, 0.05)), impactLabel: 'est. household saving',
+      citation: 'Income Tax Act s.146(5.1) · Spousal RRSP',
+    });
+  }
+
+  // 16) Home Buyers' Plan — stack with FHSA ----------------------------------
+  if (p.firstTimeHomeBuyer && !p.ownsHome) {
+    push({
+      id: 'hbp', category: 'Registered savings', priority: 2,
+      title: 'Stack the Home Buyers’ Plan with your FHSA',
+      detail: 'As a first-time buyer you can also withdraw up to $60,000 from your RRSP tax-free under the Home Buyers’ Plan (repaid over 15 years). Combined with an FHSA, that’s a much larger tax-advantaged down payment — and RRSP contributions still give you a deduction on the way in.',
+      impactLabel: 'tax-free withdrawal', citation: 'Income Tax Act s.146.01 · Home Buyers’ Plan',
+    });
+  }
+
+  // 17) Donate appreciated securities in-kind --------------------------------
+  if (hasInvestments && (p.donations > 0 || p.capitalGains > 0)) {
+    const avoided = p.capitalGains > 0 ? money(p.capitalGains * data.federal.capitalGainsInclusion * mr) : null;
+    push({
+      id: 'donate-securities', category: 'Credits', priority: 2,
+      title: 'Donate appreciated stock instead of cash',
+      detail: 'Donating publicly-traded shares or ETFs directly to a registered charity eliminates the capital-gains tax on them entirely, and you still get the full donation credit on the fair market value — one of the most tax-efficient ways to give.',
+      impact: avoided, impactLabel: avoided ? 'est. gains tax avoided' : 'gains-tax-free giving',
+      citation: 'Income Tax Act s.38(a.1) · Gifts of listed securities',
+    });
+  }
+
+  // 18) Prescribed-rate loan — split investment income -----------------------
+  if (married && mr >= 0.4 && p.spouseNetIncome < ret.netIncome * 0.5 && hasInvestments) {
+    push({
+      id: 'income-splitting-loan', category: 'Planning', priority: 3,
+      title: 'Split investment income with a prescribed-rate loan',
+      detail: 'With a large income gap and taxable investments, lending money to your lower-income spouse at the CRA’s prescribed rate lets the investment income be taxed in their hands, at a lower rate — a legitimate way around the attribution rules. Best set up with a professional.',
+      impactLabel: 'household saving', citation: 'Income Tax Act s.74.5(2) · Prescribed-rate loan',
+    });
+  }
+
+  // 19) Deduct investment carrying charges & interest ------------------------
+  if (hasInvestments) {
+    push({
+      id: 'carrying-charges', category: 'Deductions', priority: 3,
+      title: 'Deduct investment interest & carrying charges',
+      detail: 'Interest on money borrowed to earn investment income is generally tax-deductible, as are eligible investment-management and accounting fees. If you have an investment loan or advisory fees, track them — they reduce your taxable income directly.',
+      impactLabel: 'potential deduction', citation: 'Income Tax Act s.20(1)(c) · Interest & carrying charges',
+    });
+  }
+
   // Sort: quantified impact first (desc) within priority, then qualitative.
   out.sort((a, b) => (a.priority - b.priority) || ((b.impact || 0) - (a.impact || 0)));
   return out;

@@ -162,6 +162,20 @@ ok(emptyAudit.health && emptyAudit.checklist && emptyAudit.calendar && emptyAudi
 const cleanSim = require('../engine').simulate({ profile: { province: 'ON', year: 2024, employmentIncome: 80000 }, overrides: { rrsp: -99999, extraIncome: 'x' } });
 ok(isFinite(cleanSim.refundOrBalance) && cleanSim.taxableIncome === 80000, 'simulate ignores hostile overrides and stays finite');
 
+// ---- 8e. Coach-style strategies fire for the right profiles ----
+const coach = runAudit({
+  profile: { province: 'ON', year: 2024, maritalStatus: 'married', spouseNetIncome: 15000, firstTimeHomeBuyer: true, ownsHome: false, hasInvestments: true },
+  financial: { employmentIncome: 150000, eligibleDividends: 3000, capitalGains: 8000, donations: 1000, taxWithheld: 40000 },
+});
+const coachIds = coach.opportunities.map((o) => o.id);
+['spousal-rrsp', 'hbp', 'donate-securities', 'income-splitting-loan', 'carrying-charges'].forEach((id) =>
+  ok(coachIds.includes(id), `strategy fires: ${id}`));
+ok(coach.opportunities.find((o) => o.id === 'donate-securities').impact > 0, 'in-kind donation estimates gains tax avoided');
+// and they DON'T fire for a simple single filer with no investments
+const simple = runAudit({ profile: { province: 'ON', year: 2024, maritalStatus: 'single' }, financial: { employmentIncome: 45000, taxWithheld: 6000 } });
+const simpleIds = simple.opportunities.map((o) => o.id);
+ok(!simpleIds.includes('spousal-rrsp') && !simpleIds.includes('income-splitting-loan'), 'income-splitting strategies stay hidden for a single filer');
+
 // ---- 9. Every province computes without error ----
 for (const code of Object.keys(getTaxData(2024).provinces)) {
   const r = computeReturn({ province: code, year: 2024, employmentIncome: 75000, cppContrib: 3867.5, eiContrib: 1049.12, taxWithheld: 12000 });
