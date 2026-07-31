@@ -109,6 +109,26 @@
   .wf-row{display:flex;flex-direction:column;gap:.35rem}
   .wf-lab{display:flex;justify-content:space-between;font-size:.82rem;color:var(--ink-2)}.wf-lab b{font-family:var(--mono);color:var(--accent)}
   .wf-row input[type=range]{width:100%;accent-color:var(--accent);height:22px}
+  .wf-cap{font-size:.75rem;color:var(--ink-3);line-height:1.45}
+  .wf-cap b{color:var(--accent-2)}
+  /* assurance & reliability */
+  .conf{display:flex;gap:1.4rem;align-items:center;flex-wrap:wrap}
+  .conf-dial{flex:none;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;position:relative;background:conic-gradient(var(--c) calc(var(--p,0)*1%),var(--line) 0)}
+  .conf-dial::after{content:"";position:absolute;inset:8px;border-radius:50%;background:var(--bg-2)}
+  .conf-n{position:relative;z-index:1;font-family:var(--serif);font-size:1.9rem;font-weight:600;line-height:1}
+  .conf-u{position:relative;z-index:1;font-family:var(--mono);font-size:.56rem;color:var(--ink-3);letter-spacing:.1em}
+  .conf-b{flex:1;min-width:230px}
+  .conf-blurb{font-size:.9rem;color:var(--ink-2);line-height:1.55;margin:.4rem 0 .7rem}
+  .drivers{display:flex;flex-direction:column;gap:.3rem}
+  .drv{display:flex;justify-content:space-between;gap:1rem;font-size:.82rem;color:var(--ink-2);padding:.28rem 0;border-bottom:1px dashed var(--line)}
+  .drv:last-child{border-bottom:0}.drv b{font-family:var(--mono)}
+  .drv.pos b{color:var(--pos)}.drv.warn b{color:var(--warn)}.drv.neg b{color:var(--crit)}
+  .chk{display:flex;gap:.7rem;align-items:flex-start;padding:.6rem 0;border-bottom:1px dashed var(--line)}
+  .chk:last-child{border-bottom:0}
+  .chk-ic{flex:none;font-weight:800;font-size:.9rem;width:16px;text-align:center;margin-top:.05em}
+  .chk-t{font-weight:600;font-size:.88rem}.chk-d{font-size:.8rem;color:var(--ink-2);line-height:1.5;margin-top:.1rem}
+  ul.assum{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.4rem}
+  ul.assum li{font-size:.84rem;color:var(--ink-2);line-height:1.5}
   /* cash-flow + bracket bars */
   .flow-bar{display:flex;height:28px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
   .flow-seg{height:100%;transition:width .8s cubic-bezier(.2,.7,.2,1)}
@@ -374,7 +394,7 @@ async function boot() {
     const v = await ONYX.api('/verify');
     const el = $('assurance');
     if (el) el.innerHTML = v.allPass
-      ? ` · <a href="methodology.html" style="color:var(--pos)">✓ engine v${v.version} · ${v.passCount}/${v.total} reference checks pass</a>`
+      ? ` · <a href="methodology.html" style="color:var(--pos)">✓ engine v${v.version} verified — ${v.passCount}/${v.total} reference cases reconcile to the CRA method</a>`
       : ` · <a href="methodology.html" style="color:var(--crit)">engine self-check: ${v.passCount}/${v.total}</a>`;
   } catch (_) {}
 }
@@ -465,6 +485,10 @@ function renderReport(a) {
   const posLabel = r.isRefund ? 'Estimated refund' : 'Estimated balance owing';
   const tone = { positive:'var(--pos)', warning:'var(--warn)', critical:'var(--crit)' }[h.band.tone] || 'var(--accent)';
   const C = 2*Math.PI*52, off = C*(1 - h.score/100);
+  // Assurance / confidence for this audit (drives the hero chip + section).
+  const as = a.assurance || null;
+  const cf2 = as ? as.confidence : null;
+  const ctone = cf2 ? ({ positive:'var(--pos)', warning:'var(--warn)', critical:'var(--crit)' }[cf2.band.tone] || 'var(--accent)') : 'var(--accent)';
 
   const meters = h.subscores.map(s => {
     const col = s.score>=80?'var(--pos)':s.score>=50?'var(--accent)':'var(--warn)';
@@ -551,7 +575,7 @@ function renderReport(a) {
   <div class="card"><div class="card-b"><div class="acct">${acc.order.map((x,i)=>`<span class="a ${i===0?'n1':''}">${i+1}. ${x}</span>`).join('')}</div>${acc.tips.map(t=>`<div class="small" style="margin-bottom:.3rem"><b style="color:var(--accent)">${esc(t.account)}</b> — ${esc(t.why)}</div>`).join('')}</div></div>` : '';
 
   const room = Math.max(10000, Math.round((a.health.context && a.health.context.estimatedRrspRoom) || 10000));
-  const wfSlider = (id,label,max,step) => `<div class="wf-row"><div class="wf-lab"><span>${label}</span><b id="wfv-${id}">$0</b></div><input type="range" class="wf-slider" id="sl-${id}" min="0" max="${max}" step="${step}" value="0" /></div>`;
+  const wfSlider = (id,label,max,step,cap) => `<div class="wf-row"><div class="wf-lab"><span>${label}</span><b id="wfv-${id}">$0</b></div><input type="range" class="wf-slider" id="sl-${id}" min="0" max="${max}" step="${step}" value="0" /><div class="wf-cap">${cap}</div></div>`;
   const wfHTML = `<h2 class="sectitle">What-if planner</h2>
   <div class="card glow"><div class="card-b">
     <div class="wf-out">
@@ -560,9 +584,48 @@ function renderReport(a) {
       <div class="wf-mini"><span class="k">Taxable</span><b id="wfTax">${money(r.taxableIncome)}</b></div>
       <div class="wf-mini"><span class="k">Fed bracket</span><b id="wfBracket">${bf?(bf.rate*100).toFixed(bf.rate*100%1?1:0)+'%':'—'}</b></div>
     </div>
-    <div class="wf-sliders">${wfSlider('rrsp','Extra RRSP contribution',room,100)}${wfSlider('fhsa','FHSA contribution',8000,100)}${wfSlider('don','Extra donations',5000,50)}${wfSlider('inc','Extra income',50000,500)}${wfSlider('cg','Capital gain realized',50000,500)}</div>
+    <div class="wf-sliders">${
+      wfSlider('rrsp','Extra RRSP contribution',room,100,'Simulates <b>Registered accounts → Contribute to your RRSP</b>. Lowers taxable income; each dollar saves tax at your marginal rate.')
+    }${
+      wfSlider('fhsa','FHSA contribution',8000,100,'Simulates <b>Registered accounts → Open an FHSA</b>. Deductible now and tax-free for a first home.')
+    }${
+      wfSlider('don','Extra donations',5000,50,'Simulates <b>Tax credits → Optimize your donations</b>. The credit jumps to 29% federally above $200.')
+    }${
+      wfSlider('inc','Extra income',50000,500,'Shows how each new dollar of income is taxed at your <b>marginal rate</b> — useful before taking a raise or bonus.')
+    }${
+      wfSlider('cg','Capital gain realized',50000,500,'Simulates selling an investment. Only <b>50% of the gain</b> is taxable — see <b>Income splitting → Tax-loss harvesting</b> to offset it.')
+    }</div>
     <p class="hint" style="margin-top:.8rem">Drag to preview the estimated impact. This never changes your saved data.</p>
   </div></div>`;
+
+  // ---- assurance & reliability ----
+  let assuranceHTML = '';
+  if (as) {
+    const ic = { pass:'✓', review:'⚠', flag:'✕' };
+    const scol = { pass:'var(--pos)', review:'var(--warn)', flag:'var(--crit)' };
+    const chkRows = as.checks.map(c => `<div class="chk ${c.status}"><span class="chk-ic" style="color:${scol[c.status]}">${ic[c.status]}</span><div class="chk-b"><div class="chk-t">${esc(c.label)}</div><div class="chk-d">${esc(c.detail)}</div></div></div>`).join('');
+    const drvRows = cf2.drivers.map(d => `<div class="drv ${d.tone||''}"><span>${esc(d.label)}</span><b>${d.delta?((d.delta>0?'+':'')+d.delta):'✓'}</b></div>`).join('');
+    const assumRows = as.assumptions.map(x => `<li>${esc(x.text)}</li>`).join('');
+    const pctP = Math.max(0, Math.min(100, cf2.score));
+    assuranceHTML = `<h2 class="sectitle">Assurance &amp; reliability <span class="k" style="font-family:var(--mono)">· how much to trust this audit</span></h2>
+    <div class="card glow"><div class="card-b">
+      <div class="conf">
+        <div class="conf-dial" style="--c:${ctone};--p:${pctP}"><div class="conf-n" style="color:${ctone}">${cf2.score}</div><div class="conf-u">/ 100</div></div>
+        <div class="conf-b">
+          <span class="band" style="color:${ctone}">● ${esc(cf2.band.label)}</span>
+          <p class="conf-blurb">${esc(cf2.band.blurb)}</p>
+          <div class="drivers">${drvRows}</div>
+        </div>
+      </div>
+    </div></div>
+    <div class="grid g2" style="margin-top:1rem">
+      <div class="card"><div class="card-h">Reconciliation checks <span class="k" style="font-family:var(--mono)">· ${as.counts.pass}✓ · ${as.counts.review}⚠ · ${as.counts.flag}✕</span></div><div class="card-b">${chkRows}</div></div>
+      <div class="card"><div class="card-h">Assumptions applied to your return</div><div class="card-b">
+        <ul class="assum">${assumRows}</ul>
+        <p class="disc" style="margin-top:.9rem">Framework: ${esc(as.method.framework)}</p>
+      </div></div>
+    </div>`;
+  }
 
   // ---- audit outline: income explainer ----
   const inc = r.income;
@@ -655,7 +718,7 @@ function renderReport(a) {
     <div class="calc-row"><span>Tax withheld / already paid</span><span class="v">−${money(r.taxWithheld)}</span></div>
     <div class="calc-row tot"><span>${r.isRefund?'Estimated refund':'Estimated balance owing'}</span><span class="v">${money(Math.abs(r.refundOrBalance))}</span></div>
     <div class="calc-sub">Assumptions</div>
-    <p class="hint" style="line-height:1.65">Uses ${r.year} federal &amp; provincial parameters. Net income is used as a proxy for taxable income (no loss carryovers or specialized deductions). Capital gains at 50% inclusion. Provincial dividend credits and some province-specific amounts are approximated.${r.year===2025?(eng.provinceVerified?` 2025 ${esc(r.provinceName)} provincial figures are verified against the official published amounts.`:` 2025 ${esc(r.provinceName)} provincial figures are preliminary indexed estimates pending verification.`):''} These are educational estimates, not a filed return.</p>
+    <p class="hint" style="line-height:1.65">Uses ${r.year} federal &amp; provincial parameters. Net income is used as a proxy for taxable income (no loss carryovers or specialized deductions). Capital gains at 50% inclusion. Provincial dividend credits and some province-specific amounts are approximated.${r.year===2025?(eng.provinceVerified?` 2025 ${esc(r.provinceName)} provincial figures are verified against the official published amounts.`:` 2025 ${esc(r.provinceName)} provincial figures are preliminary indexed estimates pending verification.`):''} This is a reconciled, professional-grade estimate of the figures you provided — see Assurance &amp; reliability above — not a return filed with the CRA.</p>
   </details></div></div>`;
 
   const dataHTML = `<h2 class="sectitle">Your data</h2>
@@ -684,6 +747,7 @@ function renderReport(a) {
         <span class="stchip">Total tax <b>${money(r.tax.total)}</b></span>
         <span class="stchip">Marginal <b>${(r.marginalRate*100).toFixed(1)}%</b></span>
         <span class="stchip">Average <b>${(r.averageRate*100).toFixed(1)}%</b></span>
+        ${cf2?`<span class="stchip">Confidence <b style="color:${ctone}">${cf2.score}/100</b></span>`:''}
       </div>
     </div>
     <div style="text-align:center">
@@ -694,6 +758,7 @@ function renderReport(a) {
     </div>
   </div></div></div>
   ${r.year===2025?`<p class="hint" style="margin:.5rem 0 0">Note: 2025 federal figures are verified vs the CRA (incl. the July 2025 rate cut to a blended 14.5%). ${eng.provinceVerified?`2025 ${esc(r.provinceName)} provincial figures are verified against the official published amounts.`:`2025 ${esc(r.provinceName)} provincial figures are preliminary indexed estimates pending verification.`}</p>`:''}
+  ${assuranceHTML}
   ${flowHTML}
   ${incomeHTML}
   ${dedCredHTML}
@@ -788,7 +853,8 @@ function copySummary() {
 function buildSummaryText(a) {
   const r = a.return, L = [];
   L.push(`ONYX LEDGER — TAX AUDIT SUMMARY (${r.provinceName} ${r.year})`);
-  L.push(`Generated ${new Date(a.generatedAt).toLocaleDateString()}  ·  Educational estimate, not tax advice`);
+  L.push(`Generated ${new Date(a.generatedAt).toLocaleDateString()}  ·  Reconciled, professional-grade estimate — not a return filed with the CRA`);
+  if (a.assurance) L.push(`Confidence: ${a.assurance.confidence.score}/100 (${a.assurance.confidence.band.label})  ·  ${a.assurance.counts.pass} checks passed, ${a.assurance.counts.review} to review, ${a.assurance.counts.flag} to resolve`);
   L.push('');
   L.push(`${r.isRefund ? 'Estimated refund' : 'Estimated balance owing'}: ${money(r.refundOrBalance)}`);
   L.push(`Total income: ${money(r.income.total)}  |  Taxable: ${money(r.taxableIncome)}  |  Total tax: ${money(r.tax.total)}`);
