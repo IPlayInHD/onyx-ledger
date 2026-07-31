@@ -180,25 +180,30 @@ const PROVINCES_2024 = {
 };
 
 /**
- * 2025 tax year. Federal figures are the published 2025 amounts. Provincial
- * figures are the 2024 tables indexed forward (~2.8%) as a PRELIMINARY estimate,
- * with Alberta's new 2025 8% bracket applied explicitly. Verify provincial 2025
- * figures against each province's published amounts before production use.
+ * 2025 tax year.
+ * FEDERAL — verified against CRA "Tax rates and income brackets" (2025).
+ *   The lowest federal rate was cut from 15% to 14% effective July 1, 2025,
+ *   giving a BLENDED 14.5% rate for the 2025 tax year. Non-refundable credits
+ *   (incl. the basic personal amount) and the first $200 of donations are
+ *   therefore valued at 14.5% for 2025. Source: canada.ca — CRA tax rates.
+ * PROVINCIAL — the 2024 tables indexed forward (~2.8%) as a PRELIMINARY estimate,
+ *   with Alberta's new 2025 8% bracket applied explicitly. Verify against each
+ *   province's published 2025 figures before relying on provincial amounts.
  */
 const FEDERAL_2025 = {
   brackets: [
-    { upTo: 57375, rate: 0.15 }, { upTo: 114750, rate: 0.205 }, { upTo: 177882, rate: 0.26 },
+    { upTo: 57375, rate: 0.145 }, { upTo: 114750, rate: 0.205 }, { upTo: 177882, rate: 0.26 },
     { upTo: 253414, rate: 0.29 }, { upTo: Infinity, rate: 0.33 },
   ],
   bpa: { max: 16129, min: 14538, phaseStart: 177882, phaseEnd: 253414 },
-  creditRate: 0.15,
+  creditRate: 0.145, // 2025 non-refundable credits valued at the blended 14.5% rate
   canadaEmployment: 1471,
   pensionIncomeMax: 2000,
   ageAmount: { max: 9028, threshold: 45522, rate: 0.15 },
   cpp: { maxPensionable: 71300, exemption: 3500, rate: 0.0595, max: 4034.1, cpp2: { lower: 71300, upper: 81200, rate: 0.04, max: 396 } },
   ei: { maxInsurable: 65700, rate: 0.0164, max: 1077.48 },
   medical: { pct: 0.03, cap: 2834 },
-  donation: { threshold: 200, low: 0.15, high: 0.29, top: 0.33, topBracket: 253414 },
+  donation: { threshold: 200, low: 0.145, high: 0.29, top: 0.33, topBracket: 253414 },
   eligibleDiv: { grossUp: 0.38, dtc: 0.150198 },
   nonEligibleDiv: { grossUp: 0.15, dtc: 0.090301 },
   capitalGainsInclusion: 0.5,

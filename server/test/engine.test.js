@@ -120,7 +120,7 @@ ok(taxCalendar({ employmentType: 'employed' }).every((c) => c.tag !== 'instalmen
 
 // ---- 8c. 2025 tax year + bracket/cashflow + simulate + account priority ----
 const fed25 = getTaxData(2025).federal;
-near(bracketTax(60000, fed25.brackets), 0.15 * 57375 + 0.205 * (60000 - 57375), 0.5, '2025 federal bracket tax on $60,000');
+near(bracketTax(60000, fed25.brackets), 0.145 * 57375 + 0.205 * (60000 - 57375), 0.5, '2025 federal bracket tax on $60,000 (blended 14.5%)');
 const r2025 = computeReturn({ province: 'ON', year: 2025, employmentIncome: 60000, cppContrib: 4034.1, eiContrib: 996, taxWithheld: 9000 });
 ok(r2025.tax.total > 0 && Math.abs(r2025.tax.total - on.tax.total) > 1, '2025 differs from 2024 (indexation)');
 ok(r2025.bracketFederal && r2025.bracketFederal.rate === 0.205, 'bracketFederal identifies the 20.5% band at $60k');

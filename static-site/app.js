@@ -184,25 +184,30 @@ const PROVINCES_2024 = {
 };
 
 /**
- * 2025 tax year. Federal figures are the published 2025 amounts. Provincial
- * figures are the 2024 tables indexed forward (~2.8%) as a PRELIMINARY estimate,
- * with Alberta's new 2025 8% bracket applied explicitly. Verify provincial 2025
- * figures against each province's published amounts before production use.
+ * 2025 tax year.
+ * FEDERAL — verified against CRA "Tax rates and income brackets" (2025).
+ *   The lowest federal rate was cut from 15% to 14% effective July 1, 2025,
+ *   giving a BLENDED 14.5% rate for the 2025 tax year. Non-refundable credits
+ *   (incl. the basic personal amount) and the first $200 of donations are
+ *   therefore valued at 14.5% for 2025. Source: canada.ca — CRA tax rates.
+ * PROVINCIAL — the 2024 tables indexed forward (~2.8%) as a PRELIMINARY estimate,
+ *   with Alberta's new 2025 8% bracket applied explicitly. Verify against each
+ *   province's published 2025 figures before relying on provincial amounts.
  */
 const FEDERAL_2025 = {
   brackets: [
-    { upTo: 57375, rate: 0.15 }, { upTo: 114750, rate: 0.205 }, { upTo: 177882, rate: 0.26 },
+    { upTo: 57375, rate: 0.145 }, { upTo: 114750, rate: 0.205 }, { upTo: 177882, rate: 0.26 },
     { upTo: 253414, rate: 0.29 }, { upTo: Infinity, rate: 0.33 },
   ],
   bpa: { max: 16129, min: 14538, phaseStart: 177882, phaseEnd: 253414 },
-  creditRate: 0.15,
+  creditRate: 0.145, // 2025 non-refundable credits valued at the blended 14.5% rate
   canadaEmployment: 1471,
   pensionIncomeMax: 2000,
   ageAmount: { max: 9028, threshold: 45522, rate: 0.15 },
   cpp: { maxPensionable: 71300, exemption: 3500, rate: 0.0595, max: 4034.1, cpp2: { lower: 71300, upper: 81200, rate: 0.04, max: 396 } },
   ei: { maxInsurable: 65700, rate: 0.0164, max: 1077.48 },
   medical: { pct: 0.03, cap: 2834 },
-  donation: { threshold: 200, low: 0.15, high: 0.29, top: 0.33, topBracket: 253414 },
+  donation: { threshold: 200, low: 0.145, high: 0.29, top: 0.33, topBracket: 253414 },
   eligibleDiv: { grossUp: 0.38, dtc: 0.150198 },
   nonEligibleDiv: { grossUp: 0.15, dtc: 0.090301 },
   capitalGainsInclusion: 0.5,
@@ -1415,7 +1420,7 @@ const ENGINE_VERSION = '1.0.0';
 
 const DATA_STATUS = {
   2024: { label: 'Constants verified for the 2024 tax year', verified: true },
-  2025: { label: 'Federal final; provincial figures preliminary (indexed)', verified: false },
+  2025: { label: 'Federal verified vs CRA (incl. the July 2025 rate cut to a blended 14.5%); provincial figures preliminary (indexed)', verified: false },
 };
 
 // Each expected value is computed with the published CRA method; see methodology.html.
@@ -1441,6 +1446,13 @@ const REFERENCE_CASES = [
     // BC: 5.06%×47,937 + 7.7%×47,938 + 10.5%×4,125 = 6,549.96; credits 5.06%×(12,580+4,055.5+1,049.12)=894.84 → 5,655.12
     expect: { federal: 14090.92, provincial: 5655.12, total: 19746.04 },
   },
+  {
+    // FEDERAL-ONLY anchor for 2025 (verified rate): the July 2025 cut → blended 14.5%.
+    name: 'Federal · employee · $60,000 · 2025 (blended 14.5%)',
+    input: { province: 'ON', year: 2025, employmentIncome: 60000, cppContrib: 3361.75, eiContrib: 984 },
+    // Federal: 14.5%×57,375 + 20.5%×2,625 = 8,857.50; credits 14.5%×(16,129+3,361.75+984+1,471)=3,182.13 → 5,675.37
+    expect: { federal: 5675.37 },
+  },
 ];
 
 const TOLERANCE = 1.5; // dollars — absorbs cent-level rounding differences
@@ -1449,7 +1461,7 @@ function selfCheck() {
   const checks = [];
   for (const c of REFERENCE_CASES) {
     const r = computeReturn(c.input);
-    for (const field of ['federal', 'provincial', 'total']) {
+    for (const field of Object.keys(c.expect)) {
       const got = field === 'total' ? r.tax.total : r.tax[field];
       const expected = c.expect[field];
       checks.push({ case: c.name, field, expected, got, pass: Math.abs(got - expected) <= TOLERANCE });

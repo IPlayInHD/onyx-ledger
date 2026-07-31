@@ -24,7 +24,7 @@ const ENGINE_VERSION = '1.0.0';
 
 const DATA_STATUS = {
   2024: { label: 'Constants verified for the 2024 tax year', verified: true },
-  2025: { label: 'Federal final; provincial figures preliminary (indexed)', verified: false },
+  2025: { label: 'Federal verified vs CRA (incl. the July 2025 rate cut to a blended 14.5%); provincial figures preliminary (indexed)', verified: false },
 };
 
 // Each expected value is computed with the published CRA method; see methodology.html.
@@ -50,6 +50,13 @@ const REFERENCE_CASES = [
     // BC: 5.06%×47,937 + 7.7%×47,938 + 10.5%×4,125 = 6,549.96; credits 5.06%×(12,580+4,055.5+1,049.12)=894.84 → 5,655.12
     expect: { federal: 14090.92, provincial: 5655.12, total: 19746.04 },
   },
+  {
+    // FEDERAL-ONLY anchor for 2025 (verified rate): the July 2025 cut → blended 14.5%.
+    name: 'Federal · employee · $60,000 · 2025 (blended 14.5%)',
+    input: { province: 'ON', year: 2025, employmentIncome: 60000, cppContrib: 3361.75, eiContrib: 984 },
+    // Federal: 14.5%×57,375 + 20.5%×2,625 = 8,857.50; credits 14.5%×(16,129+3,361.75+984+1,471)=3,182.13 → 5,675.37
+    expect: { federal: 5675.37 },
+  },
 ];
 
 const TOLERANCE = 1.5; // dollars — absorbs cent-level rounding differences
@@ -58,7 +65,7 @@ function selfCheck() {
   const checks = [];
   for (const c of REFERENCE_CASES) {
     const r = computeReturn(c.input);
-    for (const field of ['federal', 'provincial', 'total']) {
+    for (const field of Object.keys(c.expect)) {
       const got = field === 'total' ? r.tax.total : r.tax[field];
       const expected = c.expect[field];
       checks.push({ case: c.name, field, expected, got, pass: Math.abs(got - expected) <= TOLERANCE });
