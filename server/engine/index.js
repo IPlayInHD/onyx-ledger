@@ -12,6 +12,7 @@ const { computeTaxHealth } = require('./scoring');
 const { findOpportunities, whatWeFound, buildAdvisory } = require('./advisory');
 const { buildChecklist } = require('./checklist');
 const { optimizeRRSP, accountPriority, estimateBenefits, taxCalendar } = require('./planner');
+const { selfCheck, ENGINE_VERSION, DATA_STATUS } = require('./verify');
 const { getTaxData, PROVINCE_NAMES } = require('./taxData');
 
 /**
@@ -54,6 +55,13 @@ function runAudit({ profile = {}, financial = {}, documents = [], year, ocrProvi
     taxYear,
     province: ret.province,
     provinceName: ret.provinceName,
+    // provenance: which engine + data produced this audit (shown to the user)
+    engine: {
+      version: ENGINE_VERSION,
+      dataStatus: (DATA_STATUS[taxYear] || {}).label || `${taxYear} constants`,
+      dataVerified: !!(DATA_STATUS[taxYear] || {}).verified,
+      methodologyUrl: 'methodology.html',
+    },
     return: stripInternal(ret),
     health,
     documents: scan.documents,
@@ -109,6 +117,8 @@ function stripInternal(ret) {
 module.exports = {
   runAudit,
   simulate,
+  selfCheck,
+  ENGINE_VERSION,
   computeReturn,
   normalizeProfile,
   scanDocuments,

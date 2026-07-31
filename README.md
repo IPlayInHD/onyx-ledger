@@ -86,6 +86,27 @@ and documents its simplifications in-source. It is an **auditor-grade estimate**
 not a filed return. Image OCR requires wiring an OCR provider into
 `engine/extract.js`.
 
+## Verification & assurance
+
+Trust is built through transparency and repeatable checks, not claims:
+
+- **Reference backtests** (`test/reference.test.js`) validate the engine against
+  hand-derived expected federal/provincial/total tax (Ontario $60k, Alberta $50k,
+  BC $100k) — the arithmetic is documented in the public **Methodology** page.
+- **`GET /api/verify`** re-runs those reference cases live, so anyone can confirm
+  the deployed engine still matches. The dashboard shows the result as a badge
+  ("✓ engine v1.0.0 · 9/9 reference checks pass") and the methodology page lists
+  each check.
+- Every audit is stamped with the **engine version + data status** (2024 verified;
+  2025 provincial preliminary), shown in "How this was calculated".
+- **`/methodology.html`** documents the full calculation, the source of every
+  constant, and the honest limitations.
+
+> **Not CRA-certified.** Software that *files* returns must pass the CRA's NETFILE
+> certification. This engine produces educational estimates; the verification
+> layer proves it is transparent, consistent, and drift-free — not that it is a
+> substitute for certified filing software or a professional.
+
 ## Testing
 
 `npm test` runs 139 assertions: hand-computed reference cases, the Quebec

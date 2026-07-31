@@ -23,7 +23,8 @@ function localApi(path, opts) {
   var method = opts.method || 'GET';
   var body = opts.body || {};
 
-  if (path === '/meta') return { provinces: PROVINCE_NAMES, slipTypes: slipTypes, years: (typeof AVAILABLE_YEARS !== 'undefined' ? AVAILABLE_YEARS : [2024]), year: 2024 };
+  if (path === '/meta') return { provinces: PROVINCE_NAMES, slipTypes: slipTypes, years: (typeof AVAILABLE_YEARS !== 'undefined' ? AVAILABLE_YEARS : [2024]), year: 2024, engineVersion: (typeof ENGINE_VERSION !== 'undefined' ? ENGINE_VERSION : '1.0.0') };
+  if (path === '/verify') return selfCheck();
 
   if (path === '/auth/register') {
     var email = (body.email || '').toLowerCase().trim();

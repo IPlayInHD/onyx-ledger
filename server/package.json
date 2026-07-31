@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/engine.test.js",
+    "test": "node test/engine.test.js && node test/reference.test.js",
     "build:static": "node scripts/build-static.cjs"
   },
   "dependencies": {

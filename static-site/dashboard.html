@@ -179,7 +179,9 @@
 <div class="wrap">
   <p class="no-print" style="font-family:var(--mono);font-size:.7rem;color:var(--ink-3);text-align:center;margin:.9rem 0 -.4rem">
     Educational estimates · independent, not the CRA · your data stays in this browser ·
+    <a href="methodology.html" style="color:var(--accent)">Methodology</a> ·
     <a href="privacy.html" style="color:var(--accent)">Privacy</a> · <a href="about.html" style="color:var(--accent)">About</a>
+    <span id="assurance" style="color:var(--pos)"></span>
   </p>
   <div class="intro">
     <div>
@@ -334,6 +336,14 @@ async function boot() {
   await loadProfile();
   await loadDocs();
   try { const { audit } = await ONYX.api('/audit'); audit ? renderReport(audit) : renderEmpty(); } catch (_) { renderEmpty(); }
+  // Live engine self-check → assurance badge
+  try {
+    const v = await ONYX.api('/verify');
+    const el = $('assurance');
+    if (el) el.innerHTML = v.allPass
+      ? ` · <a href="methodology.html" style="color:var(--pos)">✓ engine v${v.version} · ${v.passCount}/${v.total} reference checks pass</a>`
+      : ` · <a href="methodology.html" style="color:var(--crit)">engine self-check: ${v.passCount}/${v.total}</a>`;
+  } catch (_) {}
 }
 
 async function loadProfile() {
@@ -504,8 +514,11 @@ function renderReport(a) {
   </div></div>`;
 
   const t = r.tax, cr = r.credits;
+  const eng = a.engine || {};
   const calcHTML = `<h2 class="sectitle">How this was calculated</h2>
-  <div class="card calc"><div class="card-b"><details>
+  <div class="card calc"><div class="card-b">
+    <p class="small" style="margin:0 0 .7rem;color:var(--ink-3)">Computed by <b style="color:var(--ink)">ONYX engine v${eng.version||'1.0.0'}</b> · ${esc(eng.dataStatus||(r.year+' constants'))} ${eng.dataVerified?'<span style="color:var(--pos)">✓ verified</span>':'<span style="color:var(--warn)">preliminary</span>'} · <a href="methodology.html" style="color:var(--accent)">Methodology &amp; sources →</a></p>
+    <details>
     <summary>Show the federal &amp; provincial breakdown + assumptions</summary>
     <div class="calc-sub">Income</div>
     <div class="calc-row"><span>Total income</span><span class="v">${money(r.income.total)}</span></div>

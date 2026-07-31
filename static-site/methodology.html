@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Methodology & verification — Onyx Ledger</title>
+<meta name="description" content="How Onyx Ledger calculates your tax estimate, the sources behind every constant, how the engine is verified, and its documented limitations. Educational estimates only — not CRA-certified filing software." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230C0A08'/%3E%3Cpath d='M8 3l4 3-4 7-4-7z' fill='%23E3BE86'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="onyx.css" />
+<style>
+  .m{max-width:820px}
+  .m h1{font-family:var(--serif);font-weight:500;font-size:clamp(2rem,1.5rem + 2.4vw,3rem);letter-spacing:-.02em;margin:.6rem 0 0}
+  .m h2{font-family:var(--serif);font-size:1.35rem;font-weight:600;margin:2rem 0 .5rem}
+  .m p,.m li{color:var(--ink-2);line-height:1.7}
+  .m ul,.m ol{padding-left:1.2rem}
+  .m code{font-family:var(--mono);font-size:.85em;background:var(--bg-3);border:1px solid var(--line);border-radius:5px;padding:.1em .4em;color:var(--ink)}
+  .m b{color:var(--ink)}
+  .step{border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2);padding:1rem 1.2rem;margin:.7rem 0}
+  .step .n{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  .step h3{font-family:var(--serif);font-size:1.1rem;font-weight:600;margin:.3rem 0 .3rem}
+  .warn{border:1px solid color-mix(in oklab,var(--warn) 45%,transparent);background:color-mix(in oklab,var(--warn) 8%,transparent);border-radius:var(--r);padding:1.1rem 1.3rem;margin:1.4rem 0}
+  .warn b{color:var(--ink)}
+  .ver{border:1px solid color-mix(in oklab,var(--pos) 40%,transparent);background:color-mix(in oklab,var(--pos) 7%,transparent);border-radius:var(--r);padding:1rem 1.2rem;margin:1rem 0;font-family:var(--mono);font-size:.82rem}
+  .ver .ok{color:var(--pos)}
+  table{width:100%;border-collapse:collapse;margin:.8rem 0;font-size:.86rem}
+  th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line)}
+  th{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+  td{color:var(--ink-2)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap topbar-in">
+  <a class="brand" href="index.html"><span class="dot"></span>Onyx&nbsp;Ledger<span class="os">TaxOS</span></a>
+  <span class="sp"></span>
+  <a class="btn btn-ghost btn-sm" href="dashboard.html">Dashboard</a>
+  <a class="btn btn-primary btn-sm" href="signup.html">Try it free</a>
+</div></header>
+
+<div class="wrap m" style="padding-top:clamp(2rem,5vw,3.4rem);padding-bottom:4rem">
+  <span class="k">Methodology &amp; verification</span>
+  <h1>How ONYX calculates — and how you can check it.</h1>
+  <p>Trust should be earned, not asserted. This page documents exactly how the engine turns your figures into an estimate, the sources behind every constant, how the calculation is verified, and where it deliberately simplifies. Nothing here is a black box.</p>
+
+  <div class="warn">
+    <p style="margin:0"><b>Onyx Ledger is not CRA-certified filing software and does not file your taxes.</b> In Canada, software that transmits a return to the CRA must pass <b>NETFILE certification</b> — an annual program with the CRA's own test cases. This tool produces <b>educational estimates</b> to help you understand and plan. Always confirm with the CRA or a licensed professional before you file.</p>
+  </div>
+
+  <h2>Engine &amp; data version</h2>
+  <p id="verline">Engine version and self-check status load here from <code>/api/verify</code>…</p>
+  <div class="ver" id="verbox">Loading verification status…</div>
+
+  <h2>The calculation, step by step</h2>
+  <div class="step"><div class="n">Step 1 — Income</div><h3>Total income</h3><p>Employment, self-employment, interest, pension and other income are summed. Eligible and non-eligible dividends are <b>grossed up</b> (×1.38 / ×1.15); <b>50%</b> of a capital gain is included. </p></div>
+  <div class="step"><div class="n">Step 2 — Deductions</div><h3>Net &amp; taxable income</h3><p>RRSP, FHSA, union dues, child care, moving and employment deductions reduce total income to net income, used as the basis for tax (a documented simplification — see limitations).</p></div>
+  <div class="step"><div class="n">Step 3 — Federal tax</div><h3>Brackets minus credits</h3><p>Progressive federal brackets are applied, then non-refundable credits (basic personal amount, CPP/EI paid, the Canada employment amount, tuition, medical above the 3% threshold, age, pension, spousal, and donations) are subtracted at 15%, along with the dividend tax credit. Quebec residents receive the 16.5% federal abatement.</p></div>
+  <div class="step"><div class="n">Step 4 — Provincial tax</div><h3>Provincial brackets, credits, surtax</h3><p>Each province/territory's brackets and credit rate are applied. Ontario's surtax and health premium are included. Provincial credits mirror the shared amounts.</p></div>
+  <div class="step"><div class="n">Step 5 — Result</div><h3>Refund or balance owing</h3><p>Federal + provincial tax is your total income tax. Subtract tax already withheld or paid to get your estimated refund or balance owing, plus marginal and average rates.</p></div>
+
+  <h2>Sources for every constant</h2>
+  <p>Tax constants are maintained as data, separate from the calculation logic, and each year's figures are drawn from official publications:</p>
+  <table>
+    <tr><th>Constant</th><th>Source</th></tr>
+    <tr><td>Federal brackets &amp; basic personal amount</td><td>CRA — <a href="https://www.canada.ca/en/revenue-agency.html" target="_blank" rel="noopener">Federal income tax rates</a> &amp; the T1 income tax package</td></tr>
+    <tr><td>CPP / EI rates &amp; maximums</td><td>CRA — CPP contribution rates &amp; EI premium rates</td></tr>
+    <tr><td>Provincial/territorial rates &amp; amounts</td><td>Each province's finance ministry &amp; CRA provincial tax information</td></tr>
+    <tr><td>Credits (medical, donations, tuition, age, pension, disability)</td><td>CRA — non-refundable tax credit lines / Federal Worksheet</td></tr>
+    <tr><td>Dividend gross-up &amp; tax credit, capital gains inclusion</td><td>CRA — investment income guidance</td></tr>
+  </table>
+  <p><b>2024</b> figures are treated as verified. <b>2025</b> federal figures are final; <b>2025 provincial</b> figures are indexed estimates pending verification against each province's published amounts.</p>
+
+  <h2>How the engine is verified</h2>
+  <ul>
+    <li><b>Reference cases:</b> the engine is checked against hand-derived expected federal, provincial and total tax for representative filers (e.g., Ontario $60,000, Alberta $50,000, British Columbia $100,000). The arithmetic matches the CRA's published method.</li>
+    <li><b>Self-check on demand:</b> the <code>/api/verify</code> endpoint re-runs those reference cases live, so you can confirm the deployed engine still matches — see the status box above.</li>
+    <li><b>Property tests:</b> automated tests confirm tax is monotonic in income, marginal ≥ average, no negative tax or credits, and identical inputs always produce identical outputs, across every province and a range of incomes.</li>
+    <li><b>Deterministic:</b> the engine is pure — the same inputs always yield the same result, with no hidden state.</li>
+  </ul>
+
+  <h2>Documented limitations</h2>
+  <ul>
+    <li>Net income is used as a proxy for taxable income (no loss carryovers or specialized deductions).</li>
+    <li>Provincial dividend tax credits and some province-specific amounts are approximated.</li>
+    <li>Image OCR requires an OCR provider; the demo reads structured entries and text.</li>
+    <li>Benefit estimates (GST/HST, Canada Carbon Rebate, CCB) use simplified formulas.</li>
+    <li>It is an estimate — not a filed return, not tax advice, and not CRA-certified.</li>
+  </ul>
+
+  <h2>Want authoritative numbers?</h2>
+  <p>Use the CRA's own tools: <a href="https://www.canada.ca/en/revenue-agency.html" target="_blank" rel="noopener">canada.ca — Canada Revenue Agency</a>, the <b>Auto-fill my return</b> service through NETFILE-certified software, or a licensed tax professional. Onyx Ledger is designed to help you <i>understand</i> those numbers, not replace them.</p>
+
+  <p style="margin-top:2.5rem;font-size:.8rem;color:var(--ink-3)">© 2026 Onyx Ledger · Educational estimates · Not affiliated with the Canada Revenue Agency · <a href="privacy.html">Privacy</a> · <a href="about.html">About</a></p>
+</div>
+
+<script src="app.js" onerror="void 0"></script>
+<script>
+(async function(){
+  try {
+    var meta = await ONYX.api('/meta');
+    var v = await ONYX.api('/verify');
+    document.getElementById('verline').innerHTML = 'Running <b>ONYX engine v' + (v.version||meta.engineVersion||'1.0.0') + '</b>. The self-check below re-computes the reference cases live.';
+    var box = document.getElementById('verbox');
+    var head = (v.allPass ? '<span class="ok">✓ PASS</span>' : '✗ FAIL') + ' — ' + v.passCount + '/' + v.total + ' reference checks (±$' + v.tolerance + ') · ' + new Date(v.ranAt).toLocaleString() + '<br><br>';
+    box.innerHTML = head + v.checks.map(function(c){
+      return (c.pass?'✓':'✗') + ' ' + c.case + ' · ' + c.field + ': expected $' + c.expected + ', got $' + c.got;
+    }).join('<br>');
+  } catch (e) {
+    document.getElementById('verbox').textContent = 'Verification runs inside the app. Open the dashboard to see the live self-check.';
+  }
+})();
+</script>
+</body>
+</html>
