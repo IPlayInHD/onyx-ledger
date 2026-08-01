@@ -44,3 +44,24 @@ class ExpenseCategory(Base):
     is_credit: Mapped[bool] = mapped_column(Boolean, default=False)
     cra_line: Mapped[str | None] = mapped_column(String)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class DocumentType(Base):
+    __tablename__ = "document_type"
+    __table_args__ = {"schema": "ref"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    code: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, default="slip")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Jurisdiction(Base):
+    __tablename__ = "jurisdiction"
+    __table_args__ = {"schema": "ref"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    code: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    level: Mapped[str] = mapped_column(String, nullable=False)
