@@ -13,6 +13,13 @@ from app.database.models.admin import (  # noqa: F401
     RuleChangeRequest,
     RulePublication,
 )
+from app.database.models.ai import (  # noqa: F401
+    AiConversation,
+    AiMessage,
+    AiMessageCitation,
+    AiPromptContext,
+    KnowledgeEmbedding,
+)
 from app.database.models.analysis import (  # noqa: F401
     AnalysisInputSnapshot,
     AnalysisLineItem,

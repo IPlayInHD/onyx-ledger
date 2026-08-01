@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.admin.routes import router as admin_router
+from app.api.v1.ai.routes import router as ai_router
 from app.api.v1.analysis.routes import router as analysis_router
 from app.api.v1.auth.routes import router as auth_router
 from app.api.v1.documents.routes import router as documents_router
@@ -18,4 +19,5 @@ api_router.include_router(financials_router)
 api_router.include_router(tax_router)
 api_router.include_router(analysis_router)
 api_router.include_router(documents_router)
+api_router.include_router(ai_router)
 api_router.include_router(admin_router)

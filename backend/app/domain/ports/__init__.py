@@ -20,5 +20,11 @@ class LlmClient(Protocol):
     async def complete(self, system: str, prompt: str, *, max_tokens: int = 1024) -> str: ...
 
 
+class Embedder(Protocol):
+    dim: int
+
+    def embed(self, text: str) -> list[float]: ...
+
+
 class EmailSender(Protocol):
     async def send(self, to: str, subject: str, body: str) -> None: ...
