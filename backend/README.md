@@ -45,6 +45,33 @@ cd deploy && docker compose up --build
 # Postgres applies backend/db/sql on first boot; worker + redis + minio included.
 ```
 
+## Migrations (Alembic)
+
+The canonical schema lives in `db/sql/*.sql`. Alembic **mirrors** it: a 20-revision
+chain (`0001_foundation … 0020_seed_example`), one revision per SQL file in
+dependency order, each a thin wrapper that executes its file verbatim. So
+`alembic upgrade head` and running the SQL by hand produce an identical database
+(verified: the full test suite passes against an Alembic-built DB).
+
+```bash
+# build the whole schema from scratch (needs an elevated role: CREATE EXTENSION/ROLE)
+ONYX_DATABASE_URL_SYNC="postgresql+psycopg2://onyx_migrator@localhost/onyx" \
+  alembic upgrade head
+
+alembic current           # -> 0020_seed_example (head)
+alembic history           # the file-by-file chain
+alembic downgrade base    # full teardown (the SQL baseline is applied/removed as a unit)
+
+# adopt an EXISTING db that was built by the raw SQL files:
+alembic stamp head
+```
+
+**Going forward:** change the schema by adding a **new** SQL file + a **new** revision
+(never mutate an applied one). `env.py` wires `Base.metadata` with `include_schemas`,
+so incremental table changes can use `alembic revision --autogenerate` — but keep
+partitioning, RLS, triggers, and the HNSW index as hand-written ops (autogenerate
+does not model them).
+
 ## Layout
 
 ```

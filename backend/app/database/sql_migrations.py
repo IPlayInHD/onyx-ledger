@@ -23,21 +23,30 @@ SCHEMAS = [
 ROLES = ["onyx_app_rw", "onyx_app_ro", "onyx_kb_admin", "onyx_audit_writer", "onyx_migrator"]
 
 
+def _run_sql(sql: str) -> None:
+    """Execute raw multi-statement SQL (incl. dollar-quoted bodies) via the
+    DBAPI cursor — bypassing SQLAlchemy's bind-parameter parsing, which would
+    otherwise choke on ':' in trigger/DO-block text."""
+    raw = op.get_bind().connection  # psycopg2 connection (shares Alembic's tx)
+    cur = raw.cursor()
+    try:
+        cur.execute(sql)
+    finally:
+        cur.close()
+
+
 def apply_sql_file(name: str) -> None:
     """Execute a whole SQL file (multi-statement + dollar-quoted bodies) verbatim."""
-    sql = (SQL_DIR / name).read_text()
-    op.get_bind().exec_driver_sql(sql)
+    _run_sql((SQL_DIR / name).read_text())
 
 
 def drop_all_schemas() -> None:
     """Full teardown for `alembic downgrade base` (the SQL baseline is a
     forward-only chain applied/removed as one unit)."""
-    bind = op.get_bind()
     for schema in SCHEMAS:
-        bind.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        _run_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     for role in ROLES:
-        # roles are cluster-wide; ignore if still referenced elsewhere
         try:
-            bind.exec_driver_sql(f'DROP ROLE IF EXISTS "{role}"')
+            _run_sql(f'DROP ROLE IF EXISTS "{role}"')
         except Exception:  # noqa: BLE001
             pass

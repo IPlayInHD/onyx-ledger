@@ -68,11 +68,20 @@ Each SQL file maps to one Alembic revision, applied in filename order. The
 > indexes → seed`. `tax_kb`↔`rules` and `ai`↔`admin` use deferred FKs added by
 > the later domain, so neither blocks the other.
 
-## Apply directly (psql, dev)
+## Apply the schema
 
+**Via Alembic (forward-migration path — recommended):** the migration chain in
+`backend/migrations/` mirrors these files 1:1 in the order above.
+```bash
+cd backend && ONYX_DATABASE_URL_SYNC="postgresql+psycopg2://onyx_migrator@host/onyx" alembic upgrade head
+```
+
+**Directly (psql, dev):**
 ```bash
 for f in backend/db/sql/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
 ```
+
+Both produce an identical database.
 
 ## SQLAlchemy / FastAPI notes
 

@@ -33,6 +33,12 @@ jobs:
         run: ruff check app workers tests
       - name: Type-check
         run: mypy app || true   # advisory during scaffolding
+      - name: Migration smoke (alembic upgrade/downgrade)
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGSUPER: onyx_super
+        run: bash scripts/check_migrations.sh
       - name: Tests
         env:
           PGHOST: localhost
