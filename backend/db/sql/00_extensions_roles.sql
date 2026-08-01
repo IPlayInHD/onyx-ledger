@@ -42,6 +42,9 @@ CREATE OR REPLACE FUNCTION ref.uuid_generate_v7()
 RETURNS uuid
 LANGUAGE plpgsql
 VOLATILE
+-- self-contained search_path so it resolves gen_random_bytes (pgcrypto/public)
+-- even when called from a SECURITY DEFINER trigger with a pinned search_path.
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
     unix_ms bigint := (extract(epoch FROM clock_timestamp()) * 1000)::bigint;

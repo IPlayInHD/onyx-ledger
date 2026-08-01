@@ -39,12 +39,15 @@ RETURNS uuid LANGUAGE sql STABLE AS $$
     SELECT nullif(current_setting('app.user_id', true), '')::uuid;
 $$;
 
--- Enable RLS + a self-ownership policy on every user-owned table.
+-- Enable RLS + a self-ownership policy on every user-owned DATA table.
+-- NOTE: the identity/auth tables are deliberately excluded — registration and
+-- login operate with NO user context yet, so they cannot satisfy a self-
+-- ownership policy. Those tables are gated exclusively by the Auth service
+-- (which is the only code path that touches them). RLS defends the tables that
+-- actually hold user PII and financial data.
 DO $$
 DECLARE
     owned text[] := ARRAY[
-        'identity.auth_session','identity.login_event','identity.password_reset_token',
-        'identity.email_verification_token','identity.mfa_method','identity.user_credential',
         'profile.user_profile','profile.tax_profile','profile.dependent',
         'profile.spouse_profile','profile.user_preference','profile.user_privacy_setting',
         'finance.income_source','finance.expense_record',
@@ -69,13 +72,6 @@ BEGIN
             tbl, sch, tbl);
     END LOOP;
 END $$;
-
--- user_account keyed on id, not user_id.
-ALTER TABLE identity.user_account ENABLE ROW LEVEL SECURITY;
-ALTER TABLE identity.user_account FORCE ROW LEVEL SECURITY;
-CREATE POLICY p_self_user_account ON identity.user_account
-    USING (id = ref.current_app_user())
-    WITH CHECK (id = ref.current_app_user());
 
 -- Default privileges so future tables created by the migrator inherit grants.
 ALTER DEFAULT PRIVILEGES IN SCHEMA

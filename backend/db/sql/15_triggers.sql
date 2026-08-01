@@ -31,9 +31,14 @@ END $$;
 -- ---- Generic audit trigger --------------------------------------------------
 -- Writes a row into audit.audit_log for every INSERT/UPDATE/DELETE on tracked
 -- tables. Actor is read from the session GUC app.user_id (set by the API).
+-- SECURITY DEFINER: runs with the function owner's rights so the runtime role
+-- (onyx_app_rw, which has no direct INSERT on audit.audit_log) can still be
+-- audited. search_path pinned to defeat search-path injection.
 CREATE OR REPLACE FUNCTION audit.log_change()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = audit, pg_catalog
 AS $$
 DECLARE
     v_actor uuid;
