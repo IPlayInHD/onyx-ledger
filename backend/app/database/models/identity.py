@@ -36,6 +36,7 @@ class UserCredential(Base):
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     algorithm: Mapped[str] = mapped_column(String, nullable=False, default="argon2id")
     must_reset: Mapped[bool] = mapped_column(default=False)
+    password_changed_at: Mapped[datetime] = created_at_col()
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
 
@@ -70,3 +71,48 @@ class LoginEvent(Base):
     ip_address: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_token"
+    __table_args__ = {"schema": "identity"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
+    )
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class EmailVerificationToken(Base):
+    __tablename__ = "email_verification_token"
+    __table_args__ = {"schema": "identity"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
+    )
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class MfaMethod(Base):
+    __tablename__ = "mfa_method"
+    __table_args__ = {"schema": "identity"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
+    )
+    method_type: Mapped[str] = mapped_column(String, nullable=False)
+    secret_kms_ref: Mapped[str | None] = mapped_column(Text)
+    label: Mapped[str | None] = mapped_column(String)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_col()
+    updated_at: Mapped[datetime] = updated_at_col()

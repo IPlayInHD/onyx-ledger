@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ForeignKey, Integer, SmallInteger, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -78,5 +78,18 @@ class KnowledgeEmbedding(Base):
     source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     tax_year: Mapped[int | None] = mapped_column()
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class AiExplanation(Base):
+    __tablename__ = "ai_explanation"
+    __table_args__ = {"schema": "ai"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    tax_rule_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_by: Mapped[str | None] = mapped_column(String)
+    reviewed_by_admin_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at_col()

@@ -38,3 +38,33 @@ class Recommendation(Base):
     status: Mapped[str] = mapped_column(String, default="generated")
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
+
+
+class RecommendationStatusEvent(Base):
+    __tablename__ = "recommendation_status_event"
+    __table_args__ = {"schema": "reco"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    recommendation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("reco.recommendation.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class RecommendationFeedback(Base):
+    __tablename__ = "recommendation_feedback"
+    __table_args__ = {"schema": "reco"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    recommendation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("reco.recommendation.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
+    )
+    rating: Mapped[int | None] = mapped_column(SmallInteger)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()

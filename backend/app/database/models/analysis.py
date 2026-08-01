@@ -79,3 +79,15 @@ class ReconciliationCheck(Base):
     label: Mapped[str] = mapped_column(String, nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
+
+
+class AnalysisAssumption(Base):
+    __tablename__ = "analysis_assumption"
+    __table_args__ = {"schema": "analysis"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    analysis_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analysis.analysis_run.id", ondelete="CASCADE")
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = created_at_col()

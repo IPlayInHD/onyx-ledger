@@ -28,6 +28,7 @@ class Document(Base):
     mime_type: Mapped[str | None] = mapped_column(String)
     byte_size: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String, default="uploaded")
+    uploaded_at: Mapped[datetime] = created_at_col()
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
