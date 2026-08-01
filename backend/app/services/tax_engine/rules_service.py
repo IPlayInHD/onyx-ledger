@@ -94,7 +94,7 @@ class RulesEvaluatorService:
                     "value_boolean": c.value_boolean, "value_set": None,
                 })
         root = None
-        for gid, node in by_id.items():
+        for node in by_id.values():
             parent = node.pop("_parent")
             if parent is None:
                 root = node

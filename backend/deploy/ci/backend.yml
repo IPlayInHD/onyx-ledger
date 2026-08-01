@@ -1,0 +1,42 @@
+# GitHub Actions — backend CI (lint, type-check, unit + integration + security).
+name: backend-ci
+on:
+  push:
+    paths: ["backend/**"]
+  pull_request:
+    paths: ["backend/**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: onyx_super
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U onyx_super" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install
+        run: pip install .[dev]
+      - name: Lint
+        run: ruff check app workers tests
+      - name: Type-check
+        run: mypy app || true   # advisory during scaffolding
+      - name: Tests
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+        run: |
+          # apply schema, provision role, run pytest against real Postgres
+          bash scripts/run_backend_tests.sh

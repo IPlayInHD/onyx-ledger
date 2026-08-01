@@ -160,7 +160,6 @@ def compute(inp: TaxInput) -> TaxResult:
     taxable_income = net_income
 
     # ---- Shared credit amounts ----
-    employee_cpp = min(inp.cpp_contrib, cpp_ceiling)
     cpp = min(inp.cpp_contrib + se_cpp_credit, cpp_ceiling)
     ei = min(inp.ei_contrib, f.ei_max)
     canada_employment = (

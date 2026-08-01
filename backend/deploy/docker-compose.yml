@@ -1,0 +1,54 @@
+# Local dev stack: api + worker + postgres(pgvector) + redis + minio.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: onyx_super
+      POSTGRES_DB: onyx
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports: ["5432:5432"]
+    volumes:
+      - ../db/sql:/docker-entrypoint-initdb.d:ro   # applies schema on first boot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onyx_super -d onyx"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: onyx
+      MINIO_ROOT_PASSWORD: onyx-dev-secret
+    ports: ["9000:9000", "9001:9001"]
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      ONYX_DATABASE_URL: postgresql+asyncpg://onyx_super@postgres:5432/onyx
+      ONYX_REDIS_URL: redis://redis:6379/0
+      ONYX_JWT_SECRET: dev-secret-change-me-at-least-32bytes-000
+      ONYX_S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["8000:8000"]
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["celery", "-A", "workers.celery_app", "worker",
+              "-Q", "analysis,documents,ingestion,notify", "--loglevel=INFO"]
+    environment:
+      ONYX_DATABASE_URL: postgresql+asyncpg://onyx_super@postgres:5432/onyx
+      ONYX_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }

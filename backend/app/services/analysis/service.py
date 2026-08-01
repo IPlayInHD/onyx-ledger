@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +18,8 @@ from app.database.models import (
     AnalysisInputSnapshot,
     AnalysisLineItem,
     AnalysisRun,
-    ReconciliationCheck,
     Recommendation,
+    ReconciliationCheck,
 )
 from app.services.optimization.service import rank
 from app.services.tax_engine.rules_service import RulesEvaluatorService
@@ -40,7 +40,7 @@ class AnalysisService:
         run = AnalysisRun(
             user_id=user_id, tax_year=tax_year, province_code=inp.province,
             engine_version=ENGINE_VERSION, status="running",
-            started_at=datetime.now(tz=timezone.utc),
+            started_at=datetime.now(tz=UTC),
         )
         self.s.add(run)
         await self.s.flush()
@@ -81,7 +81,7 @@ class AnalysisService:
                 total_savings += opp.estimated_impact
 
         run.status = "completed"
-        run.completed_at = datetime.now(tz=timezone.utc)
+        run.completed_at = datetime.now(tz=UTC)
         run.total_income = result.total_income
         run.taxable_income = result.taxable_income
         run.estimated_tax = result.income_tax

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +46,7 @@ class AuthService:
             self.s.add(LoginEvent(user_id=user.id if user else None, email_tried=email,
                                   event_type="failure", ip_address=ip))
             raise Unauthorized("Invalid email or password")
-        user.last_login_at = datetime.now(tz=timezone.utc)
+        user.last_login_at = datetime.now(tz=UTC)
         self.s.add(LoginEvent(user_id=user.id, event_type="success", ip_address=ip))
         return await self._issue_tokens(user.id, ip)
 
@@ -55,7 +55,7 @@ class AuthService:
         sess = await self.s.scalar(
             select(AuthSession).where(AuthSession.refresh_token_hash == token_hash)
         )
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         if not sess or sess.revoked_at is not None or sess.expires_at <= now:
             # reuse of a rotated/expired token → revoke the whole family for safety
             if sess and sess.revoked_at is not None:
@@ -73,7 +73,7 @@ class AuthService:
             user_id=user_id,
             refresh_token_hash=hash_token(raw_refresh),
             ip_address=ip,
-            expires_at=datetime.now(tz=timezone.utc)
+            expires_at=datetime.now(tz=UTC)
             + timedelta(seconds=self.settings.refresh_token_ttl_seconds),
         ))
         await self.s.flush()
@@ -85,6 +85,6 @@ class AuthService:
         sessions = await self.s.scalars(
             select(AuthSession).where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None))
         )
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         for sess in sessions:
             sess.revoked_at = now
