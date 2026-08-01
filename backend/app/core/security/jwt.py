@@ -50,3 +50,15 @@ def decode_access_token(token: str) -> dict:
 def generate_refresh_token() -> str:
     """A high-entropy opaque token (client stores raw; we store the hash)."""
     return secrets.token_urlsafe(48)
+
+
+def create_admin_token(admin_id: uuid.UUID) -> str:
+    """Access token scoped to the admin plane (separate principal namespace)."""
+    return create_access_token(admin_id, extra={"scope": "admin"})
+
+
+def decode_admin_token(token: str) -> dict:
+    payload = decode_access_token(token)
+    if payload.get("scope") != "admin":
+        raise Unauthorized("Admin scope required")
+    return payload

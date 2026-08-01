@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +71,7 @@ class DocumentService:
             engine="structured" if fields else "ocr-regex",
             status="processed" if confidence >= LOW_CONFIDENCE else "needs_review",
             confidence=round(confidence, 4),
-            extracted_at=datetime.now(tz=timezone.utc),
+            extracted_at=datetime.now(tz=UTC),
         )
         self.s.add(extraction)
         await self.s.flush()

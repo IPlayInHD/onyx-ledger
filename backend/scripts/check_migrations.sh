@@ -10,8 +10,9 @@ export ONYX_DATABASE_URL_SYNC="postgresql+psycopg2://${SUPER}@/onyx_migrate?host
 export ONYX_DATABASE_URL="postgresql+asyncpg://${SUPER}@/onyx_migrate?host=${PGHOST}&port=${PGPORT}"
 
 PYTHONPATH=. alembic upgrade head
-CUR=$(PYTHONPATH=. alembic current 2>/dev/null | grep -o '0020_seed_example' || true)
-[ "$CUR" = "0020_seed_example" ] || { echo "FAIL: head not reached"; exit 1; }
+HEAD=$(PYTHONPATH=. alembic heads 2>/dev/null | awk '{print $1}' | head -1)
+CUR=$(PYTHONPATH=. alembic current 2>/dev/null | awk '{print $1}' | head -1)
+[ -n "$HEAD" ] && [ "$CUR" = "$HEAD" ] || { echo "FAIL: current($CUR) != head($HEAD)"; exit 1; }
 N=$(psql "postgres://${SUPER}@/onyx_migrate?host=${PGHOST}&port=${PGPORT}" -tAc \
   "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND NOT c.relispartition AND n.nspname IN ('ref','identity','profile','finance','wealth','tax_kb','rules','analysis','reco','ai','docs','admin','billing','audit');")
 echo "alembic upgrade head -> $N tables"

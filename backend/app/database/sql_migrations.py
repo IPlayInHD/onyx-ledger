@@ -42,11 +42,11 @@ def apply_sql_file(name: str) -> None:
 
 def drop_all_schemas() -> None:
     """Full teardown for `alembic downgrade base` (the SQL baseline is a
-    forward-only chain applied/removed as one unit)."""
+    forward-only chain applied/removed as one unit).
+
+    Only the per-database SCHEMAS are dropped. The ROLES created by 0001 are
+    cluster-wide and may be shared by other databases / sessions, so they are
+    intentionally left in place (00_extensions_roles.sql creates them
+    idempotently, so a later re-upgrade is unaffected)."""
     for schema in SCHEMAS:
         _run_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-    for role in ROLES:
-        try:
-            _run_sql(f'DROP ROLE IF EXISTS "{role}"')
-        except Exception:  # noqa: BLE001
-            pass

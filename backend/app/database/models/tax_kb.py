@@ -20,6 +20,7 @@ class TaxRule(Base):
     code: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
+    jurisdiction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     province_code: Mapped[str | None] = mapped_column(String)
 
 
