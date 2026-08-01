@@ -5,3 +5,8 @@ node_modules/
 *.zip
 server/data/db.json
 server/dashboard-preview.png
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
