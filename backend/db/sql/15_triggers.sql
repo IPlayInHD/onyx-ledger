@@ -6,18 +6,20 @@
 -- =============================================================================
 
 -- ---- updated_at: auto-attach to every base table that has the column --------
+-- Uses pg_catalog so we can exclude partition CHILDREN (relispartition), which
+-- inherit the trigger from their partitioned parent automatically.
 DO $$
 DECLARE r record;
 BEGIN
     FOR r IN
-        SELECT c.table_schema, c.table_name
-        FROM information_schema.columns c
-        JOIN information_schema.tables t
-          ON t.table_schema = c.table_schema AND t.table_name = c.table_name
-        WHERE c.column_name = 'updated_at'
-          AND t.table_type = 'BASE TABLE'
-          AND c.table_schema IN ('ref','identity','profile','finance','wealth','tax_kb',
-                                 'rules','analysis','reco','ai','docs','admin','billing')
+        SELECT n.nspname AS table_schema, c.relname AS table_name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'updated_at' AND NOT a.attisdropped
+        WHERE c.relkind IN ('r','p')          -- ordinary + partitioned parents
+          AND NOT c.relispartition            -- skip partition children
+          AND n.nspname IN ('ref','identity','profile','finance','wealth','tax_kb',
+                            'rules','analysis','reco','ai','docs','admin','billing')
     LOOP
         EXECUTE format(
             'CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON %I.%I
