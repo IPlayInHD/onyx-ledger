@@ -439,3 +439,86 @@ async def test_rule_without_contract_authoring_is_indeterminate_and_not_evaluabl
         assert cand.eligibility_status == "indeterminate"
         assert cand.portfolio_membership == "excluded_not_evaluable"
         assert cand.calculation_basis is None
+
+
+@pytest.mark.asyncio
+async def test_confidence_score_conversion_boundaries():
+    """The exact display→integer conversion, executed against the live trigger.
+
+    Pinned mode is HALF AWAY FROM ZERO (identical to ROUND_HALF_UP over the
+    non-negative [0,100] domain). 63.50→64 is the discriminating case: banker's
+    rounding would give 62 for 62.50, so both midpoints rounding UP proves the
+    mode.
+    """
+    uid, analysis_id = await _user_with_analysis()
+    await _publish_rule(f"P3RND_{uuid.uuid4().hex[:6].upper()}")
+    outcome = await OptimizationOrchestrator(uid).generate(analysis_id)
+
+    cases = [
+        ("0.00", 0), ("0.50", 1), ("62.40", 62), ("62.50", 63),
+        ("62.60", 63), ("63.50", 64), ("99.50", 100), ("100.00", 100),
+    ]
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        run = await s.get(OptimizationRun, outcome.run_id)
+        for display, expected in cases:
+            cand = OptimizationCandidate(
+                run_id=run.id, opportunity_code=f"round-{display}",
+                eligibility_status="eligible",
+                display_support_score=Decimal(display),
+                assumption_adjusted_score=Decimal(display),
+            )
+            s.add(cand)
+            await s.flush()
+            await s.refresh(cand)
+            assert cand.confidence_score == expected, (
+                f"{display} should convert to {expected}, got {cand.confidence_score}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_runtime_role_cannot_disable_the_derivation_trigger():
+    """Privilege boundary: the application role is not the table owner, so it
+    cannot turn the derivation off. Disabling it is an owner/superuser act."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import ProgrammingError
+
+    async with unit_of_work(actor_type="system") as s:
+        with pytest.raises(ProgrammingError, match="must be owner"):
+            await s.execute(text(
+                "ALTER TABLE ioe.optimization_candidate "
+                "DISABLE TRIGGER trg_derive_confidence_score"
+            ))
+        await s.rollback()
+
+
+def test_check_constraint_holds_independently_of_the_trigger():
+    """The CHECK is a row invariant, not a restatement of the derivation.
+
+    Executed as the table OWNER — the privileged path the constraint exists for.
+    With the trigger disabled the derivation does not run, and a divergent row is
+    still refused by the CHECK.
+    """
+    import psycopg2
+
+    conn = psycopg2.connect("postgresql://onyx_migrator@localhost:5432/onyx")
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM ioe.optimization_run LIMIT 1")
+        row = cur.fetchone()
+        if row is None:
+            pytest.skip("no optimization_run available to attach a candidate to")
+        run_id = row[0]
+
+        cur.execute("ALTER TABLE ioe.optimization_candidate "
+                    "DISABLE TRIGGER trg_derive_confidence_score")
+        with pytest.raises(psycopg2.errors.CheckViolation) as exc:
+            cur.execute(
+                "INSERT INTO ioe.optimization_candidate "
+                "(run_id, opportunity_code, eligibility_status, "
+                " display_support_score, assumption_adjusted_score, confidence_score) "
+                "VALUES (%s, 'divergent', 'eligible', 62.40, 62.40, 99)", (run_id,))
+        assert "candidate_confidence_matches_display" in str(exc.value)
+    finally:
+        conn.rollback()          # also reverts the DISABLE TRIGGER
+        conn.close()

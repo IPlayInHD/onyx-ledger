@@ -71,15 +71,25 @@ ALTER TABLE ioe.optimization_candidate VALIDATE CONSTRAINT candidate_cap_reason_
 -- integer equivalent of `display_support_score`. It is no longer an independent
 -- input — any value supplied by a caller is overwritten.
 --
--- Divergence is prevented STRUCTURALLY, not by convention:
---   1. a BEFORE INSERT/UPDATE trigger DERIVES it from display_support_score, so
---      an application cannot write a conflicting value even by mistake;
---   2. a CHECK constraint then asserts the two agree, so a direct SQL write that
---      somehow bypassed the derivation is still rejected.
+-- Two controls with DIFFERENT failure modes (defence in depth):
+--   1. TRIGGER = derivation. A BEFORE INSERT/UPDATE trigger computes the value
+--      from display_support_score, so application code cannot write a
+--      conflicting one even by mistake. It fires for EVERY ordinary write from
+--      any client -- there is no "direct SQL" path that skips it.
+--   2. CHECK = independent row invariant. It constrains the ROW regardless of
+--      how the row was created, so it still holds when the derivation does not
+--      run: triggers disabled (ALTER TABLE ... DISABLE TRIGGER), the superuser
+--      replication-apply path (session_replication_role='replica'), a bulk load
+--      with triggers off, or a later migration dropping/replacing the function.
 --
--- Rounding is half-up to a whole number, matching the ROUND_HALF_UP money/score
--- policy used throughout the domain. (PostgreSQL's numeric round() is half-up
--- away from zero; support scores are non-negative, so the two agree.)
+-- CONVERSION, exactly (no implicit cast rounding is relied upon):
+--   step 1  round(numeric)  -- explicit, to 0 decimal places, HALF AWAY FROM ZERO
+--   step 2  ::smallint      -- cast of an already-integral numeric; EXACT
+-- display_support_score is constrained to [0,100], so over that non-negative
+-- domain half-away-from-zero is identical to the ROUND_HALF_UP policy used by
+-- the Decimal layer. Writing `display_support_score::smallint` would rely on the
+-- cast's implicit rounding and must not be introduced.
+-- See docs/architecture/ioe-p3-closing-notes.md.
 -- =============================================================================
 CREATE OR REPLACE FUNCTION ioe.derive_confidence_score()
 RETURNS trigger
