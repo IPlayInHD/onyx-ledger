@@ -55,13 +55,20 @@ from app.database.models import (
 from app.database.session import unit_of_work
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import confidence as support
+from app.services.ioe.domain import levers as lever_registry
+from app.services.ioe.domain import portfolio as assembly
 from app.services.ioe.domain import relationships as relationship_rules
+from app.services.ioe.domain import savings as savings_domain
 from app.services.ioe.domain import scoring
 from app.services.ioe.domain.enums import ScoreFactor, WorkflowStatus
 from app.services.ioe.domain.workflow import WorkflowStateMachine
 from app.services.ioe.normalization.service import (
     NORMALIZATION_VERSION,
     OpportunityNormalizationService,
+)
+from app.services.ioe.portfolio.service import (
+    PORTFOLIO_SERVICE_VERSION,
+    PortfolioEvaluationService,
 )
 from app.services.ioe.snapshot.service import RuleSnapshotService
 from app.services.tax_engine.contracts import CONTRACT_VERSION
@@ -85,6 +92,7 @@ ERROR_ANALYSIS_NOT_READY = "ANALYSIS_NOT_READY"
 ERROR_RULES_EVALUATION_FAILED = "RULES_EVALUATION_FAILED"
 ERROR_NORMALIZATION_FAILED = "NORMALIZATION_FAILED"
 ERROR_SCORING_FAILED = "SCORING_FAILED"
+ERROR_PORTFOLIO_ASSEMBLY_FAILED = "PORTFOLIO_ASSEMBLY_FAILED"
 ERROR_PERSISTENCE_FAILED = "PERSISTENCE_FAILED"
 ERROR_INTERNAL = "INTERNAL_ERROR"
 
@@ -118,6 +126,7 @@ class OptimizationOutcome:
     replayed: bool = False
     candidate_count: int = 0
     relationship_count: int = 0
+    portfolio_member_count: int = 0
     error_code: str | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -169,6 +178,12 @@ class OptimizationOrchestrator:
             "confidence_algorithm_version": support.CONFIDENCE_ALGORITHM_VERSION,
             "relationship_registry_version": relationship_rules.RELATIONSHIP_REGISTRY_VERSION,
             "canonical_serialization_version": c.CANONICAL_SERIALIZATION_VERSION,
+            # P4 — these change portfolio results, so they change run identity
+            "portfolio_service_version": PORTFOLIO_SERVICE_VERSION,
+            "portfolio_assembly_version": assembly.PORTFOLIO_ASSEMBLY_VERSION,
+            "lever_registry_version": lever_registry.LEVER_REGISTRY_VERSION,
+            "portfolio_objective_code": savings_domain.PORTFOLIO_OBJECTIVE_CODE.value,
+            "portfolio_objective_version": savings_domain.PORTFOLIO_OBJECTIVE_VERSION,
             "rule_snapshot_hash": pinned.snapshot_hash,
             "weight_config_version": weight_config.version if weight_config else "default",
         }
@@ -312,6 +327,9 @@ class OptimizationOrchestrator:
             workflow_status=WorkflowStatus.COMPLETED.value,
             candidate_count=len(computed["candidates"]),
             relationship_count=len(computed["relationships"]),
+            portfolio_member_count=(
+                len(computed["portfolio"].members) if computed.get("portfolio") else 0
+            ),
         )
 
     async def _compute(self, spec: PinnedSpec) -> dict:
@@ -341,22 +359,39 @@ class OptimizationOrchestrator:
                 ),
             )
 
-        ranked = scoring.rank(
-            candidates,
-            available_cash=_available_cash(spec.user_constraints),
-        )
+        available_cash = _available_cash(spec.user_constraints)
+        ranked = scoring.rank(candidates, available_cash=available_cash)
         relationships = relationship_rules.derive(ranked)
-        return {"candidates": ranked, "relationships": relationships}
+
+        # ---- P4: constrained assembly, every figure measured by the engine ----
+        constraints = assembly.AssemblyConstraints(
+            available_cash=available_cash,
+            objective_metric=savings_domain.PORTFOLIO_OBJECTIVE_CODE,
+            objective_version=savings_domain.PORTFOLIO_OBJECTIVE_VERSION,
+            resource_capacities=_resource_capacities(spec.user_constraints),
+            jurisdiction=spec.jurisdiction,
+            tax_year=spec.tax_year,
+        )
+        portfolio = PortfolioEvaluationService().evaluate(
+            ranked, relationships, inp, constraints
+        )
+        return {
+            "candidates": ranked,
+            "relationships": relationships,
+            "portfolio": portfolio,
+        }
 
     # ---------------------------------------------------------------- TX-2 ---
     async def _persist(self, run_id: uuid.UUID, spec: PinnedSpec, computed: dict) -> str:
         """One atomic transaction: all children, the sealed hash, and completion."""
         candidates = computed["candidates"]
         relationships = computed["relationships"]
+        portfolio = computed.get("portfolio")
 
         result_payload = {
             "candidates": [x.as_canonical() for x in candidates],
             "relationships": [r.as_canonical() for r in relationships],
+            "portfolio": portfolio.as_canonical() if portfolio else None,
         }
         result_hash = c.optimization_result_hash(
             spec_hash=spec.spec_hash, result=result_payload
@@ -432,6 +467,12 @@ class OptimizationOrchestrator:
                     resolution_options=list(edge.resolution_options),
                 ))
 
+            if portfolio is not None:
+                await PortfolioEvaluationService().persist(
+                    session, run_id, portfolio,
+                    {key: row.id for key, row in key_to_row.items()},
+                )
+
             WorkflowStateMachine.assert_transition(
                 WorkflowStatus.RUNNING, WorkflowStatus.COMPLETED
             )
@@ -465,6 +506,10 @@ class OptimizationOrchestrator:
 def _classify(exc: Exception) -> str:
     """Map an exception to an enumerated code; the message never escapes."""
     name = type(exc).__name__
+    # A portfolio that cannot reconcile, or a ledger that lost conservation, is
+    # never shown — the run fails rather than reporting an unverifiable total.
+    if "Reconciliation" in name or "LedgerConservation" in name:
+        return ERROR_PORTFOLIO_ASSEMBLY_FAILED
     if "Rules" in name or "Evaluat" in name:
         return ERROR_RULES_EVALUATION_FAILED
     if "Lever" in name or "Normal" in name:
@@ -486,6 +531,16 @@ def _canonical_constraints(constraints: dict) -> dict:
 def _available_cash(constraints: dict) -> Decimal | None:
     raw = constraints.get("available_cash")
     return Decimal(raw) if raw is not None else None
+
+
+def _resource_capacities(constraints: dict) -> dict[str, Decimal]:
+    """Declared shared-pool capacities (RRSP room, FHSA room, ...).
+
+    An UNDECLARED pool is uncapped, not zero: the assembler must not invent a
+    contribution limit the user never stated and the rules did not publish.
+    """
+    raw = constraints.get("resource_capacities") or {}
+    return {code: Decimal(str(raw[code])) for code in sorted(raw)}
 
 
 __all__ = [

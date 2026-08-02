@@ -121,7 +121,7 @@ def _normalize_effort(effort_rating: int) -> Decimal:
 def _normalize_cash_flow(
     candidate: OptimizationCandidate, available_cash: Decimal | None
 ) -> Decimal:
-    required = candidate.required_cash_contribution() + candidate.true_costs()
+    required = candidate.liquidity_commitment() + candidate.true_costs()
     if required <= 0:
         return Decimal(0)
     if not available_cash or available_cash <= 0:
@@ -157,7 +157,7 @@ def compute_score(
             Decimal(candidate.effort_rating), _normalize_effort(candidate.effort_rating),
         ),
         ScoreFactor.REQUIRED_CASH_FLOW: (
-            candidate.required_cash_contribution() + candidate.true_costs(),
+            candidate.liquidity_commitment() + candidate.true_costs(),
             _normalize_cash_flow(candidate, available_cash),
         ),
         ScoreFactor.USER_RELEVANCE: (

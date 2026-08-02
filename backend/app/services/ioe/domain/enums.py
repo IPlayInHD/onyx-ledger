@@ -44,12 +44,46 @@ class EconomicEffectType(StrEnum):
 
 
 class CostType(StrEnum):
-    """A required cash contribution retains an asset and is therefore NOT a cost
-    in the objective — only a liquidity constraint (architecture §B)."""
+    """Commitments and costs, kept as SEPARATE concepts (P4).
 
+    They behave differently and conflating them misstates a user's position:
+
+      LIQUIDITY_COMMITMENT        cash that must be available and is tied up.
+                                  Constrains feasibility; it is not a loss.
+      ASSET_TRANSFER              value moved into an account and RETAINED —
+                                  an RRSP contribution is not money spent.
+      NONRECOVERABLE_EXPENDITURE  money that is gone (a donation, an expense).
+      IMPLEMENTATION_COST         fees, professional advice.
+
+    Only the last two reduce the objective. The legacy members are retained so
+    stored rows and existing rule data stay valid.
+    """
+
+    # P4 taxonomy
+    LIQUIDITY_COMMITMENT = "liquidity_commitment"
+    ASSET_TRANSFER = "asset_transfer"
+    NONRECOVERABLE_EXPENDITURE = "nonrecoverable_expenditure"
+    IMPLEMENTATION_COST = "implementation_cost"
+    # legacy (retained): a required cash contribution is both a liquidity
+    # commitment and an asset transfer, which is why it was split.
     REQUIRED_CASH_CONTRIBUTION = "required_cash_contribution"
     REQUIRED_EXPENDITURE = "required_expenditure"
-    IMPLEMENTATION_COST = "implementation_cost"
+
+
+# Costs that genuinely reduce the objective — money that does not come back.
+NONRECOVERABLE_COST_TYPES = frozenset({
+    CostType.NONRECOVERABLE_EXPENDITURE,
+    CostType.IMPLEMENTATION_COST,
+    CostType.REQUIRED_EXPENDITURE,          # legacy alias
+})
+
+# Commitments that constrain FEASIBILITY (cash must be available) but are not a
+# loss: the value is retained.
+LIQUIDITY_COMMITMENT_TYPES = frozenset({
+    CostType.LIQUIDITY_COMMITMENT,
+    CostType.ASSET_TRANSFER,
+    CostType.REQUIRED_CASH_CONTRIBUTION,    # legacy alias
+})
 
 
 class Reversibility(StrEnum):

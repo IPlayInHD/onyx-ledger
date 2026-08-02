@@ -63,6 +63,28 @@ def _linear_engine(rate="0.20", baseline=Decimal("10000")):
     return evaluate
 
 
+def _capped_engine(cap="250", rate="0.20", baseline=Decimal("10000")):
+    """Diminishing returns: the reduction is capped, so two strategies drawing on
+    it are SUB-additive — exactly what a non-refundable credit ceiling does."""
+    def evaluate(inputs: dict) -> Decimal:
+        deductions = sum((v for v in inputs.values() if isinstance(v, Decimal)), Decimal(0))
+        return baseline - min(deductions * Decimal(rate), Decimal(cap))
+    return evaluate
+
+
+def _threshold_bonus_engine(threshold="1200", bonus="150", rate="0.20",
+                            baseline=Decimal("10000")):
+    """Each strategy helps alone, and crossing a threshold together helps more —
+    a SUPER-additive interaction, as a phase-out boundary can produce."""
+    def evaluate(inputs: dict) -> Decimal:
+        deductions = sum((v for v in inputs.values() if isinstance(v, Decimal)), Decimal(0))
+        reduction = deductions * Decimal(rate)
+        if deductions >= Decimal(threshold):
+            reduction += Decimal(bonus)
+        return baseline - reduction
+    return evaluate
+
+
 BASE = {"rrsp_deduction": Decimal(0), "donations": Decimal(0), "medical_expenses": Decimal(0)}
 
 
@@ -209,16 +231,19 @@ def test_candidate_that_does_not_help_is_deferred_not_discarded():
 
 
 def test_sub_additive_interaction_is_detected_and_signed_correctly():
-    """Overlap means summing the cards would OVERSTATE the benefit."""
-    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="200")
-    b = _candidate("B", "INCREASE_DONATIONS", "500", standalone="250")   # inflated
-    result = pf.assemble([a, b], [], BASE, _linear_engine())
+    """Overlap: standalone values are MEASURED, and summing them would overstate."""
+    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000")
+    b = _candidate("B", "INCREASE_DONATIONS", "500")
+    result = pf.assemble([a, b], [], BASE, _capped_engine(cap="250"))
 
-    assert result.sum_of_standalone == Decimal("450.00")
-    assert result.portfolio_total_benefit == Decimal("300.00")
-    assert result.interaction_delta == Decimal("150.00")     # positive ⇒ overstated
+    assert a.standalone_potential == Decimal("200.00")   # measured, not supplied
+    assert b.standalone_potential == Decimal("100.00")
+    assert result.sum_of_standalone == Decimal("300.00")
+    assert result.objective_delta == Decimal("250.00")   # the capped combined run
+    assert result.interaction_delta == Decimal("50.00")  # positive ⇒ overstated
     assert result.additivity_class is AdditivityClass.SUB_ADDITIVE
     assert result.additivity_verified is False
+
 
 
 def test_additive_case_is_verified():
@@ -237,10 +262,14 @@ def test_classification_thresholds_use_decimal_epsilon():
 
 
 def test_per_candidate_interaction_delta():
-    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="250")
-    pf.assemble([a], [], BASE, _linear_engine())
-    # standalone 250 vs incremental 200 ⇒ 50 of the standalone figure was overlap
-    assert pf.interaction_delta_for(a) == Decimal("50.00")
+    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000")
+    b = _candidate("B", "INCREASE_DONATIONS", "500")
+    pf.assemble([a, b], [], BASE, _capped_engine(cap="250"))
+    # B measured 100 alone but delivered only 50 once A had consumed the cap
+    assert b.standalone_potential == Decimal("100.00")
+    assert b.incremental_portfolio_benefit == Decimal("50.00")
+    assert pf.interaction_delta_for(b) == Decimal("50.00")
+
 
 
 def test_optimality_is_never_claimed():
@@ -265,16 +294,18 @@ def test_assembly_is_deterministic():
 
 def test_reconciliation_failure_is_a_hard_error():
     """A total that cannot be reproduced by re-running the engine is refused."""
-    # call 1 = baseline, call 2 = trial (accepted), call 3 = final combined run.
-    # The final run disagrees with the accepted trial, so the total is unprovable.
-    sequence = iter([Decimal("9000"), Decimal("8000"), Decimal("7000")])
+    # call 1 baseline, 2 standalone, 3 accepted trial, 4 FINAL COMBINED.
+    # The final run disagrees with the accepted trial, so the headline cannot be
+    # reproduced by re-running the engine and must be refused.
+    sequence = iter([Decimal("9000"), Decimal("8000"), Decimal("8000"), Decimal("7000")])
 
     def drifting_engine(inputs):
         return next(sequence)
 
     a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000")
-    with pytest.raises(pf.PortfolioReconciliationError, match="disagrees"):
+    with pytest.raises(pf.PortfolioReconciliationError, match="I-[12]"):
         pf.assemble([a], [], BASE, drifting_engine)
+
 
 
 def test_cash_constraint_excludes_unaffordable_candidates():
@@ -314,29 +345,35 @@ def test_I2_reconciliation_holds_when_levers_are_order_independent():
 def test_super_additive_synergy_is_permitted_not_treated_as_an_error():
     """Combined benefit MAY exceed the sum of standalone values. There is
     deliberately no invariant that portfolio_total <= sum_of_standalone."""
-    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="100")
-    b = _candidate("B", "INCREASE_DONATIONS", "500", standalone="100")
-    result = pf.assemble([a, b], [], BASE, _linear_engine())
+    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000")
+    b = _candidate("B", "INCREASE_DONATIONS", "500")
+    result = pf.assemble([a, b], [], BASE, _threshold_bonus_engine())
 
-    assert result.sum_of_standalone == Decimal("200.00")
-    assert result.portfolio_total_benefit == Decimal("300.00")   # exceeds the sum
-    assert result.interaction_delta == Decimal("-100.00")        # negative ⇒ synergy
+    assert result.sum_of_standalone == Decimal("300.00")
+    assert result.objective_delta == Decimal("450.00")    # exceeds the sum
+    assert result.interaction_delta == Decimal("-150.00")  # negative ⇒ synergy
     assert result.additivity_class is AdditivityClass.SUPER_ADDITIVE
     # I-1 still holds regardless of the sign of the interaction
-    assert pf.verify_telescoping(result.members, result.portfolio_total_benefit)
+    assert pf.verify_telescoping(result.members, result.objective_delta)
+
 
 
 def test_interaction_sign_convention_is_consistent_in_both_directions():
     """Positive delta = summing would OVERSTATE; negative = would UNDERSTATE."""
-    over = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="400")
-    result_over = pf.assemble([over], [], BASE, _linear_engine())
-    assert result_over.interaction_delta > 0
-    assert result_over.additivity_class is AdditivityClass.SUB_ADDITIVE
+    over = pf.assemble(
+        [_candidate("A", "INCREASE_RRSP_DEDUCTION", "1000"),
+         _candidate("B", "INCREASE_DONATIONS", "500")],
+        [], BASE, _capped_engine(cap="250"))
+    assert over.interaction_delta > 0
+    assert over.additivity_class is AdditivityClass.SUB_ADDITIVE
 
-    under = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="50")
-    result_under = pf.assemble([under], [], BASE, _linear_engine())
-    assert result_under.interaction_delta < 0
-    assert result_under.additivity_class is AdditivityClass.SUPER_ADDITIVE
+    under = pf.assemble(
+        [_candidate("A", "INCREASE_RRSP_DEDUCTION", "1000"),
+         _candidate("B", "INCREASE_DONATIONS", "500")],
+        [], BASE, _threshold_bonus_engine())
+    assert under.interaction_delta < 0
+    assert under.additivity_class is AdditivityClass.SUPER_ADDITIVE
+
 
 
 def test_per_candidate_deltas_sum_to_the_aggregate_delta():

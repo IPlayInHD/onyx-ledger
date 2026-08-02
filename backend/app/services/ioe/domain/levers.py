@@ -56,6 +56,19 @@ class LeverSpec:
     composite_children: tuple[str, ...] = ()
     conflicts_with: tuple[str, ...] = ()
     effort_rating: int = 3
+    # Applicability. Empty means "no restriction"; a populated set restricts the
+    # lever to those jurisdictions / tax years.
+    jurisdictions: tuple[str, ...] = ()
+    tax_years: tuple[int, ...] = ()
+
+    def applies_to(self, *, jurisdiction: str | None, tax_year: int | None) -> bool:
+        if self.jurisdictions and jurisdiction is not None:
+            if jurisdiction not in self.jurisdictions:
+                return False
+        if self.tax_years and tax_year is not None:
+            if tax_year not in self.tax_years:
+                return False
+        return True
 
     def as_canonical(self) -> dict:
         return {
@@ -267,29 +280,52 @@ class LeverApplicationResult:
     changes: list[AppliedChange] = field(default_factory=list)
 
 
+def assert_applicable(
+    spec: LeverSpec, *, jurisdiction: str | None, tax_year: int | None
+) -> None:
+    """A lever may only be applied where the registry says it applies."""
+    if not spec.applies_to(jurisdiction=jurisdiction, tax_year=tax_year):
+        raise LeverValidationError(
+            f"lever '{spec.code}' does not apply to jurisdiction={jurisdiction!r}, "
+            f"tax_year={tax_year!r}"
+        )
+
+
 def apply_lever(
     inputs: dict[str, Any],
     lever_code: str,
     parameters: dict[str, Any],
     *,
     apply_order: int = 0,
+    jurisdiction: str | None = None,
+    tax_year: int | None = None,
 ) -> LeverApplicationResult:
     """Apply one lever to a COPY of `inputs`; the original is never mutated.
 
     Writes are restricted to the lever's declared `writable_fields`; any attempt
-    to touch another field raises LeverSafetyError.
+    to touch another field raises LeverSafetyError. A COMPOSITE lever is applied
+    ATOMICALLY: every child succeeds or the caller's input is returned untouched,
+    so a half-applied composite can never reach the engine.
     """
     spec = get(lever_code)
+    assert_applicable(spec, jurisdiction=jurisdiction, tax_year=tax_year)
     resolved = validate_parameters(spec, parameters)
     clone = dict(inputs)
     changes: list[AppliedChange] = []
 
     if spec.composite_children:
+        # Atomic: build the whole composite on a scratch copy first. If any child
+        # fails validation or safety, nothing is applied at all.
+        scratch = dict(inputs)
+        staged: list[AppliedChange] = []
         for child in spec.composite_children:
-            nested = apply_lever(clone, child, parameters, apply_order=apply_order)
-            clone = nested.inputs
-            changes.extend(nested.changes)
-        return LeverApplicationResult(clone, changes)
+            nested = apply_lever(
+                scratch, child, parameters, apply_order=apply_order,
+                jurisdiction=jurisdiction, tax_year=tax_year,
+            )
+            scratch = nested.inputs
+            staged.extend(nested.changes)
+        return LeverApplicationResult(scratch, staged)
 
     for target_field in spec.writable_fields:
         old = clone.get(target_field)
@@ -347,13 +383,23 @@ def _new_value(spec: LeverSpec, target_field: str, old: Any, resolved: dict[str,
 
 
 def apply_all(
-    inputs: dict[str, Any], applications: list[tuple[str, dict[str, Any]]]
+    inputs: dict[str, Any],
+    applications: list[tuple[str, dict[str, Any]]],
+    *,
+    jurisdiction: str | None = None,
+    tax_year: int | None = None,
 ) -> LeverApplicationResult:
-    """Apply levers in the given order, accumulating the recorded changes."""
+    """Apply levers in the given order, accumulating the recorded changes.
+
+    Atomic as a whole: a failure part-way leaves the caller's input untouched.
+    """
     current = dict(inputs)
     changes: list[AppliedChange] = []
     for order, (code, params) in enumerate(applications):
-        result = apply_lever(current, code, params, apply_order=order)
+        result = apply_lever(
+            current, code, params, apply_order=order,
+            jurisdiction=jurisdiction, tax_year=tax_year,
+        )
         current = result.inputs
         changes.extend(result.changes)
     return LeverApplicationResult(current, changes)

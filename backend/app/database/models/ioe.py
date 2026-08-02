@@ -398,6 +398,69 @@ class StrategyPortfolio(Base):
     engine_runs_used: Mapped[int] = mapped_column(Integer, default=0)
 
     portfolio_result_hash: Mapped[str | None] = mapped_column(Text)
+
+    # ---- P4: pinned objective + per-concept totals ----
+    portfolio_objective_code: Mapped[str | None] = mapped_column(Text)
+    portfolio_objective_version: Mapped[str | None] = mapped_column(Text)
+    objective_delta: Mapped[Decimal | None] = mapped_column(
+        MONEY,
+        comment="baseline objective value minus final objective value; sign convention: positive is an improvement.",
+    )
+    search_budget_exhausted: Mapped[bool] = mapped_column(
+        Boolean, default=False,
+        comment="True when assembly stopped because the bounded search budget ran out rather than because it had considered every candidate.",
+    )
+    total_tax_reduction: Mapped[Decimal | None] = mapped_column(MONEY)
+    total_refund_impact: Mapped[Decimal | None] = mapped_column(MONEY)
+    total_refundable_benefit: Mapped[Decimal | None] = mapped_column(MONEY)
+    total_liquidity_commitment: Mapped[Decimal | None] = mapped_column(MONEY)
+    total_asset_transfer: Mapped[Decimal | None] = mapped_column(MONEY)
+    total_nonrecoverable_expenditure: Mapped[Decimal | None] = mapped_column(MONEY)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class PortfolioEvaluationStep(Base):
+    """One engine run performed during assembly — the step-by-step trace.
+
+    Stores objective values and codes only. It deliberately does NOT duplicate
+    the user's financial inputs, which already live in the frozen analysis
+    snapshot; re-storing them here would spread sensitive data for no gain.
+    """
+
+    __tablename__ = "portfolio_evaluation_step"
+    __table_args__ = {"schema": "ioe"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.strategy_portfolio.id", ondelete="CASCADE")
+    )
+    step_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    apply_order: Mapped[int | None] = mapped_column(SmallInteger)
+    objective_value: Mapped[Decimal | None] = mapped_column(MONEY)
+    objective_delta: Mapped[Decimal | None] = mapped_column(MONEY)
+    accepted: Mapped[bool | None] = mapped_column(Boolean)
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class PortfolioExclusion(Base):
+    """Why a candidate is not in the portfolio, and what the user can do about it."""
+
+    __tablename__ = "portfolio_exclusion"
+    __table_args__ = {"schema": "ioe"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.strategy_portfolio.id", ondelete="CASCADE")
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    membership: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    blocking_candidate_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    shared_resource_code: Mapped[str | None] = mapped_column(Text)
+    resolution_options: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = created_at_col()
 
 

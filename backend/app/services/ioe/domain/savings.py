@@ -18,7 +18,13 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.services.ioe.domain import canonical as c
-from app.services.ioe.domain.enums import CostType, EconomicEffectType, ObjectiveMetric
+from app.services.ioe.domain.enums import (
+    LIQUIDITY_COMMITMENT_TYPES,
+    NONRECOVERABLE_COST_TYPES,
+    CostType,
+    EconomicEffectType,
+    ObjectiveMetric,
+)
 from app.services.ioe.domain.models import CostComponent, EconomicEffect
 
 SAVINGS_DECOMPOSITION_VERSION = "1.0.0"
@@ -43,12 +49,18 @@ EFFECT_FACTORS: dict[EconomicEffectType, Decimal] = {
 
 DISCOUNT_RATE = Decimal("0.05")      # conservative default (D-5)
 
+# Only NONRECOVERABLE money reduces value. A liquidity commitment or an asset
+# transfer constrains feasibility but is not a loss, so it carries no weight
+# here — it is handled by the liquidity constraint instead.
 COST_FACTORS: dict[CostType, Decimal] = {
-    CostType.REQUIRED_EXPENDITURE: Decimal("1.00"),
-    CostType.IMPLEMENTATION_COST: Decimal("1.00"),
-    # A retained asset is not a cost — it is a liquidity constraint (§B).
-    CostType.REQUIRED_CASH_CONTRIBUTION: Decimal("0.00"),
+    **{t: Decimal("1.00") for t in NONRECOVERABLE_COST_TYPES},
+    **{t: Decimal("0.00") for t in LIQUIDITY_COMMITMENT_TYPES},
 }
+
+# The objective actually used is pinned by CODE and VERSION on every portfolio,
+# so a stored result can be re-derived rather than taken on trust.
+PORTFOLIO_OBJECTIVE_CODE = ObjectiveMetric.CURRENT_YEAR_TAX_REDUCTION_NET_OF_EXPENDITURE
+PORTFOLIO_OBJECTIVE_VERSION = PORTFOLIO_OBJECTIVE_VERSION_1 = "1.0.0"
 
 
 def horizon_discount(horizon_years: int) -> Decimal:
@@ -85,8 +97,9 @@ class SavingsBreakdown:
     recurring_annual: Decimal = Decimal(0)
     multi_year_projected: Decimal = Decimal(0)
     future_option_value: Decimal = Decimal(0)
-    required_cash_contribution: Decimal = Decimal(0)
-    required_expenditure: Decimal = Decimal(0)
+    liquidity_commitment: Decimal = Decimal(0)
+    asset_transfer: Decimal = Decimal(0)
+    nonrecoverable_expenditure: Decimal = Decimal(0)
     implementation_cost: Decimal = Decimal(0)
 
     @property
@@ -94,7 +107,7 @@ class SavingsBreakdown:
         """Current-year money in, minus true costs. Deferral is NOT included."""
         return (
             self.current_year_reduction + self.refund_impact + self.refundable_benefit
-            - self.required_expenditure - self.implementation_cost
+            - self.nonrecoverable_expenditure - self.implementation_cost
         ).quantize(MONEY, rounding=ROUND_HALF_UP)
 
     def as_canonical(self) -> dict:
@@ -106,8 +119,9 @@ class SavingsBreakdown:
             "recurring_annual": c.money(self.recurring_annual),
             "multi_year_projected": c.money(self.multi_year_projected),
             "future_option_value": c.money(self.future_option_value),
-            "required_cash_contribution": c.money(self.required_cash_contribution),
-            "required_expenditure": c.money(self.required_expenditure),
+            "liquidity_commitment": c.money(self.liquidity_commitment),
+            "asset_transfer": c.money(self.asset_transfer),
+            "nonrecoverable_expenditure": c.money(self.nonrecoverable_expenditure),
             "implementation_cost": c.money(self.implementation_cost),
             "net_current_year_benefit": c.money(self.net_current_year_benefit),
         }
@@ -123,9 +137,13 @@ _EFFECT_FIELD = {
     EconomicEffectType.FUTURE_OPTION_VALUE: "future_option_value",
 }
 _COST_FIELD = {
-    CostType.REQUIRED_CASH_CONTRIBUTION: "required_cash_contribution",
-    CostType.REQUIRED_EXPENDITURE: "required_expenditure",
+    CostType.LIQUIDITY_COMMITMENT: "liquidity_commitment",
+    CostType.ASSET_TRANSFER: "asset_transfer",
+    CostType.NONRECOVERABLE_EXPENDITURE: "nonrecoverable_expenditure",
     CostType.IMPLEMENTATION_COST: "implementation_cost",
+    # legacy aliases map onto the concept they represented
+    CostType.REQUIRED_CASH_CONTRIBUTION: "liquidity_commitment",
+    CostType.REQUIRED_EXPENDITURE: "nonrecoverable_expenditure",
 }
 
 
@@ -170,7 +188,9 @@ def objective_value(
 
     elif metric is ObjectiveMetric.CURRENT_YEAR_TAX_REDUCTION_NET_OF_EXPENDITURE:
         expenditure = sum(
-            (x.amount for x in costs if x.cost_type is CostType.REQUIRED_EXPENDITURE),
+            (x.amount for x in costs
+             if x.cost_type in (CostType.NONRECOVERABLE_EXPENDITURE,
+                                CostType.REQUIRED_EXPENDITURE)),
             Decimal(0),
         )
         value = reduction - expenditure
@@ -196,9 +216,59 @@ def _liquidity_penalty(
     if available_cash is None:
         return Decimal(0)
     contributions = sum(
-        (x.amount for x in costs
-         if x.cost_type is CostType.REQUIRED_CASH_CONTRIBUTION),
+        (x.amount for x in costs if x.cost_type in LIQUIDITY_COMMITMENT_TYPES),
         Decimal(0),
     )
     overshoot = contributions - available_cash
     return overshoot if overshoot > 0 else Decimal(0)
+
+
+def objective_cost(
+    *,
+    metric: ObjectiveMetric,
+    current_tax: Decimal,
+    effects: tuple[EconomicEffect, ...] = (),
+    costs: tuple[CostComponent, ...] = (),
+    available_cash: Decimal | None = None,
+) -> Decimal:
+    """The portfolio objective expressed as a quantity to MINIMIZE.
+
+    Sign convention, fixed once here and used by every stage of assembly:
+
+        objective_delta = baseline_objective_cost - final_objective_cost
+
+    so a POSITIVE delta is an improvement. Expressing the objective as a cost
+    (rather than as a benefit to maximize) is what makes that formula and that
+    reading agree; a benefit-shaped objective would need the subtraction the
+    other way round and would silently invert every stored delta.
+
+    Only NONRECOVERABLE money is added to the cost. A liquidity commitment or an
+    asset transfer constrains feasibility but is not a loss, so it enters only
+    through the liquidity penalty when it exceeds declared available cash.
+    """
+    if metric is ObjectiveMetric.CURRENT_YEAR_TAX_REDUCTION:
+        cost = current_tax
+
+    elif metric is ObjectiveMetric.CURRENT_YEAR_TAX_REDUCTION_NET_OF_EXPENDITURE:
+        expenditure = sum(
+            (x.amount for x in costs
+             if x.cost_type in (CostType.NONRECOVERABLE_EXPENDITURE,
+                                CostType.REQUIRED_EXPENDITURE)),
+            Decimal(0),
+        )
+        cost = current_tax + expenditure
+
+    elif metric is ObjectiveMetric.NET_CASH_BENEFIT_CURRENT_YEAR:
+        cost = current_tax + sum(
+            (x.amount for x in costs if x.is_true_cost), Decimal(0)
+        )
+
+    elif metric is ObjectiveMetric.COMPARABLE_VALUE_MULTI_HORIZON:
+        # negate the benefit so that lower is still better
+        cost = -comparable_value(effects, costs)
+
+    else:  # pragma: no cover - exhaustive over the enum
+        raise ValueError(f"unsupported objective metric: {metric}")
+
+    cost += _liquidity_penalty(costs, available_cash)
+    return cost.quantize(MONEY, rounding=ROUND_HALF_UP)

@@ -184,7 +184,15 @@ class RuleAction(Base):
     action_code: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     effort_rating: Mapped[int] = mapped_column(SmallInteger, default=3)
-    cost_type: Mapped[str | None] = mapped_column(Text)
+    cost_type: Mapped[str | None] = mapped_column(
+        Text,
+        comment=(
+            "Rule-authored commitment class. Liquidity commitments and asset "
+            "transfers constrain feasibility but are not losses; only "
+            "nonrecoverable expenditure and implementation cost reduce the "
+            "portfolio objective."
+        ),
+    )
     cost_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     deadline_code: Mapped[str | None] = mapped_column(Text)
     sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)

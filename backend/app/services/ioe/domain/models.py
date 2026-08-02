@@ -68,10 +68,18 @@ class CostComponent:
 
     @property
     def is_true_cost(self) -> bool:
-        """A required cash CONTRIBUTION retains the asset, so it is a liquidity
-        constraint rather than a cost. Only expenditure and implementation cost
-        reduce the objective (architecture §B)."""
-        return self.cost_type is not CostType.REQUIRED_CASH_CONTRIBUTION
+        """Only NONRECOVERABLE money reduces the objective. A liquidity
+        commitment or an asset transfer constrains feasibility but is not a
+        loss — the value is retained."""
+        from app.services.ioe.domain.enums import NONRECOVERABLE_COST_TYPES
+
+        return self.cost_type in NONRECOVERABLE_COST_TYPES
+
+    @property
+    def is_liquidity_commitment(self) -> bool:
+        from app.services.ioe.domain.enums import LIQUIDITY_COMMITMENT_TYPES
+
+        return self.cost_type in LIQUIDITY_COMMITMENT_TYPES
 
     def as_canonical(self) -> dict:
         return {
@@ -302,11 +310,16 @@ class OptimizationCandidate:
             )
         )
 
-    def required_cash_contribution(self) -> Decimal:
+    def liquidity_commitment(self) -> Decimal:
+        """Money or assets that must be COMMITTED for this action to be feasible.
+
+        This constrains feasibility but is not a loss — the value is retained
+        (§B). Uses the full P4 taxonomy, not just the legacy member, so a
+        `liquidity_commitment` or `asset_transfer` cost is honoured by the cash
+        constraint exactly as a legacy `required_cash_contribution` is.
+        """
         return sum(
-            (x.amount for x in self.costs
-             if x.cost_type is CostType.REQUIRED_CASH_CONTRIBUTION),
-            Decimal(0),
+            (x.amount for x in self.costs if x.is_liquidity_commitment), Decimal(0)
         )
 
     def true_costs(self) -> Decimal:
@@ -425,6 +438,15 @@ class StrategyPortfolio:
     objective_value_final: Decimal
     assembly_method: AssemblyMethod
     optimality_claim: OptimalityClaim
+    # P4: the objective is pinned by CODE and VERSION, and its delta is stored
+    # beside the two values that define it.
+    objective_code: str = ""
+    objective_version: str = ""
+    objective_delta: Decimal = Decimal(0)
+    search_budget_exhausted: bool = False
+    savings: object | None = None          # SavingsBreakdown (per-concept totals)
+    trace: tuple = ()                      # TraceStep[] — the step-by-step record
+    exclusions: tuple = ()                 # ExclusionRecord[] — retained, not dropped
     deferred_count: int = 0
     excluded_count: int = 0
     improvement_moves_applied: int = 0
@@ -448,6 +470,12 @@ class StrategyPortfolio:
             "objective_value_final": c.money(self.objective_value_final),
             "assembly_method": self.assembly_method,
             "optimality_claim": self.optimality_claim,
+            "objective_code": self.objective_code,
+            "objective_version": self.objective_version,
+            "objective_delta": c.money(self.objective_delta),
+            "search_budget_exhausted": self.search_budget_exhausted,
+            "savings": self.savings.as_canonical() if self.savings else None,
+            "exclusions": [x.as_canonical() for x in self.exclusions],
             "deferred_count": self.deferred_count,
             "excluded_count": self.excluded_count,
             "improvement_moves_applied": self.improvement_moves_applied,

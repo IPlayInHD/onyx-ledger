@@ -42,9 +42,13 @@ ECONOMIC_EFFECT_TYPES = frozenset({
     "refundable_benefit", "recurring_annual_benefit",
     "multi_year_projected_benefit", "future_option_value",
 })
-COST_TYPES = frozenset(
-    {"required_cash_contribution", "required_expenditure", "implementation_cost"}
-)
+COST_TYPES = frozenset({
+    # legacy (retained: required_cash_contribution predates the split)
+    "required_cash_contribution", "required_expenditure", "implementation_cost",
+    # P4 taxonomy — commitments that constrain feasibility are kept distinct from
+    # expenditure that is actually lost.
+    "liquidity_commitment", "asset_transfer", "nonrecoverable_expenditure",
+})
 REVERSIBILITY = frozenset({"reversible", "partially_reversible", "irreversible"})
 DEPENDENCY_TYPES = frozenset({"requires", "precedes", "excludes", "substitutes"})
 DOCUMENT_NECESSITY = frozenset({"required", "recommended", "conditional"})

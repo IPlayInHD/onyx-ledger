@@ -69,6 +69,8 @@ from app.database.models.ioe import (  # noqa: F401
     OptimizationCandidate,
     OptimizationRun,
     OptimizationRunEvent,
+    PortfolioEvaluationStep,
+    PortfolioExclusion,
     PortfolioMember,
     RecommendationRelationship,
     ResourceLedgerEntry,
