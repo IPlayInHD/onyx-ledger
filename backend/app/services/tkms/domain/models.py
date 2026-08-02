@@ -121,6 +121,54 @@ class FormulaSpec:
         )
 
 
+VALID_OUTCOME_TYPES = {
+    "recommend", "apply_credit", "apply_deduction", "flag_benefit_eligibility",
+}
+
+
+@dataclass(frozen=True)
+class OutcomeSpec:
+    """The THEN half of a rule — what the engine emits when the gate passes.
+
+    `uses_formula` binds the impact to the rule's own staged formula (the common
+    case); the where/how/why templates power the user-facing recommendation.
+    """
+
+    outcome_type: str = "recommend"
+    priority: int = 3
+    uses_formula: bool = True
+    title_template: str | None = None
+    mechanism: str | None = None
+    where_template: str | None = None
+    how_template: str | None = None
+    why_template: str | None = None
+
+    def as_payload(self) -> dict:
+        return {
+            "outcome_type": self.outcome_type,
+            "priority": self.priority,
+            "uses_formula": self.uses_formula,
+            "title_template": self.title_template,
+            "mechanism": self.mechanism,
+            "where_template": self.where_template,
+            "how_template": self.how_template,
+            "why_template": self.why_template,
+        }
+
+    @classmethod
+    def from_payload(cls, d: dict) -> OutcomeSpec:
+        return cls(
+            outcome_type=str(d.get("outcome_type", "recommend")),
+            priority=int(d.get("priority", 3)),
+            uses_formula=bool(d.get("uses_formula", True)),
+            title_template=d.get("title_template"),
+            mechanism=d.get("mechanism"),
+            where_template=d.get("where_template"),
+            how_template=d.get("how_template"),
+            why_template=d.get("why_template"),
+        )
+
+
 @dataclass(frozen=True)
 class ExtractedRule:
     """The canonical parser output contract (§4 of the TKMS architecture).
@@ -141,6 +189,7 @@ class ExtractedRule:
     expiry_date: str | None = None
     description: str = ""
     formula: FormulaSpec | None = None
+    outcome: OutcomeSpec | None = None
     eligibility_conditions: tuple[EligibilityCondition, ...] = ()
     income_threshold_low: Decimal | None = None
     income_threshold_high: Decimal | None = None
@@ -169,6 +218,7 @@ class ExtractedRule:
             "expiry_date": self.expiry_date,
             "description": self.description,
             "formula": self.formula.as_payload() if self.formula else None,
+            "outcome": self.outcome.as_payload() if self.outcome else None,
             "eligibility_conditions": [c.as_payload() for c in self.eligibility_conditions],
             "income_threshold_low": _iso_num(self.income_threshold_low),
             "income_threshold_high": _iso_num(self.income_threshold_high),
@@ -196,6 +246,7 @@ class ExtractedRule:
             expiry_date=_iso(d.get("expiry_date")),
             description=str(d.get("description", "")),
             formula=FormulaSpec.from_payload(d["formula"]) if d.get("formula") else None,
+            outcome=OutcomeSpec.from_payload(d["outcome"]) if d.get("outcome") else None,
             eligibility_conditions=tuple(
                 EligibilityCondition.from_payload(c) for c in (d.get("eligibility_conditions") or [])
             ),

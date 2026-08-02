@@ -26,6 +26,7 @@ from app.database.models import (
     LegislationReference,
     RuleCondition,
     RuleConditionGroup,
+    RuleOutcome,
     TaxRule,
     TaxRuleVersion,
     TaxYear,
@@ -33,7 +34,12 @@ from app.database.models import (
 from app.database.models import (
     ExtractedRule as ExtractedRuleRow,
 )
-from app.services.tkms.domain.models import EligibilityCondition, ExtractedRule, FormulaSpec
+from app.services.tkms.domain.models import (
+    EligibilityCondition,
+    ExtractedRule,
+    FormulaSpec,
+    OutcomeSpec,
+)
 
 
 class ExtractionService:
@@ -129,8 +135,24 @@ class ExtractionService:
             version.formula_id = await self._stage_formula(rule.formula)
         if rule.eligibility_conditions:
             await self._stage_conditions(version.id, rule.eligibility_conditions)
+        if rule.outcome is not None:
+            await self._stage_outcome(version, rule.outcome)
         await self.s.flush()
         return version
+
+    async def _stage_outcome(self, version: TaxRuleVersion, outcome: OutcomeSpec) -> None:
+        self.s.add(RuleOutcome(
+            rule_version_id=version.id,
+            outcome_type=outcome.outcome_type,
+            impact_formula_id=version.formula_id if outcome.uses_formula else None,
+            priority=outcome.priority,
+            title_template=outcome.title_template,
+            mechanism=outcome.mechanism,
+            where_template=outcome.where_template,
+            how_template=outcome.how_template,
+            why_template=outcome.why_template,
+        ))
+        await self.s.flush()
 
     async def _resolve_legislation_ref(self, rule: ExtractedRule) -> uuid.UUID | None:
         citation = rule.legislation_reference

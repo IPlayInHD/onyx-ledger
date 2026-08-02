@@ -13,11 +13,13 @@ from decimal import Decimal
 from app.services.tkms.domain.models import (
     VALID_CATEGORIES,
     VALID_OPERATORS,
+    VALID_OUTCOME_TYPES,
     VALID_VALUE_TYPES,
     EligibilityCondition,
     ExtractedRule,
     ExtractedRuleSet,
     FormulaSpec,
+    OutcomeSpec,
     _dec,
 )
 
@@ -92,6 +94,8 @@ def normalize_rule(raw: dict) -> tuple[ExtractedRule | None, list[str]]:
 
     formula, fwarn = _parse_formula(raw.get("formula"))
     warnings.extend(fwarn)
+    outcome, owarn = _parse_outcome(raw.get("outcome"))
+    warnings.extend(owarn)
     conditions, cwarn = _parse_conditions(raw.get("eligibility_conditions"))
     warnings.extend(cwarn)
 
@@ -107,6 +111,7 @@ def normalize_rule(raw: dict) -> tuple[ExtractedRule | None, list[str]]:
         expiry_date=_s(raw.get("expiry_date")),
         description=_s(raw.get("description")) or name,
         formula=formula,
+        outcome=outcome,
         eligibility_conditions=tuple(conditions),
         income_threshold_low=nums["income_threshold_low"],
         income_threshold_high=nums["income_threshold_high"],
@@ -143,6 +148,32 @@ def _parse_formula(val: object) -> tuple[FormulaSpec | None, list[str]]:
         output_unit=_s(val.get("output_unit")),
         inputs=inputs,
     ), []
+
+
+def _parse_outcome(val: object) -> tuple[OutcomeSpec | None, list[str]]:
+    if not val:
+        return None, []
+    if not isinstance(val, dict):
+        return None, [f"outcome must be an object, got {type(val).__name__}"]
+    otype = (_s(val.get("outcome_type")) or "recommend").lower()
+    warnings: list[str] = []
+    if otype not in VALID_OUTCOME_TYPES:
+        warnings.append(f"unknown outcome_type '{otype}' — defaulting to recommend")
+        otype = "recommend"
+    try:
+        priority = int(val.get("priority", 3))
+    except (TypeError, ValueError):
+        priority = 3
+    return OutcomeSpec(
+        outcome_type=otype,
+        priority=priority,
+        uses_formula=bool(val.get("uses_formula", True)),
+        title_template=_s(val.get("title_template")),
+        mechanism=_s(val.get("mechanism")),
+        where_template=_s(val.get("where_template")),
+        how_template=_s(val.get("how_template")),
+        why_template=_s(val.get("why_template")),
+    ), warnings
 
 
 def _parse_conditions(val: object) -> tuple[list[EligibilityCondition], list[str]]:

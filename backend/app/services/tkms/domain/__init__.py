@@ -14,12 +14,14 @@ from app.services.tkms.domain.lifecycle import (  # noqa: F401
 from app.services.tkms.domain.models import (  # noqa: F401
     VALID_CATEGORIES,
     VALID_OPERATORS,
+    VALID_OUTCOME_TYPES,
     VALID_VALUE_TYPES,
     ChangeItem,
     EligibilityCondition,
     ExtractedRule,
     ExtractedRuleSet,
     FormulaSpec,
+    OutcomeSpec,
     ValidationFinding,
     ValidationOutcome,
 )
