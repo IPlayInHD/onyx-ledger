@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, created_at_col, updated_at_col, uuid_pk
@@ -57,6 +57,10 @@ class TaxRuleVersion(Base):
     parser_version: Mapped[str | None] = mapped_column(String)
     parser_confidence: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
     validation_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # Opportunity contract v2: coded eligibility reasons. Its ABSENCE is the
+    # signal that this version carries no contract metadata, which the evaluator
+    # reports as eligibility_status='indeterminate' (never guessed).
+    eligibility_basis_codes: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
 
@@ -153,8 +157,95 @@ class RuleOutcome(Base):
     where_template: Mapped[str | None] = mapped_column(Text)
     how_template: Mapped[str | None] = mapped_column(Text)
     why_template: Mapped[str | None] = mapped_column(Text)
+    # ---- Opportunity contract v2 (additive) ----
+    # economic classification so the IOE never treats a deferral as a reduction;
+    # portfolio_lever_code references the IOE lever registry BY CODE only — rule
+    # data never names an engine input field.
+    economic_effect_type: Mapped[str | None] = mapped_column(Text)
+    reversibility: Mapped[str | None] = mapped_column(Text)
+    portfolio_lever_code: Mapped[str | None] = mapped_column(Text)
+    lever_parameters: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
+
+
+# ---------------------------------------------------------------------------
+# Opportunity contract v2 — legally meaningful metadata authored as RULE DATA
+# (TKMS-governed). The IOE consumes these verbatim and never infers them.
+# ---------------------------------------------------------------------------
+class RuleAction(Base):
+    __tablename__ = "rule_action"
+    __table_args__ = {"schema": "rules"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id", ondelete="CASCADE")
+    )
+    action_code: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    effort_rating: Mapped[int] = mapped_column(SmallInteger, default=3)
+    cost_type: Mapped[str | None] = mapped_column(Text)
+    cost_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    deadline_code: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class RuleRequiredDocument(Base):
+    __tablename__ = "rule_required_document"
+    __table_args__ = {"schema": "rules"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id", ondelete="CASCADE")
+    )
+    document_type_code: Mapped[str] = mapped_column(Text, nullable=False)
+    necessity: Mapped[str] = mapped_column(Text, default="required")
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class RuleDependency(Base):
+    __tablename__ = "rule_dependency"
+    __table_args__ = {"schema": "rules"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id", ondelete="CASCADE")
+    )
+    depends_on_rule_code: Mapped[str] = mapped_column(Text, nullable=False)
+    dependency_type: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class RuleDeadline(Base):
+    __tablename__ = "rule_deadline"
+    __table_args__ = {"schema": "rules"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id", ondelete="CASCADE")
+    )
+    deadline_code: Mapped[str] = mapped_column(Text, nullable=False)
+    deadline_date: Mapped[date | None] = mapped_column(Date)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_hard: Mapped[bool] = mapped_column(Boolean, default=True)
+    jurisdiction_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class RuleSharedResource(Base):
+    __tablename__ = "rule_shared_resource"
+    __table_args__ = {"schema": "rules"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id", ondelete="CASCADE")
+    )
+    resource_code: Mapped[str] = mapped_column(Text, nullable=False)
+    pool_scope: Mapped[str] = mapped_column(Text, default="individual")
+    created_at: Mapped[datetime] = created_at_col()
 
 
 class GovSource(Base):

@@ -91,18 +91,6 @@ from app.database.models.ref import (  # noqa: F401
     TaxYear,
     VerificationStatus,
 )
-from app.database.models.tkms import (  # noqa: F401
-    ChangeItem,
-    ChangeReport,
-    DeadLetter,
-    ExtractedRule,
-    ImportJob,
-    ParseResult,
-    RawDocument,
-    RollbackRecord,
-    ValidationFinding,
-    ValidationReport,
-)
 from app.database.models.tax_kb import (  # noqa: F401
     BenefitParameter,
     BenefitProgram,
@@ -115,13 +103,30 @@ from app.database.models.tax_kb import (  # noqa: F401
     FactDefinition,
     GovSource,
     LegislationReference,
+    RuleAction,
     RuleCondition,
     RuleConditionGroup,
+    RuleDeadline,
+    RuleDependency,
     RuleOutcome,
+    RuleRequiredDocument,
+    RuleSharedResource,
     TaxBracket,
     TaxBracketSet,
     TaxRule,
     TaxRuleVersion,
+)
+from app.database.models.tkms import (  # noqa: F401
+    ChangeItem,
+    ChangeReport,
+    DeadLetter,
+    ExtractedRule,
+    ImportJob,
+    ParseResult,
+    RawDocument,
+    RollbackRecord,
+    ValidationFinding,
+    ValidationReport,
 )
 from app.database.models.wealth import (  # noqa: F401
     Asset,
