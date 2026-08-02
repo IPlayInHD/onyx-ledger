@@ -16,7 +16,7 @@ celery_app = Celery(
     "onyx",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["workers.tasks.analysis", "workers.tasks.maintenance"],
+    include=["workers.tasks.analysis", "workers.tasks.maintenance", "workers.tasks.tkms"],
 )
 
 celery_app.conf.task_routes = {
@@ -25,6 +25,13 @@ celery_app.conf.task_routes = {
     "workers.tasks.ingestion.*": {"queue": "ingestion"},
     "workers.tasks.notify.*": {"queue": "notify"},
     "workers.tasks.maintenance.*": {"queue": "maintenance"},
+    # TKMS: one queue per stage so slow work never blocks and each scales alone
+    "workers.tasks.tkms.parse": {"queue": "tkms_parse"},
+    "workers.tasks.tkms.extract": {"queue": "tkms_extract"},
+    "workers.tasks.tkms.promote": {"queue": "tkms_extract"},
+    "workers.tasks.tkms.validate": {"queue": "tkms_validate"},
+    "workers.tasks.tkms.compare": {"queue": "tkms_compare"},
+    "workers.tasks.tkms.reindex": {"queue": "tkms_index"},
 }
 
 celery_app.conf.beat_schedule = {
