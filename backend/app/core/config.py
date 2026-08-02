@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # --- object storage ---
     s3_endpoint_url: str | None = None
     s3_bucket_documents: str = "onyx-documents"
+    s3_bucket_legislation: str = "onyx-legislation"   # TKMS raw imports + extracted text
 
     # --- ai ---
     llm_provider: str = "anthropic"
