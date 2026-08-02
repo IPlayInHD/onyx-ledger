@@ -1,6 +1,10 @@
 # Onyx Ledger — Income Optimization Engine (IOE) Architecture
 
-**Status:** Architecture design (pre-implementation). Code is generated only after this design is approved.
+> ⚠️ **SUPERSEDED by `ioe-architecture-v2.md`.** Retained for history only — do not implement from this document.
+> Revision 2 corrects four defects here: over-broad purity/determinism claims, "guaranteed savings" terminology,
+> IOE-derived eligibility/actions (legislation interpretation), and summed recommendation totals (double counting).
+
+**Status:** Superseded (pre-implementation, Revision 1).
 **Author role:** Principal fintech systems architect
 **Builds on (stable, unchanged):** the validated 14-schema database + `tkms`, the FastAPI modular monolith, the **deterministic Tax Intelligence Engine** (`TaxEngineService` + `RulesEvaluatorService`), and the **Tax Knowledge Management System** (published rules only). See `database-architecture.md`, `backend-architecture.md`, `tkms-architecture.md`.
 
