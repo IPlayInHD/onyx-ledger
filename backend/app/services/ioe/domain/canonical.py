@@ -42,14 +42,26 @@ CANONICAL_SERIALIZATION_VERSION = "1.1.0"
 MONEY_SCALE = Decimal("0.01")        # 2 dp
 RATE_SCALE = Decimal("0.000001")     # 6 dp
 FACTOR_SCALE = Decimal("0.000001")   # 6 dp
+QUANTITY_SCALE = Decimal("0.000001")  # 6 dp
 
-# Magnitude bounds mirror the database domains, so a value that could never be
-# stored is rejected before it can reach a hash:
-#   ref.money_amt  NUMERIC(14,2)  → 12 integer digits
-#   ref.rate       NUMERIC(9,6)   → 3 integer digits
+# Magnitude bounds are SEMANTIC-TYPE-SPECIFIC, each mirroring the database column
+# that stores that kind of value. A single global bound would be wrong in both
+# directions: too tight for legitimate diagnostic quantities, too loose to catch
+# an unstorable money value.
+#
+#   money()     ref.money_amt   NUMERIC(14,2)  → 12 integer digits
+#   rate()      ref.rate        NUMERIC(9,6)   → 3 integer digits  (fractions, 0..1)
+#   factor()    weights/normalized components   NUMERIC(9,6)
+#   quantity()  diagnostic raw values           NUMERIC(18,6) → 12 integer digits
+#
+# `quantity()` exists precisely so a legitimate intermediate — a raw economic
+# value of several thousand dollars recorded beside a normalized 0..1 factor —
+# is not rejected by a bound meant for rates.
 MONEY_MAX = Decimal("999999999999.99")
 RATE_MAX = Decimal("999.999999")
-# Guard against pathological inputs before quantization.
+QUANTITY_MAX = Decimal("999999999999.999999")
+# Sanity guard against pathological inputs before quantization. Deliberately far
+# above every semantic bound: it catches absurd values, it does not police them.
 MAX_SIGNIFICANT_DIGITS = 38
 
 # Unicode: text is normalized to NFC so two byte-different but canonically
@@ -113,8 +125,18 @@ def rate(value: Decimal | int | str | None) -> str | None:
 
 
 def factor(value: Decimal | int | str | None) -> str | None:
-    """Weight/normalized factor at scale 6."""
+    """Weight/normalized factor at scale 6. Bounded like a rate (0..1 domain)."""
     return None if value is None else _quantize(value, FACTOR_SCALE, RATE_MAX)
+
+
+def quantity(value: Decimal | int | str | None) -> str | None:
+    """A diagnostic raw quantity at scale 6, bounded like NUMERIC(18,6).
+
+    Used where a value is recorded for explainability rather than as money or a
+    rate — e.g. the raw economic value behind a normalized score factor, which is
+    routinely in the thousands and must not be judged by a rate bound.
+    """
+    return None if value is None else _quantize(value, QUANTITY_SCALE, QUANTITY_MAX)
 
 
 def ordered(items: Sequence[Any], key=None) -> list:

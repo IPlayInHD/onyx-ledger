@@ -237,7 +237,22 @@ class OptimizationCandidate(Base):
     exclusion_reason_code: Mapped[str | None] = mapped_column(Text)
     candidate_rank: Mapped[int | None] = mapped_column(Integer)
     recommendation_score: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
-    confidence_score: Mapped[int | None] = mapped_column(SmallInteger)
+    # ---- five-stage support score (migration 0029) ----
+    # This is a SUPPORT/RELIABILITY score, not a probability of CRA acceptance
+    # or of receiving the displayed amount.
+    raw_support_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    assumption_adjusted_score: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2),
+        comment="Uncapped support after assumption uncertainty; secondary ordering key.",
+    )
+    display_support_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    support_cap_applied: Mapped[bool] = mapped_column(Boolean, default=False)
+    support_cap_reason_code: Mapped[str | None] = mapped_column(Text)
+    # DERIVED by DB trigger from display_support_score; never supplied by callers.
+    confidence_score: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        comment="DERIVED from display_support_score by trigger; never supplied by callers. A support score, not a probability.",
+    )
     created_at: Mapped[datetime] = created_at_col()
 
 

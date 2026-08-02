@@ -18,6 +18,7 @@ consumers exclude it rather than guessing.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Collection
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -60,13 +61,32 @@ class RulesEvaluatorService:
     def __init__(self, session: AsyncSession):
         self.s = session
 
-    async def evaluate(self, tax_year: int, facts: dict) -> list[OpportunityContractV2]:
-        versions = list(await self.s.scalars(
-            select(TaxRuleVersion).where(
-                TaxRuleVersion.tax_year == tax_year,
-                TaxRuleVersion.status == "published",
-            )
-        ))
+    async def evaluate(
+        self,
+        tax_year: int,
+        facts: dict,
+        *,
+        pinned_rule_version_ids: Collection | None = None,
+    ) -> list[OpportunityContractV2]:
+        """Evaluate published rules for the year against the fact map.
+
+        `pinned_rule_version_ids` CONSTRAINS the evaluation to an exact,
+        immutable version set. When supplied, only those versions are considered
+        — a rule published after the set was pinned cannot enter the result, so
+        an in-flight optimization keeps evaluating the snapshot it started with.
+        Passing an empty collection means "no rules pinned" and yields nothing;
+        that is distinct from passing None, which means "resolve now".
+        """
+        stmt = select(TaxRuleVersion).where(
+            TaxRuleVersion.tax_year == tax_year,
+            TaxRuleVersion.status == "published",
+        )
+        if pinned_rule_version_ids is not None:
+            pinned = list(pinned_rule_version_ids)
+            if not pinned:
+                return []
+            stmt = stmt.where(TaxRuleVersion.id.in_(pinned))
+        versions = list(await self.s.scalars(stmt))
         if not versions:
             return []
 

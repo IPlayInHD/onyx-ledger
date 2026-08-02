@@ -10,6 +10,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+# Declared version of this in-code reference dataset (IOE decision D-11).
+# Because the dataset lives in code rather than in the database, nothing else can
+# detect that it changed. Bump this whenever any value below is edited; the IOE
+# pins it in a run's version manifest and hashes the dataset's content beside it,
+# so a corrected bracket makes historical replay report DRIFTED instead of
+# silently producing a different number.
+#
+# Additive and inert: no calculation reads this constant.
+REFERENCE_DATA_VERSION = "2025.1.0"
+
 
 def D(x) -> Decimal:
     return Decimal(str(x))

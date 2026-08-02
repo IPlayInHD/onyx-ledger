@@ -95,7 +95,9 @@ class ScoreComponent:
     def as_canonical(self) -> dict:
         return {
             "factor_code": self.factor_code,
-            "raw_value": c.factor(self.raw_value),
+            # raw_value is a diagnostic quantity (NUMERIC(18,6)), not a rate: an
+            # economic value of several thousand is legitimate here.
+            "raw_value": c.quantity(self.raw_value),
             "normalized_value": c.factor(self.normalized_value),
             "weight": c.factor(self.weight),
             "contribution": c.factor(self.contribution),

@@ -338,3 +338,34 @@ def test_spec_and_result_hashes_of_the_same_payload_differ():
     assert c.domain_hash(c.DOMAIN_SCENARIO_SPEC, payload) != c.domain_hash(
         c.DOMAIN_OPTIMIZATION_SPEC, payload
     )
+
+
+def test_decimal_bounds_are_semantic_type_specific():
+    """A legitimate intermediate must not be rejected by a bound meant for a
+    different semantic type (P3 requirement 4)."""
+    economic_raw = Decimal("3000")          # a raw economic value, not a rate
+    assert c.quantity(economic_raw) == "3000.000000"
+    with pytest.raises(c.CanonicalizationError, match="magnitude bound"):
+        c.factor(economic_raw)              # correctly rejected AS A RATE
+
+    # each helper enforces its own column's bound
+    assert c.quantity(c.QUANTITY_MAX) == "999999999999.999999"
+    with pytest.raises(c.CanonicalizationError, match="magnitude bound"):
+        c.quantity(c.QUANTITY_MAX + Decimal("1"))
+    assert c.MAX_SIGNIFICANT_DIGITS > 30    # a sanity guard, not a policy bound
+
+
+def test_score_breakdown_with_large_raw_value_canonicalizes():
+    """Regression: ScoreComponent.raw_value holds NUMERIC(18,6) quantities."""
+    from app.services.ioe.domain.enums import ScoreFactor
+    from app.services.ioe.domain.models import ScoreBreakdown, ScoreComponent
+
+    breakdown = ScoreBreakdown(
+        overall=Decimal("87.50"),
+        components=(ScoreComponent(
+            factor_code=ScoreFactor.ECONOMIC_VALUE,
+            raw_value=Decimal("4250.00"), normalized_value=Decimal("0.85"),
+            weight=Decimal("0.35"), contribution=Decimal("0.2975"),
+        ),),
+    )
+    assert c.canonical_hash(breakdown.as_canonical())
