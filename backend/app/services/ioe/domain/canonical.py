@@ -30,35 +30,71 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import unicodedata
 import uuid
 from collections.abc import Mapping, Sequence
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Any
 
-CANONICAL_SERIALIZATION_VERSION = "1.0.0"
+CANONICAL_SERIALIZATION_VERSION = "1.1.0"
 
 MONEY_SCALE = Decimal("0.01")        # 2 dp
 RATE_SCALE = Decimal("0.000001")     # 6 dp
 FACTOR_SCALE = Decimal("0.000001")   # 6 dp
+
+# Magnitude bounds mirror the database domains, so a value that could never be
+# stored is rejected before it can reach a hash:
+#   ref.money_amt  NUMERIC(14,2)  → 12 integer digits
+#   ref.rate       NUMERIC(9,6)   → 3 integer digits
+MONEY_MAX = Decimal("999999999999.99")
+RATE_MAX = Decimal("999.999999")
+# Guard against pathological inputs before quantization.
+MAX_SIGNIFICANT_DIGITS = 38
+
+# Unicode: text is normalized to NFC so two byte-different but canonically
+# equivalent spellings (e.g. "é" as U+00E9 vs "e"+U+0301) hash identically.
+UNICODE_FORM = "NFC"
 
 
 class CanonicalizationError(TypeError):
     """A value cannot be canonicalized deterministically."""
 
 
+def normalize_text(value: str) -> str:
+    """NFC-normalize a string. Applied to every string and every object key."""
+    return unicodedata.normalize(UNICODE_FORM, value)
+
+
 # ---------------------------------------------------------------------------
 # Explicit scale helpers — the ONLY way a Decimal enters a canonical payload
 # ---------------------------------------------------------------------------
-def _quantize(value: Decimal | int | str, scale: Decimal) -> str:
+def _quantize(value: Decimal | int | str, scale: Decimal, maximum: Decimal | None) -> str:
     if isinstance(value, float):
         raise CanonicalizationError(
             "float is not permitted in canonical payloads (use Decimal): "
             f"{value!r}"
         )
     d = value if isinstance(value, Decimal) else Decimal(str(value))
-    if not d.is_finite():
-        raise CanonicalizationError(f"non-finite Decimal is not canonicalizable: {d!r}")
+
+    # NaN and ±Infinity have no canonical form and must never reach a hash.
+    if d.is_nan():
+        raise CanonicalizationError("NaN is not canonicalizable")
+    if d.is_infinite():
+        raise CanonicalizationError("Infinity is not canonicalizable")
+
+    digits = len(d.as_tuple().digits)
+    if digits > MAX_SIGNIFICANT_DIGITS:
+        raise CanonicalizationError(
+            f"Decimal exceeds the maximum canonical precision of "
+            f"{MAX_SIGNIFICANT_DIGITS} significant digits (got {digits})"
+        )
+    if maximum is not None and d.copy_abs() > maximum:
+        raise CanonicalizationError(
+            f"value {d} exceeds the canonical magnitude bound {maximum} "
+            f"(it could not be stored in the corresponding database domain)"
+        )
+
     q = d.quantize(scale, rounding=ROUND_HALF_UP)
     # Normalize negative zero so -0.00 and 0.00 hash identically.
     if q == 0:
@@ -68,17 +104,17 @@ def _quantize(value: Decimal | int | str, scale: Decimal) -> str:
 
 def money(value: Decimal | int | str | None) -> str | None:
     """Money at scale 2, ROUND_HALF_UP. `None` passes through as null."""
-    return None if value is None else _quantize(value, MONEY_SCALE)
+    return None if value is None else _quantize(value, MONEY_SCALE, MONEY_MAX)
 
 
 def rate(value: Decimal | int | str | None) -> str | None:
     """Rate/percentage at scale 6."""
-    return None if value is None else _quantize(value, RATE_SCALE)
+    return None if value is None else _quantize(value, RATE_SCALE, RATE_MAX)
 
 
 def factor(value: Decimal | int | str | None) -> str | None:
     """Weight/normalized factor at scale 6."""
-    return None if value is None else _quantize(value, FACTOR_SCALE)
+    return None if value is None else _quantize(value, FACTOR_SCALE, RATE_MAX)
 
 
 def ordered(items: Sequence[Any], key=None) -> list:
@@ -103,8 +139,11 @@ def canonicalize(value: Any) -> Any:
     if isinstance(value, Enum):
         return canonicalize(value.value)
 
-    if value is None or isinstance(value, (str, bool)):
+    if value is None or isinstance(value, bool):
         return value
+
+    if isinstance(value, str):
+        return normalize_text(value)
 
     if isinstance(value, int):
         return value
@@ -139,11 +178,23 @@ def canonicalize(value: Any) -> Any:
         )
 
     if isinstance(value, Mapping):
-        # keys sorted by Unicode code point, recursively; None VALUES are kept
-        out = {}
-        for k in sorted(value.keys(), key=_key_text):
-            out[_key_text(k)] = canonicalize(value[k])
-        return out
+        # Keys are NFC-normalized, then sorted by Unicode code point, recursively.
+        # None VALUES are kept (null ≠ missing).
+        normalized: list[tuple[str, Any]] = [
+            (_key_text(k), value[k]) for k in value.keys()
+        ]
+        seen: set[str] = set()
+        for key, _ in normalized:
+            if key in seen:
+                # two distinct source keys collapsed to one under NFC; silently
+                # dropping one would make the hash depend on iteration order
+                raise CanonicalizationError(
+                    f"duplicate object key after Unicode normalization: {key!r}"
+                )
+            seen.add(key)
+        return {
+            key: canonicalize(val) for key, val in sorted(normalized, key=lambda kv: kv[0])
+        }
 
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         return [canonicalize(v) for v in value]   # caller-supplied order preserved
@@ -155,11 +206,15 @@ def canonicalize(value: Any) -> Any:
 
 
 def _key_text(key: Any) -> str:
-    if isinstance(key, str):
-        return key
+    """Object keys must be text. Integers, tuples, and enums-by-ordinal are
+    rejected because their textual form is not stable across languages."""
     if isinstance(key, Enum):
-        return str(key.value)
-    raise CanonicalizationError(f"object keys must be strings, got {type(key).__name__}")
+        return normalize_text(str(key.value))
+    if isinstance(key, str):
+        return normalize_text(key)
+    raise CanonicalizationError(
+        f"object keys must be strings, got {type(key).__name__}: {key!r}"
+    )
 
 
 def dumps(value: Any) -> str:
@@ -179,8 +234,53 @@ def canonical_text(payload: Any) -> str:
 
 
 def canonical_hash(payload: Any) -> str:
-    """SHA-256 (hex) of the canonical UTF-8 encoding of `payload`."""
+    """SHA-256 (hex) of the canonical UTF-8 encoding of `payload`.
+
+    Prefer `domain_hash()` for stored artifacts: an undomained hash of two
+    different artifact types could coincide if their payloads happened to match.
+    """
     return hashlib.sha256(canonical_text(payload).encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Domain separation
+#
+# Every stored artifact hashes under its own domain tag, so an optimization spec
+# and a scenario spec (or a snapshot, or a portfolio result) can never produce
+# the same digest even if their canonical payloads were identical. The tag also
+# carries the serialization version, so a change to the §9.1 rules necessarily
+# changes every digest rather than silently reinterpreting stored ones.
+# ---------------------------------------------------------------------------
+HASH_DOMAIN_PREFIX = "onyx.ioe"
+
+DOMAIN_OPTIMIZATION_SPEC = "optimization_spec"
+DOMAIN_OPTIMIZATION_RESULT = "optimization_result"
+DOMAIN_SCENARIO_SPEC = "scenario_spec"
+DOMAIN_SCENARIO_RESULT = "scenario_result"
+DOMAIN_RULE_SNAPSHOT = "rule_snapshot"
+DOMAIN_ASSUMPTION_SET = "assumption_set"
+DOMAIN_PORTFOLIO_RESULT = "portfolio_result"
+DOMAIN_VERSION_MANIFEST = "version_manifest"
+DOMAIN_WEIGHT_CONFIG = "weight_config"
+
+ALL_HASH_DOMAINS = (
+    DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
+    DOMAIN_SCENARIO_SPEC, DOMAIN_SCENARIO_RESULT,
+    DOMAIN_RULE_SNAPSHOT, DOMAIN_ASSUMPTION_SET,
+    DOMAIN_PORTFOLIO_RESULT, DOMAIN_VERSION_MANIFEST, DOMAIN_WEIGHT_CONFIG,
+)
+
+
+def domain_tag(domain: str) -> str:
+    return f"{HASH_DOMAIN_PREFIX}.{domain}.v{CANONICAL_SERIALIZATION_VERSION}"
+
+
+def domain_hash(domain: str, payload: Any) -> str:
+    """SHA-256 (hex) over a domain tag plus the canonical payload."""
+    if domain not in ALL_HASH_DOMAINS:
+        raise CanonicalizationError(f"unknown hash domain: {domain!r}")
+    body = f"{domain_tag(domain)}\n{canonical_text(payload)}"
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +300,7 @@ def optimization_spec_hash(
     user_constraints: Mapping[str, Any],
     assumption_set: Sequence[Any],
 ) -> str:
-    return canonical_hash({
+    return domain_hash(DOMAIN_OPTIMIZATION_SPEC, {
         "baseline_input_snapshot_hash": baseline_input_snapshot_hash,
         "tax_year": tax_year,
         "jurisdiction": jurisdiction,
@@ -212,7 +312,10 @@ def optimization_spec_hash(
 
 
 def optimization_result_hash(*, spec_hash: str, result: Mapping[str, Any]) -> str:
-    return canonical_hash({"optimization_spec_hash": spec_hash, "result": result})
+    return domain_hash(
+        DOMAIN_OPTIMIZATION_RESULT,
+        {"optimization_spec_hash": spec_hash, "result": result},
+    )
 
 
 def scenario_spec_hash(
@@ -229,7 +332,7 @@ def scenario_spec_hash(
     calculation_policy_version: str,
     decimal_policy_version: str,
 ) -> str:
-    return canonical_hash({
+    return domain_hash(DOMAIN_SCENARIO_SPEC, {
         "baseline_input_snapshot_hash": baseline_input_snapshot_hash,
         "canonical_scenario_input": list(canonical_scenario_input),   # apply order
         "tax_year": tax_year,
@@ -245,4 +348,40 @@ def scenario_spec_hash(
 
 
 def scenario_result_hash(*, spec_hash: str, result: Mapping[str, Any]) -> str:
-    return canonical_hash({"scenario_spec_hash": spec_hash, "result": result})
+    return domain_hash(
+        DOMAIN_SCENARIO_RESULT, {"scenario_spec_hash": spec_hash, "result": result}
+    )
+
+
+def rule_snapshot_hash(artifacts: Sequence[Mapping[str, Any]]) -> str:
+    """Content-address a rule snapshot (architecture Revision 2.1 §A.2).
+
+    Artifacts are explicitly ordered by (kind, key) — never by query order — so
+    the digest depends only on content.
+    """
+    return domain_hash(DOMAIN_RULE_SNAPSHOT, {
+        "artifacts": ordered(
+            list(artifacts),
+            key=lambda a: (str(a["artifact_kind"]), str(a["artifact_key"])),
+        ),
+    })
+
+
+def assumption_set_hash(assumptions: Sequence[Mapping[str, Any]]) -> str:
+    """Assumptions ordered explicitly by code; `display_note` is excluded by the
+    caller's `as_canonical()`, so rewording a note cannot change identity."""
+    return domain_hash(DOMAIN_ASSUMPTION_SET, {
+        "assumptions": ordered(list(assumptions), key=lambda a: str(a["code"])),
+    })
+
+
+def portfolio_result_hash(portfolio: Mapping[str, Any]) -> str:
+    return domain_hash(DOMAIN_PORTFOLIO_RESULT, {"portfolio": portfolio})
+
+
+def version_manifest_hash(manifest: Mapping[str, Any]) -> str:
+    return domain_hash(DOMAIN_VERSION_MANIFEST, {"manifest": manifest})
+
+
+def weight_config_checksum(weights: Mapping[str, Any]) -> str:
+    return domain_hash(DOMAIN_WEIGHT_CONFIG, {"weights": weights})

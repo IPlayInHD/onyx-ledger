@@ -133,14 +133,75 @@ class ConfidenceComponent:
 
 
 @dataclass(frozen=True)
-class ConfidenceBreakdown:
-    overall: Decimal                        # 0..100
-    components: tuple[ConfidenceComponent, ...]
+class UncertaintyComponent:
+    """One assumption's contribution to the uncertainty adjustment.
+
+    Kept separate from the support components so the raw weighted sum stays
+    verifiable on its own and the adjustment is independently auditable.
+    """
+
+    assumption_code: str
+    materiality: Materiality
+    source: AssumptionSource
+    affects_eligibility: bool
+    sensitivity: Decimal | None
+    penalty: Decimal
+    reason_code: str
 
     def as_canonical(self) -> dict:
         return {
-            "overall": c.factor(self.overall),
+            "assumption_code": self.assumption_code,
+            "materiality": self.materiality,
+            "source": self.source,
+            "affects_eligibility": self.affects_eligibility,
+            "sensitivity": c.rate(self.sensitivity),
+            "penalty": c.factor(self.penalty),
+            "reason_code": self.reason_code,
+        }
+
+
+@dataclass(frozen=True)
+class ConfidenceBreakdown:
+    """A SUPPORT/RELIABILITY score — explicitly not a probability.
+
+    Three values are preserved rather than collapsed, because each answers a
+    different question and conflating them changes the meaning of the model:
+
+      raw_support_score          how well the result is supported, before
+                                 accounting for declared assumptions
+      assumption_adjusted_score  after the uncertainty adjustment derived from
+                                 assumption materiality, source, evidence,
+                                 eligibility impact, and measured sensitivity
+      display_support_score      min(assumption_adjusted_score, cap) — the
+                                 user-facing value
+
+    The cap is applied ONLY to the displayed value. Ordering uses
+    `assumption_adjusted_score`, so results tied at the displayed cap still order
+    deterministically without the displayed number changing meaning.
+    """
+
+    raw_support_score: Decimal              # 0..100
+    assumption_adjusted_score: Decimal      # 0..100
+    display_support_score: Decimal          # 0..100, capped
+    cap_applied: bool
+    cap_reason_code: str | None
+    components: tuple[ConfidenceComponent, ...]
+    uncertainty: tuple[UncertaintyComponent, ...] = ()
+
+    @property
+    def overall(self) -> Decimal:
+        """The user-facing value. Alias for `display_support_score`."""
+        return self.display_support_score
+
+    def as_canonical(self) -> dict:
+        return {
+            "raw_support_score": c.factor(self.raw_support_score),
+            "assumption_adjusted_score": c.factor(self.assumption_adjusted_score),
+            "display_support_score": c.factor(self.display_support_score),
+            "cap_applied": self.cap_applied,
+            "cap_reason_code": self.cap_reason_code,
             "components": [comp.as_canonical() for comp in self.components],
+            "uncertainty": [u.as_canonical() for u in self.uncertainty],
         }
 
 

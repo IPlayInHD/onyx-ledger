@@ -284,3 +284,82 @@ def test_cash_constraint_excludes_unaffordable_candidates():
     result = pf.assemble([a], [], BASE, _linear_engine(), cons)
     assert result.members == ()
     assert a.exclusion_reason_code == "INSUFFICIENT_CASH"
+
+
+# ---------------------------------------------------------------------------
+# Invariants I-1 and I-2, and what is deliberately NOT an invariant
+# ---------------------------------------------------------------------------
+def test_I1_telescoping_holds_exactly_for_every_shape():
+    """I-1: Σ incremental_i == portfolio_total_benefit, to the cent, always."""
+    for amounts in (["1000"], ["1000", "500"], ["100", "200", "300", "400"]):
+        candidates = [
+            _candidate(f"C{i}", "INCREASE_RRSP_DEDUCTION", amt, standalone="1")
+            for i, amt in enumerate(amounts)
+        ]
+        result = pf.assemble(candidates, [], BASE, _linear_engine())
+        total = sum((m.incremental_benefit for m in result.members), Decimal(0))
+        assert total == result.portfolio_total_benefit
+        assert pf.verify_telescoping(result.members, result.portfolio_total_benefit)
+
+
+def test_I2_reconciliation_holds_when_levers_are_order_independent():
+    """I-2: the combined run equals the last accepted trial run."""
+    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000")
+    b = _candidate("B", "INCREASE_DONATIONS", "500")
+    result = pf.assemble([a, b], [], BASE, _linear_engine())
+    # portfolio_tax IS the combined run; the assembler raises if it disagreed
+    assert result.portfolio_tax == result.baseline_tax - result.portfolio_total_benefit
+
+
+def test_super_additive_synergy_is_permitted_not_treated_as_an_error():
+    """Combined benefit MAY exceed the sum of standalone values. There is
+    deliberately no invariant that portfolio_total <= sum_of_standalone."""
+    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="100")
+    b = _candidate("B", "INCREASE_DONATIONS", "500", standalone="100")
+    result = pf.assemble([a, b], [], BASE, _linear_engine())
+
+    assert result.sum_of_standalone == Decimal("200.00")
+    assert result.portfolio_total_benefit == Decimal("300.00")   # exceeds the sum
+    assert result.interaction_delta == Decimal("-100.00")        # negative ⇒ synergy
+    assert result.additivity_class is AdditivityClass.SUPER_ADDITIVE
+    # I-1 still holds regardless of the sign of the interaction
+    assert pf.verify_telescoping(result.members, result.portfolio_total_benefit)
+
+
+def test_interaction_sign_convention_is_consistent_in_both_directions():
+    """Positive delta = summing would OVERSTATE; negative = would UNDERSTATE."""
+    over = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="400")
+    result_over = pf.assemble([over], [], BASE, _linear_engine())
+    assert result_over.interaction_delta > 0
+    assert result_over.additivity_class is AdditivityClass.SUB_ADDITIVE
+
+    under = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="50")
+    result_under = pf.assemble([under], [], BASE, _linear_engine())
+    assert result_under.interaction_delta < 0
+    assert result_under.additivity_class is AdditivityClass.SUPER_ADDITIVE
+
+
+def test_per_candidate_deltas_sum_to_the_aggregate_delta():
+    """Consistency between per-candidate and aggregate interaction, which
+    follows from I-1."""
+    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "1000", standalone="250")
+    b = _candidate("B", "INCREASE_DONATIONS", "500", standalone="150")
+    result = pf.assemble([a, b], [], BASE, _linear_engine())
+    per_candidate = sum(
+        (pf.interaction_delta_for(x) for x in (a, b)), Decimal(0)
+    )
+    assert per_candidate == result.interaction_delta
+
+
+def test_invariants_share_one_objective_and_rounding_stage():
+    """I-1 and I-2 are stated over the same objective, sign convention, Decimal
+    policy, and rounding stage — money scale 2, ROUND_HALF_UP, quantized once."""
+    a = _candidate("A", "INCREASE_RRSP_DEDUCTION", "333.33", standalone="66.67")
+    result = pf.assemble([a], [], BASE, _linear_engine(),
+                         pf.AssemblyConstraints(
+                             objective_metric=ObjectiveMetric.CURRENT_YEAR_TAX_REDUCTION))
+    assert result.objective_metric is ObjectiveMetric.CURRENT_YEAR_TAX_REDUCTION
+    for value in (result.portfolio_total_benefit, result.sum_of_standalone,
+                  result.interaction_delta, result.baseline_tax, result.portfolio_tax):
+        assert value == value.quantize(Decimal("0.01"))     # single rounding stage
+    assert pf.verify_telescoping(result.members, result.portfolio_total_benefit)

@@ -214,3 +214,127 @@ def test_scenario_input_order_matters():
     a = c.scenario_spec_hash(canonical_scenario_input=[{"l": "A"}, {"l": "B"}], **kwargs)
     b = c.scenario_spec_hash(canonical_scenario_input=[{"l": "B"}, {"l": "A"}], **kwargs)
     assert a != b
+
+
+# ---------------------------------------------------------------------------
+# Coverage confirmation for the eight required canonicalization concerns
+# ---------------------------------------------------------------------------
+def test_unicode_normalization_nfc():
+    """Canonically equivalent spellings must hash identically."""
+    composed = "café"            # é as a single code point
+    decomposed = "café"         # e + combining acute
+    assert composed != decomposed
+    assert c.canonical_text({"n": composed}) == c.canonical_text({"n": decomposed})
+    assert c.canonical_hash({"n": composed}) == c.canonical_hash({"n": decomposed})
+
+
+def test_unicode_normalization_applies_to_keys_too():
+    assert c.canonical_hash({"café": 1}) == c.canonical_hash({"café": 1})
+
+
+def test_keys_colliding_under_normalization_are_rejected_not_silently_merged():
+    with pytest.raises(c.CanonicalizationError, match="duplicate object key"):
+        c.canonicalize({"café": 1, "café": 2})
+
+
+def test_negative_zero_is_normalized_across_all_scale_helpers():
+    assert c.money(Decimal("-0")) == c.money(Decimal("0")) == "0.00"
+    assert c.rate(Decimal("-0.0000001")) == c.rate(Decimal("0")) == "0.000000"
+    assert c.factor(Decimal("-0")) == "0.000000"
+    assert c.canonical_hash({"a": c.money(Decimal("-0.00"))}) == c.canonical_hash(
+        {"a": c.money(Decimal("0.00"))}
+    )
+
+
+def test_nan_and_infinity_are_rejected():
+    for bad in (Decimal("NaN"), Decimal("sNaN")):
+        with pytest.raises(c.CanonicalizationError, match="NaN"):
+            c.money(bad)
+    for bad in (Decimal("Infinity"), Decimal("-Infinity")):
+        with pytest.raises(c.CanonicalizationError, match="Infinity"):
+            c.money(bad)
+    with pytest.raises(c.CanonicalizationError, match="float"):
+        c.money(float("nan"))
+
+
+def test_maximum_decimal_precision_is_bounded():
+    too_many_digits = Decimal("1." + "1" * (c.MAX_SIGNIFICANT_DIGITS + 5))
+    with pytest.raises(c.CanonicalizationError, match="maximum canonical precision"):
+        c.money(too_many_digits)
+
+
+def test_magnitude_bounds_match_the_database_domains():
+    assert c.money(c.MONEY_MAX) == "999999999999.99"
+    with pytest.raises(c.CanonicalizationError, match="magnitude bound"):
+        c.money(c.MONEY_MAX + Decimal("1"))
+    assert c.rate(c.RATE_MAX) == "999.999999"
+    with pytest.raises(c.CanonicalizationError, match="magnitude bound"):
+        c.rate(Decimal("1000"))
+
+
+def test_dictionary_key_restrictions():
+    with pytest.raises(c.CanonicalizationError, match="object keys must be strings"):
+        c.canonicalize({1: "a"})
+    with pytest.raises(c.CanonicalizationError, match="object keys must be strings"):
+        c.canonicalize({("a", "b"): "x"})
+    # enum keys are permitted and serialize by value
+    assert c.canonical_text({CalculationBasis.ENGINE_DETERMINED: 1}) == (
+        '{"engine_determined":1}'
+    )
+
+
+def test_date_handling_covers_date_reject_datetime_and_reject_time():
+    import datetime as dt
+
+    assert c.canonicalize(dt.date(2025, 12, 31)) == "2025-12-31"
+    with pytest.raises(c.CanonicalizationError, match="datetime is excluded"):
+        c.canonicalize(dt.datetime(2025, 12, 31, 23, 59))
+    with pytest.raises(c.CanonicalizationError, match="cannot canonicalize"):
+        c.canonicalize(dt.time(12, 0))
+
+
+def test_explicit_collection_sort_keys():
+    """Collections destined for a hash are ordered by an EXPLICIT key."""
+    artifacts = [
+        {"artifact_kind": "calc_formula", "artifact_key": "B", "content_hash": "h2"},
+        {"artifact_kind": "calc_formula", "artifact_key": "A", "content_hash": "h1"},
+        {"artifact_kind": "tax_rule_version", "artifact_key": "A", "content_hash": "h3"},
+    ]
+    ordered = c.ordered(artifacts, key=lambda a: (a["artifact_kind"], a["artifact_key"]))
+    assert [a["artifact_key"] for a in ordered] == ["A", "B", "A"]
+    # and the snapshot hash is independent of the input order
+    assert c.rule_snapshot_hash(artifacts) == c.rule_snapshot_hash(list(reversed(artifacts)))
+
+
+def test_hashes_are_domain_separated_per_artifact_type():
+    """An identical payload must not collide across artifact types."""
+    payload = {"same": "payload"}
+    digests = {
+        domain: c.domain_hash(domain, payload) for domain in c.ALL_HASH_DOMAINS
+    }
+    assert len(set(digests.values())) == len(c.ALL_HASH_DOMAINS)
+    # and none equals the undomained hash
+    assert c.canonical_hash(payload) not in set(digests.values())
+
+
+def test_unknown_hash_domain_is_rejected():
+    with pytest.raises(c.CanonicalizationError, match="unknown hash domain"):
+        c.domain_hash("not_a_domain", {"a": 1})
+
+
+def test_domain_tag_pins_the_serialization_version():
+    """A change to the §9.1 rules must change every digest rather than silently
+    reinterpreting stored ones."""
+    tag = c.domain_tag(c.DOMAIN_OPTIMIZATION_SPEC)
+    assert tag.startswith("onyx.ioe.optimization_spec.v")
+    assert c.CANONICAL_SERIALIZATION_VERSION in tag
+
+
+def test_spec_and_result_hashes_of_the_same_payload_differ():
+    payload = {"x": 1}
+    assert c.domain_hash(c.DOMAIN_OPTIMIZATION_SPEC, payload) != c.domain_hash(
+        c.DOMAIN_OPTIMIZATION_RESULT, payload
+    )
+    assert c.domain_hash(c.DOMAIN_SCENARIO_SPEC, payload) != c.domain_hash(
+        c.DOMAIN_OPTIMIZATION_SPEC, payload
+    )

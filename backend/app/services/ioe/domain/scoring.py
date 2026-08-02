@@ -196,8 +196,13 @@ def rank(
 ) -> list[OptimizationCandidate]:
     """Score and order candidates. Ties break canonically so the order is total.
 
-    Tie-break: economic value desc, then opportunity_code asc, then
-    rule_version_id asc — deterministic regardless of input order.
+    Tie-break order: score desc, then `assumption_adjusted_score` desc, then
+    economic value desc, then opportunity_code / rule_version_id / candidate_key
+    ascending — deterministic regardless of input order.
+
+    The adjusted support score is the SECOND key on purpose: results that differ
+    in support but are tied at the DISPLAYED cap still order correctly, without
+    the displayed number having to absorb the distinction.
     """
     for candidate in candidates:
         candidate.score = compute_score(
@@ -208,6 +213,7 @@ def rank(
         candidates,
         key=lambda x: (
             -x.score.overall,
+            -_adjusted_support(x),
             -economic_value_raw(x),
             x.opportunity_code,
             x.rule_version_id or "",
@@ -217,6 +223,13 @@ def rank(
     for position, candidate in enumerate(ordered, start=1):
         candidate.rank = position
     return ordered
+
+
+def _adjusted_support(candidate: OptimizationCandidate) -> Decimal:
+    """Secondary ordering value: the uncapped, assumption-adjusted support score."""
+    if candidate.confidence is None:
+        return Decimal(50)
+    return candidate.confidence.assumption_adjusted_score
 
 
 def _clamp01(value: Decimal) -> Decimal:

@@ -148,18 +148,23 @@ def test_ties_break_canonically_by_opportunity_code():
 
 # ---- confidence -------------------------------------------------------------
 def test_confidence_components_are_omitted_not_zeroed_when_inapplicable():
-    """A non-scenario candidate must not be penalized for having no scenario
-    uncertainty; its weight is redistributed instead."""
+    """A non-projection candidate must not be penalized for a factor that does
+    not concern it; its weight is redistributed instead."""
     breakdown = conf.compute(
         evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
         calculation_basis=CalculationBasis.ENGINE_DETERMINED,
     )
     codes = {comp.factor_code for comp in breakdown.components}
-    assert ConfidenceFactor.SCENARIO_UNCERTAINTY not in codes
     assert ConfidenceFactor.PROJECTION_UNCERTAINTY not in codes
+    # assumption uncertainty is a SEPARATE stage, never a weighted component
+    assert ConfidenceFactor.SCENARIO_UNCERTAINTY not in codes
+    assert ConfidenceFactor.SCENARIO_UNCERTAINTY not in conf.DEFAULT_WEIGHTS
     # redistributed weights still total 1
     assert abs(sum(comp.weight for comp in breakdown.components) - Decimal(1)) <= Decimal("0.0001")
-    assert breakdown.overall == Decimal("100.00")
+    assert breakdown.raw_support_score == Decimal("100.00")
+    assert breakdown.display_support_score == Decimal("100.00")
+    assert breakdown.cap_applied is False
+    assert breakdown.cap_reason_code is None
 
 
 def test_weaker_evidence_lowers_confidence():
@@ -223,14 +228,133 @@ def test_eligibility_affecting_assumption_costs_more_than_amount_only():
     assert eligibility.overall < amount_only.overall
 
 
-def test_assumption_bearing_results_are_capped():
-    """Certainty is never implied where assumptions exist."""
+def test_assumption_bearing_results_are_capped_for_display_only():
+    """Certainty is never implied where assumptions exist — but the cap is a
+    min() on the DISPLAYED value, not a blanket multiplier on every score."""
     result = conf.compute(
         evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
         calculation_basis=CalculationBasis.ENGINE_DETERMINED,
         assumptions=(_assumption(Materiality.LOW),),
     )
-    assert result.overall <= conf.ASSUMPTION_CONFIDENCE_CAP
+    assert result.display_support_score <= conf.ASSUMPTION_DISPLAY_CAP
+    assert result.display_support_score == min(
+        result.assumption_adjusted_score, conf.ASSUMPTION_DISPLAY_CAP
+    )
+    # the raw and adjusted values survive uncapped, for ordering and audit
+    assert result.raw_support_score == Decimal("100.00")
+    assert result.assumption_adjusted_score > result.display_support_score
+    assert result.cap_applied is True
+    assert result.cap_reason_code == conf.CAP_REASON_ASSUMPTION_BEARING
+
+
+def test_low_support_assumption_result_is_not_further_penalized_by_the_cap():
+    """The old proportional ceiling scaled EVERY assumption-bearing score by
+    0.80, penalizing weak results as much as strong ones. A min() cap must
+    leave a below-cap result untouched."""
+    weak = conf.compute(
+        evidence_status=EvidenceStatus.INCOMPLETE,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(_assumption(Materiality.LOW),),
+    )
+    assert weak.assumption_adjusted_score < conf.ASSUMPTION_DISPLAY_CAP
+    assert weak.display_support_score == weak.assumption_adjusted_score
+    assert weak.cap_applied is False
+    assert weak.cap_reason_code is None
+
+
+def test_uncertainty_uses_source_and_certainty_not_just_materiality():
+    user_asserted = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(StructuredAssumption(
+            code="X", value=True, source=AssumptionSource.USER,
+            certainty=AssumptionCertainty.USER_ASSERTED, materiality=Materiality.HIGH),),
+    )
+    statutory = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(StructuredAssumption(
+            code="X", value=True, source=AssumptionSource.PLATFORM,
+            certainty=AssumptionCertainty.STATUTORY_KNOWN, materiality=Materiality.HIGH),),
+    )
+    assert statutory.assumption_adjusted_score > user_asserted.assumption_adjusted_score
+
+
+def test_measured_sensitivity_softens_the_penalty():
+    insensitive = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(_assumption(Materiality.HIGH, sensitivity=Decimal("0.05")),),
+    )
+    sensitive = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(_assumption(Materiality.HIGH, sensitivity=Decimal("0.95")),),
+    )
+    assert insensitive.assumption_adjusted_score > sensitive.assumption_adjusted_score
+
+
+def test_weak_evidence_amplifies_assumption_uncertainty():
+    verified = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(_assumption(Materiality.HIGH),),
+    )
+    incomplete = conf.compute(
+        evidence_status=EvidenceStatus.INCOMPLETE,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(_assumption(Materiality.HIGH),),
+    )
+    # both raw support and the adjustment are worse with weaker evidence
+    assert incomplete.raw_support_score < verified.raw_support_score
+    assert incomplete.uncertainty[0].penalty > verified.uncertainty[0].penalty
+
+
+def test_uncertainty_components_are_recorded_for_audit():
+    result = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(_assumption(Materiality.HIGH, eligibility=True),),
+    )
+    assert len(result.uncertainty) == 1
+    entry = result.uncertainty[0]
+    assert entry.assumption_code == "EMPLOYMENT_INCOME_CONSTANT"
+    assert entry.reason_code == "ELIGIBILITY_AFFECTING_ASSUMPTION"
+    assert entry.penalty > 0
+
+
+def test_support_score_is_labelled_as_support_not_probability():
+    text = conf.SUPPORT_SCORE_DISCLAIMER.lower()
+    assert "support score" in text
+    assert "not a probability" in text
+    assert "cra" in text
+
+
+def test_ranking_breaks_cap_ties_using_the_adjusted_score():
+    """Two candidates tied at the displayed cap must still order deterministically
+    by their uncapped adjusted support."""
+    strong = _candidate("AAA", "1000")
+    weaker = _candidate("BBB", "1000")
+    # Both are well supported and both land above the cap, so their DISPLAYED
+    # values are identical; only the assumption they carry differs.
+    strong.confidence = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(StructuredAssumption(
+            code="X", value=True, source=AssumptionSource.PLATFORM,
+            certainty=AssumptionCertainty.STATUTORY_KNOWN, materiality=Materiality.LOW),),
+    )
+    weaker.confidence = conf.compute(
+        evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
+        calculation_basis=CalculationBasis.ENGINE_DETERMINED,
+        assumptions=(_assumption(Materiality.MEDIUM),),
+    )
+    # displayed values are identical (both at the cap) ...
+    assert strong.confidence.display_support_score == weaker.confidence.display_support_score
+    # ... but the adjusted values differ, and drive the order
+    assert strong.confidence.assumption_adjusted_score > weaker.confidence.assumption_adjusted_score
+    ordered = scoring.rank([weaker, strong])
+    assert [x.candidate_key for x in ordered] == ["AAA", "BBB"]
 
 
 def test_confidence_bounded_and_reason_codes_present():

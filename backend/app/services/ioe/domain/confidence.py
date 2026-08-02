@@ -1,29 +1,44 @@
-"""Confidence model (architecture §14) — deterministic, explainable, 0..100.
+"""Support/reliability scoring (architecture §14) — deterministic, explainable.
 
-Six components, each precisely scoped so none overlaps another:
+**This is a SUPPORT score, not a probability.** It expresses how well a result is
+supported by the data, documentation, calculation basis, and rule stability
+behind it. It is explicitly NOT a probability that the CRA will accept a claim,
+nor a probability of receiving the displayed amount. `SUPPORT_SCORE_DISCLAIMER`
+carries that statement to every surface that shows the number.
 
-  eligibility_evidence_strength  evidence that the user MEETS the criteria
-  calculation_determinism        property of HOW the amount was produced
-  documentation_quality          verification of documents supporting AMOUNTS
-  scenario_uncertainty           scenarios only
-  projection_uncertainty         projections only
-  rule_stability                 expiry proximity / amendment recency / validation
+Computation is TWO-STAGE, and the stages are preserved separately because each
+answers a different question:
 
-Two rules that shape the arithmetic:
+  1. `raw_support_score` — weighted sum of the support components:
 
-* Components that do not apply are OMITTED and their weight is redistributed
-  proportionally — scoring them zero would unfairly penalize, say, a non-scenario
-  candidate for having no scenario uncertainty.
-* Confidence is NOT reduced by the NUMBER of assumptions. One high-materiality
-  assumption with high result sensitivity costs far more than five low-materiality
-  ones. Assumptions that affect ELIGIBILITY weigh more than those affecting only
-  the amount.
+        eligibility_evidence_strength  evidence the user MEETS the criteria
+        calculation_determinism        property of HOW the amount was produced
+        documentation_quality          verification of documents behind AMOUNTS
+        projection_uncertainty         horizon degradation (projections only)
+        rule_stability                 expiry / amendment recency / validation
+
+     Components that do not apply are OMITTED and their weight redistributed
+     proportionally — scoring them zero would penalize a candidate for a factor
+     that does not concern it.
+
+  2. `assumption_adjusted_score` — `raw` reduced by an uncertainty adjustment
+     computed from assumption **materiality, source, evidence, eligibility
+     impact, and measured sensitivity**. It is NOT a function of how MANY
+     assumptions there are: one high-materiality, eligibility-affecting,
+     highly-sensitive assumption costs far more than five immaterial ones.
+
+Finally `display_support_score = min(assumption_adjusted_score, CAP)`. The cap
+applies to the DISPLAYED value only — the adjusted value is preserved so results
+tied at the cap still order deterministically without the displayed number
+taking on a different meaning.
 """
 from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.services.ioe.domain.enums import (
+    AssumptionCertainty,
+    AssumptionSource,
     CalculationBasis,
     ConfidenceFactor,
     EvidenceStatus,
@@ -33,19 +48,36 @@ from app.services.ioe.domain.models import (
     ConfidenceBreakdown,
     ConfidenceComponent,
     StructuredAssumption,
+    UncertaintyComponent,
 )
 
-CONFIDENCE_ALGORITHM_VERSION = "1.0.0"
+CONFIDENCE_ALGORITHM_VERSION = "2.0.0"
+
+SUPPORT_SCORE_DISCLAIMER = (
+    "This is a support score: it reflects how well this result is backed by the "
+    "information supplied, its documentation, and the published rule it relies "
+    "on. It is not a probability that the CRA will accept a claim, and not a "
+    "probability of receiving the amount shown."
+)
+
+# Ceiling for results that rest on assumptions. Applied as min() to the DISPLAYED
+# value only (never as a blanket multiplier, which would penalize low-confidence
+# results as much as high-confidence ones and change what the score means).
+ASSUMPTION_DISPLAY_CAP = Decimal("80")
+CAP_REASON_ASSUMPTION_BEARING = "ASSUMPTION_BEARING_RESULT"
 
 _SCALE = Decimal("0.000001")
+_PCT = Decimal("0.01")
 _ONE = Decimal(1)
 
+# Weights over the SUPPORT components only. Assumption uncertainty is a separate
+# stage, so it deliberately has no weight here — including it as a component and
+# adjusting for it afterwards would double-count the same doubt.
 DEFAULT_WEIGHTS: dict[ConfidenceFactor, Decimal] = {
-    ConfidenceFactor.ELIGIBILITY_EVIDENCE_STRENGTH: Decimal("0.30"),
+    ConfidenceFactor.ELIGIBILITY_EVIDENCE_STRENGTH: Decimal("0.35"),
     ConfidenceFactor.CALCULATION_DETERMINISM: Decimal("0.25"),
-    ConfidenceFactor.DOCUMENTATION_QUALITY: Decimal("0.15"),
+    ConfidenceFactor.DOCUMENTATION_QUALITY: Decimal("0.20"),
     ConfidenceFactor.RULE_STABILITY: Decimal("0.15"),
-    ConfidenceFactor.SCENARIO_UNCERTAINTY: Decimal("0.10"),
     ConfidenceFactor.PROJECTION_UNCERTAINTY: Decimal("0.05"),
 }
 
@@ -72,47 +104,46 @@ _DETERMINISM: dict[CalculationBasis, Decimal] = {
     CalculationBasis.PROJECTION_ESTIMATE: Decimal("0.45"),
 }
 
-_MATERIALITY_IMPACT: dict[Materiality, Decimal] = {
-    Materiality.HIGH: Decimal("0.45"),
-    Materiality.MEDIUM: Decimal("0.20"),
-    Materiality.LOW: Decimal("0.07"),
+# ---- uncertainty inputs -----------------------------------------------------
+_MATERIALITY_PENALTY: dict[Materiality, Decimal] = {
+    Materiality.HIGH: Decimal("0.40"),
+    Materiality.MEDIUM: Decimal("0.18"),
+    Materiality.LOW: Decimal("0.06"),
 }
+
+# Where the assumption came from: a statutory-known value is barely an
+# assumption; a bare user assertion carries the most doubt.
+_SOURCE_MULTIPLIER: dict[AssumptionSource, Decimal] = {
+    AssumptionSource.USER: Decimal("1.00"),
+    AssumptionSource.ANALYSIS: Decimal("0.70"),
+    AssumptionSource.PLATFORM: Decimal("0.60"),
+}
+_CERTAINTY_MULTIPLIER: dict[AssumptionCertainty, Decimal] = {
+    AssumptionCertainty.USER_ASSERTED: Decimal("1.00"),
+    AssumptionCertainty.PLATFORM_DEFAULT: Decimal("0.80"),
+    AssumptionCertainty.DERIVED_FROM_DATA: Decimal("0.55"),
+    AssumptionCertainty.STATUTORY_KNOWN: Decimal("0.20"),
+}
+
+# Weak evidence amplifies the doubt an assumption introduces.
+_EVIDENCE_MULTIPLIER: dict[EvidenceStatus, Decimal] = {
+    EvidenceStatus.DOCUMENTED_VERIFIED: Decimal("0.80"),
+    EvidenceStatus.DOCUMENTED_UNVERIFIED: Decimal("1.00"),
+    EvidenceStatus.USER_ATTESTED: Decimal("1.15"),
+    EvidenceStatus.INCOMPLETE: Decimal("1.30"),
+}
+
+# An assumption that could change ELIGIBILITY matters more than one that only
+# moves the amount.
+_ELIGIBILITY_AMPLIFIER = Decimal("1.60")
 
 _REASONS = {
     ConfidenceFactor.ELIGIBILITY_EVIDENCE_STRENGTH: "ELIGIBILITY_EVIDENCE",
     ConfidenceFactor.CALCULATION_DETERMINISM: "CALCULATION_BASIS",
     ConfidenceFactor.DOCUMENTATION_QUALITY: "DOCUMENTATION_VERIFICATION",
-    ConfidenceFactor.SCENARIO_UNCERTAINTY: "SCENARIO_ASSUMPTIONS",
     ConfidenceFactor.PROJECTION_UNCERTAINTY: "PROJECTION_HORIZON",
     ConfidenceFactor.RULE_STABILITY: "RULE_STABILITY",
 }
-
-# Assumption-bearing results are held below a ceiling so certainty is never
-# implied where assumptions exist (decision D-5 / architecture §15).
-#
-# Applied as a PROPORTIONAL ceiling rather than a clip: a hard clip would collapse
-# every well-evidenced assumption-bearing result to exactly the cap, destroying
-# the ordering between them and making confidence useless for ranking precisely
-# where uncertainty matters most. Scaling guarantees the same ceiling while
-# preserving relative ordering.
-ASSUMPTION_CONFIDENCE_CAP = Decimal("80")
-
-
-def scenario_uncertainty(assumptions: tuple[StructuredAssumption, ...]) -> Decimal:
-    """1.0 = no meaningful uncertainty. Driven by materiality, sensitivity, and
-    whether an assumption touches eligibility — NOT by how many there are."""
-    if not assumptions:
-        return _ONE
-    worst = Decimal(0)
-    for a in assumptions:
-        impact = _MATERIALITY_IMPACT.get(a.materiality, Decimal("0.20"))
-        if a.sensitivity is not None:
-            # a measured, insensitive result softens the penalty
-            impact *= (Decimal("0.4") + Decimal("0.6") * _clamp01(a.sensitivity))
-        if a.affects_eligibility:
-            impact *= Decimal("1.5")     # eligibility doubt outweighs amount doubt
-        worst = max(worst, impact)
-    return _clamp01(_ONE - worst)
 
 
 def projection_uncertainty(horizon_years: int, *, indexation_known: bool = False) -> Decimal:
@@ -139,6 +170,27 @@ def rule_stability(
     return _clamp01(value)
 
 
+def assumption_penalty(
+    assumption: StructuredAssumption, evidence_status: EvidenceStatus
+) -> Decimal:
+    """Uncertainty contributed by ONE assumption, in [0,1].
+
+    Derived from materiality, source, certainty, supporting evidence, whether it
+    affects eligibility, and measured sensitivity — never from the count.
+    """
+    penalty = _MATERIALITY_PENALTY.get(assumption.materiality, Decimal("0.18"))
+    penalty *= _SOURCE_MULTIPLIER.get(assumption.source, Decimal("1.00"))
+    penalty *= _CERTAINTY_MULTIPLIER.get(assumption.certainty, Decimal("1.00"))
+    penalty *= _EVIDENCE_MULTIPLIER.get(evidence_status, Decimal("1.00"))
+    if assumption.affects_eligibility:
+        penalty *= _ELIGIBILITY_AMPLIFIER
+    if assumption.sensitivity is not None:
+        # A measured, insensitive result softens the penalty; a highly sensitive
+        # one keeps it at full strength.
+        penalty *= (Decimal("0.35") + Decimal("0.65") * _clamp01(assumption.sensitivity))
+    return _clamp01(penalty)
+
+
 def compute(
     *,
     evidence_status: EvidenceStatus,
@@ -149,9 +201,9 @@ def compute(
     rule_stability_value: Decimal | None = None,
     weights: dict[ConfidenceFactor, Decimal] | None = None,
 ) -> ConfidenceBreakdown:
-    """Compute confidence with proportional redistribution over applicable factors."""
     w = dict(weights or DEFAULT_WEIGHTS)
 
+    # ---- stage 1: raw support ----
     values: dict[ConfidenceFactor, Decimal] = {
         ConfidenceFactor.ELIGIBILITY_EVIDENCE_STRENGTH:
             _ELIGIBILITY_EVIDENCE.get(evidence_status, Decimal("0.20")),
@@ -162,13 +214,6 @@ def compute(
         ConfidenceFactor.RULE_STABILITY:
             rule_stability_value if rule_stability_value is not None else _ONE,
     }
-
-    # Scenario uncertainty applies only when the result rests on assumptions.
-    is_scenario = calculation_basis is CalculationBasis.SCENARIO_ESTIMATE or bool(assumptions)
-    if is_scenario:
-        values[ConfidenceFactor.SCENARIO_UNCERTAINTY] = scenario_uncertainty(assumptions)
-
-    # Projection uncertainty applies only to multi-year projections.
     is_projection = (
         calculation_basis is CalculationBasis.PROJECTION_ESTIMATE
         or (horizon_years is not None and horizon_years > 1)
@@ -178,35 +223,64 @@ def compute(
             horizon_years or 1, indexation_known=indexation_known
         )
 
-    # Redistribute the weight of omitted factors proportionally.
-    applicable_weight = sum((w[f] for f in values), Decimal(0))
-    if applicable_weight <= 0:  # pragma: no cover - defensive
-        applicable_weight = _ONE
+    applicable_weight = sum((w[f] for f in values), Decimal(0)) or _ONE
 
     components: list[ConfidenceComponent] = []
-    overall = Decimal(0)
+    raw_fraction = Decimal(0)
     for factor_code in sorted(values, key=lambda f: f.value):
         value = _clamp01(values[factor_code])
         weight = (w[factor_code] / applicable_weight).quantize(_SCALE, ROUND_HALF_UP)
         contribution = (value * weight).quantize(_SCALE, ROUND_HALF_UP)
-        overall += contribution
+        raw_fraction += contribution
         components.append(ConfidenceComponent(
             factor_code=factor_code, value=value, weight=weight,
             contribution=contribution, reason_code=_REASONS[factor_code],
         ))
 
-    score = (_clamp01(overall) * Decimal(100)).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    raw_support_score = (_clamp01(raw_fraction) * Decimal(100)).quantize(_PCT, ROUND_HALF_UP)
 
-    # A result resting on assumptions — declared ones, or a scenario/projection
-    # basis — can never present as certain.
+    # ---- stage 2: assumption uncertainty adjustment ----
+    uncertainty: list[UncertaintyComponent] = []
+    worst_penalty = Decimal(0)
+    for a in sorted(assumptions, key=lambda x: x.code):
+        penalty = assumption_penalty(a, evidence_status)
+        worst_penalty = max(worst_penalty, penalty)
+        uncertainty.append(UncertaintyComponent(
+            assumption_code=a.code, materiality=a.materiality, source=a.source,
+            affects_eligibility=a.affects_eligibility, sensitivity=a.sensitivity,
+            penalty=penalty.quantize(_SCALE, ROUND_HALF_UP),
+            reason_code=(
+                "ELIGIBILITY_AFFECTING_ASSUMPTION" if a.affects_eligibility
+                else "AMOUNT_AFFECTING_ASSUMPTION"
+            ),
+        ))
+
+    assumption_adjusted_score = (
+        raw_support_score * (_ONE - worst_penalty)
+    ).quantize(_PCT, ROUND_HALF_UP)
+
+    # ---- stage 3: display cap (min, never a blanket multiplier) ----
     rests_on_assumptions = bool(assumptions) or calculation_basis in (
         CalculationBasis.SCENARIO_ESTIMATE, CalculationBasis.PROJECTION_ESTIMATE,
     )
+    display_support_score = assumption_adjusted_score
+    cap_applied = False
+    cap_reason_code: str | None = None
     if rests_on_assumptions:
-        score = (score * ASSUMPTION_CONFIDENCE_CAP / Decimal(100)).quantize(
-            Decimal("0.01"), ROUND_HALF_UP
-        )
-    return ConfidenceBreakdown(overall=score, components=tuple(components))
+        display_support_score = min(assumption_adjusted_score, ASSUMPTION_DISPLAY_CAP)
+        cap_applied = display_support_score < assumption_adjusted_score
+        if cap_applied:
+            cap_reason_code = CAP_REASON_ASSUMPTION_BEARING
+
+    return ConfidenceBreakdown(
+        raw_support_score=raw_support_score,
+        assumption_adjusted_score=assumption_adjusted_score,
+        display_support_score=display_support_score,
+        cap_applied=cap_applied,
+        cap_reason_code=cap_reason_code,
+        components=tuple(components),
+        uncertainty=tuple(uncertainty),
+    )
 
 
 def _clamp01(value: Decimal) -> Decimal:
