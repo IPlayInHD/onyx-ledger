@@ -34,6 +34,13 @@ class Recommendation(Base):
     impact_label: Mapped[str | None] = mapped_column(String)
     confidence_score: Mapped[int | None] = mapped_column(SmallInteger)
     priority: Mapped[int] = mapped_column(SmallInteger, default=3)
+    # ---- IOE link (additive) ----
+    # `calculation_basis` records HOW the figure was produced; `evidence_status`
+    # records how well the INPUTS are supported. Independent axes, never
+    # collapsed. NULL on pre-IOE rows ("basis not recorded") rather than guessed.
+    optimization_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    calculation_basis: Mapped[str | None] = mapped_column(Text)
+    evidence_status: Mapped[str | None] = mapped_column(Text)
     citation: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="generated")
     created_at: Mapped[datetime] = created_at_col()
