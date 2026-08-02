@@ -2,6 +2,11 @@
 
 **Status:** Pre-implementation architecture (revised). No implementation code until the §33 gate is approved.
 **Supersedes:** `ioe-architecture.md` (Revision 1). Revision 1 remains in history; this document is the authority.
+
+> 📎 **Amended by `ioe-architecture-v2.1.md`.** Revision 2.1 replaces six subsections of this document:
+> §9.4 + §7 + §24 (rule-snapshot pinning), §12.3 + §12.2 (portfolio objective metrics and interaction-delta
+> mathematics), §6.2 + §17 (registry-controlled lever bindings), §12.1–12.3 (greedy limitations), and
+> §30 + §31 (migration ordering). Read 2.1 alongside this document; everything else here stands unchanged.
 **Author role:** Principal fintech systems architect / senior Canadian tax-platform engineer.
 
 **Preserved, unchanged foundations:** the 14-schema PostgreSQL database (+ `tkms`), the FastAPI modular monolith, the deterministic `TaxEngineService`, the `RulesEvaluatorService`, the Tax Knowledge Management System, published-rules-only reads, the `analysis` / `reco` / `tax_kb` bounded contexts, a dedicated `ioe` bounded context, Clean Architecture layering, PostgreSQL RLS, `Decimal`-based deterministic calculation, immutable historical calculation results, versioned configuration and provenance, what-if scenarios over cloned frozen inputs, and **the tax engine as the only component permitted to calculate tax**.
