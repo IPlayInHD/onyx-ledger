@@ -18,7 +18,7 @@ SQL_DIR = Path(__file__).resolve().parents[2] / "db" / "sql"
 # Bounded contexts (+ shared ref) — dropped as a unit on full teardown.
 SCHEMAS = [
     "ref", "identity", "profile", "finance", "wealth", "tax_kb", "rules",
-    "analysis", "reco", "ai", "docs", "admin", "billing", "audit",
+    "analysis", "reco", "ai", "docs", "admin", "billing", "audit", "tkms",
 ]
 ROLES = ["onyx_app_rw", "onyx_app_ro", "onyx_kb_admin", "onyx_audit_writer", "onyx_migrator"]
 

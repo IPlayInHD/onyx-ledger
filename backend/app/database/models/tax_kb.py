@@ -20,6 +20,7 @@ class TaxRule(Base):
     code: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
+    subcategory: Mapped[str | None] = mapped_column(String)
     jurisdiction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     province_code: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = created_at_col()
@@ -51,6 +52,11 @@ class TaxRuleVersion(Base):
     legislation_reference_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     superseded_by_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # TKMS provenance (nullable — hand-authored / legacy versions predate TKMS).
+    import_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    parser_version: Mapped[str | None] = mapped_column(String)
+    parser_confidence: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    validation_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
 
