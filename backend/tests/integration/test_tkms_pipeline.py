@@ -144,3 +144,89 @@ async def test_extract_is_idempotent():
         first = await imp.extract(job.id)
         second = await imp.extract(job.id)     # re-run resumes, does not duplicate
         assert {r.id for r in first} == {r.id for r in second}
+
+
+@pytest.mark.asyncio
+async def test_validation_passes_clean_job_and_advances_status():
+    from app.database.models import ValidationFinding as VF
+    from app.services.tkms.validation.service import ValidationService
+
+    code = f"TKMS_VOK_{uuid.uuid4().hex[:8].upper()}"
+    async with unit_of_work(actor_type="admin") as s:
+        imp = ImportService(s)
+        job = await imp.create_job(source_org="CRA", fmt="csv", tax_year=2025)
+        await imp.store_raw(job.id, _csv(code))
+        await imp.parse(job.id)
+        await imp.extract(job.id)
+
+        report = await ValidationService(s).validate_job(job.id)
+        assert report.status == "passed"
+        assert job.validation_status == "passed"
+        assert job.status == "validated"
+        errors = list(await s.scalars(
+            select(VF).where(VF.report_id == report.id, VF.severity == "error")
+        ))
+        assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_validation_fails_bad_year_and_blocks():
+    from app.services.tkms.validation.service import ValidationService
+
+    # tax_year 1999 is not a seeded reference year → error, job cannot advance
+    code = f"TKMS_VBAD_{uuid.uuid4().hex[:8].upper()}"
+    raw = (
+        "code,name,category,jurisdiction,tax_year\n"
+        f"{code},Bad year rule,credit,FED,1999\n"
+    ).encode()
+    async with unit_of_work(actor_type="admin") as s:
+        imp = ImportService(s)
+        job = await imp.create_job(source_org="CRA", fmt="csv", tax_year=2025)
+        await imp.store_raw(job.id, raw)
+        await imp.parse(job.id)
+        await imp.extract(job.id)
+        report = await ValidationService(s).validate_job(job.id)
+        assert report.status == "failed"
+        assert job.validation_status == "failed"
+        assert job.status != "validated"        # blocked
+
+
+@pytest.mark.asyncio
+async def test_comparison_reports_changes_vs_published():
+    from app.database.models import ChangeItem as CI
+    from app.services.tkms.comparison.service import ComparisonService
+    from app.services.tkms.extraction.service import ExtractionService
+
+    code = f"TKMS_CMP_{uuid.uuid4().hex[:8].upper()}"
+
+    def _raw(max_amount: str) -> bytes:
+        return (
+            "code,name,category,jurisdiction,tax_year,max_amount\n"
+            f"{code},Credit,credit,FED,2025,{max_amount}\n"
+        ).encode()
+
+    async with unit_of_work(actor_type="admin") as s:
+        imp = ImportService(s)
+        # first import → promote → mark published (simulate a live baseline)
+        job1 = await imp.create_job(source_org="CRA", fmt="csv", tax_year=2025)
+        await imp.store_raw(job1.id, _raw("2000"))
+        await imp.parse(job1.id)
+        await imp.extract(job1.id)
+        v1 = (await ExtractionService(s).promote(job1.id))[0]
+        v1.status = "published"
+        await s.flush()
+
+        # second import of the SAME rule with a changed amount → draft
+        job2 = await imp.create_job(source_org="CRA", fmt="csv", tax_year=2025)
+        await imp.store_raw(job2.id, _raw("3000"))
+        await imp.parse(job2.id)
+        await imp.extract(job2.id)
+        v2 = (await ExtractionService(s).promote(job2.id))[0]
+
+        report = await ComparisonService(s).compare(v2.id)
+        assert report.baseline_version_id == v1.id
+        items = list(await s.scalars(select(CI).where(CI.change_report_id == report.id)))
+        changed = {i.field: i for i in items}
+        assert "max_amount" in changed
+        assert changed["max_amount"].old_value == "2000"
+        assert changed["max_amount"].new_value == "3000"
