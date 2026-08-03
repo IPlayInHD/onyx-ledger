@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import current_user_id, db_authed
 from app.core.exceptions import NotFound
 from app.schemas.ioe import (
-    MultiYearProjectionOut,
+    ProjectionResponse,
     ScenarioComparisonOut,
     ScenarioCreateRequest,
     ScenarioDetailOut,
@@ -25,6 +25,7 @@ from app.schemas.ioe import (
     StrategyPortfolioOut,
 )
 from app.services.ioe import presentation
+from app.services.ioe.projection_query import ProjectionQueryService
 from app.services.ioe.read_repository import IoeReadRepository
 from app.services.ioe.scenario.comparison_service import ScenarioComparisonService
 from app.services.ioe.scenario.query_service import ScenarioQueryService
@@ -175,28 +176,21 @@ async def get_portfolio(
 
 @router.get(
     "/runs/{run_id}/projections",
-    response_model=MultiYearProjectionOut | None,
+    response_model=ProjectionResponse,
     summary="Read multi-year projections for a run",
     description=(
         "Projections are returned SEPARATELY and are never part of any "
-        "current-year total. They carry their horizon, assumptions, methodology "
-        "version and uncertainty."
+        "current-year total. Always an object with a status: a run with no "
+        "rule-authorized projection returns an explicit not_generated status "
+        "rather than a misleading null."
     ),
 )
 async def get_projections(
     run_id: uuid.UUID,
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
-) -> MultiYearProjectionOut | None:
-    from app.services.ioe.projection import PROJECTION_METHODOLOGY_VERSION
-
-    repo = IoeReadRepository(session, user_id)
-    run = await repo.get_run(run_id)
-    rows = await repo.projections_for_run(run_id)
-    return presentation.projection_detail(
-        list(rows), None, run.tax_year,
-        methodology_version=PROJECTION_METHODOLOGY_VERSION,
-    )
+) -> ProjectionResponse:
+    return await ProjectionQueryService(session, user_id).for_run(run_id)
 
 
 __all__ = ["router"]

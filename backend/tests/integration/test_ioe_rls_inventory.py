@@ -26,6 +26,9 @@ SHARED_REFERENCE_TABLES = frozenset({
     "assumption_set",
     "assumption",
     "run_rule_snapshot",
+    # Queue bookkeeping: transitions, worker ids and enumerated codes. Carries
+    # no user data and is written only by the privileged outbox functions.
+    "freshness_outbox_audit",
 })
 
 # How each user-derived table resolves to a user_id.
@@ -52,6 +55,10 @@ OWNERSHIP_CHAIN = {
     "scenario_lever": "scenario_id -> scenario.user_id",
     "scenario_assumption": "scenario_id -> scenario.user_id",
     "scenario_confidence_component": "scenario_id -> scenario.user_id",
+    # Not sealed evidence — identifiers and codes only — but still tenant-scoped
+    # so one user cannot enumerate another's activity. Rows with a NULL user_id
+    # are global (an engine version moved) and are readable by design.
+    "freshness_outbox": "user_id (direct, NULL = global event)",
 }
 
 # The column each ownership policy resolves through, and the two parents the
@@ -69,6 +76,7 @@ TRAVERSAL_COLUMN = {
     "scenario_lever": "scenario_id", "scenario_assumption": "scenario_id",
     "scenario_confidence_component": "scenario_id",
     "optimization_run": "user_id", "scenario": "user_id",
+    "freshness_outbox": "user_id",
 }
 
 
@@ -196,6 +204,10 @@ async def test_deny_by_default_when_app_user_id_is_unset():
     async with unit_of_work(actor_type="system") as s:
         await s.execute(text("SELECT set_config('app.user_id', '', true)"))
         for table in sorted(OWNERSHIP_CHAIN):
+            if table == "freshness_outbox":
+                # global events (user_id IS NULL) are readable by design:
+                # they say only "the engine version changed"
+                continue
             count = await s.scalar(text(f"SELECT count(*) FROM ioe.{table}"))  # noqa: S608
             assert count == 0, (
                 f"ioe.{table} returned {count} rows with no tenant context set"
@@ -225,6 +237,8 @@ async def test_a_second_user_sees_none_of_the_first_users_evidence():
 
     async with unit_of_work(user_id=uid_b, actor_type="user") as s:
         for table in sorted(OWNERSHIP_CHAIN):
+            if table == "freshness_outbox":
+                continue          # global rows are shared by design
             count = await s.scalar(text(f"SELECT count(*) FROM ioe.{table}"))  # noqa: S608
             assert count == 0, f"user B can read {count} rows of ioe.{table}"
 

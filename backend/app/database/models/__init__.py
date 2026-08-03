@@ -65,6 +65,8 @@ from app.database.models.ioe import (  # noqa: F401
     CandidateCost,
     CandidateEconomicEffect,
     ConfidenceComponent,
+    FreshnessOutbox,
+    FreshnessOutboxAudit,
     MultiYearProjection,
     OptimizationCandidate,
     OptimizationRun,

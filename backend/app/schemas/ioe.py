@@ -377,8 +377,28 @@ class MultiYearProjectionOut(BaseModel):
     )
 
 
+class ProjectionResponse(BaseModel):
+    """Always an object with a STATUS, never a bare null.
+
+    A null would leave the caller unable to tell "no rule authorized a
+    projection" from "the feature is off" from "something went wrong". Each of
+    those is a different fact and each gets its own status.
+    """
+
+    status: str = Field(
+        description="generated | not_generated_no_eligible_candidates | "
+                    "not_generated_missing_assumptions | feature_not_enabled"
+    )
+    reason: str | None = Field(
+        None, description="Why nothing was generated, when nothing was."
+    )
+    missing_assumption_codes: list[str] = Field(default_factory=list)
+    projection: MultiYearProjectionOut | None = None
+
+
 __all__ = [
     "CURRENCY_CAD",
+    "ProjectionResponse",
     "AppliedChangeOut",
     "AssumptionInput",
     "ComparisonSideOut",

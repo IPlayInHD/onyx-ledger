@@ -600,9 +600,11 @@ async def test_projections_are_returned_separately_and_never_in_a_total(client):
     async with unit_of_work(user_id=uid, actor_type="user") as s:
         await ProjectionService(s).persist(outcome.run_id, projection)
 
-    projected = (await client.get(
+    envelope = (await client.get(
         f"{API}/runs/{outcome.run_id}/projections", headers=_auth(uid)
     )).json()
+    assert envelope["status"] == "generated"
+    projected = envelope["projection"]
     assert projected is not None
     assert projected["horizon_years"] == 5
     assert projected["methodology_version"]

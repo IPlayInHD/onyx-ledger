@@ -165,6 +165,21 @@ class RuleOutcome(Base):
     reversibility: Mapped[str | None] = mapped_column(Text)
     portfolio_lever_code: Mapped[str | None] = mapped_column(Text)
     lever_parameters: Mapped[dict | None] = mapped_column(JSONB)
+    projection_eligibility: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Whether published legislation supports projecting this opportunity into future years. Authored as rule data under four-eyes governance; the IOE never infers recurrence.",
+    )
+    projection_method: Mapped[str | None] = mapped_column(Text)
+    maximum_projection_horizon: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        comment="The furthest year the rule authorizes projecting to. A consumer may project less, never more.",
+    )
+    required_assumption_codes: Mapped[list | None] = mapped_column(
+        # none_as_null: a Python None must become SQL NULL ("not specified"),
+        # not JSON null, which would read as a malformed empty declaration.
+        JSONB(none_as_null=True),
+        comment="Assumption codes that must be present and satisfied before a projection may be generated. Absent any of them, no projection is produced.",
+    )
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
 

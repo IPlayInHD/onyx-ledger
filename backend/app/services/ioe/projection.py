@@ -17,6 +17,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from enum import StrEnum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +39,76 @@ PROJECTABLE_EFFECTS = frozenset({
 
 class ProjectionNotApplicable(ValueError):
     """This effect cannot be projected forward without inventing value."""
+
+
+class ProjectionStatus(StrEnum):
+    """Why a projection response looks the way it does.
+
+    An explicit status rather than a null: "no projection" and "the feature is
+    off" and "no rule authorized one" are three different facts, and a null
+    would tell the caller none of them.
+    """
+
+    GENERATED = "generated"
+    NOT_GENERATED_NO_ELIGIBLE_CANDIDATES = "not_generated_no_eligible_candidates"
+    NOT_GENERATED_MISSING_ASSUMPTIONS = "not_generated_missing_assumptions"
+    FEATURE_NOT_ENABLED = "feature_not_enabled"
+
+
+@dataclass(frozen=True)
+class ProjectionDecision:
+    """Whether a candidate may be projected, and why."""
+
+    authorized: bool
+    status: ProjectionStatus
+    horizon_years: int = 0
+    method: str | None = None
+    missing_assumption_codes: tuple[str, ...] = ()
+    reason: str | None = None
+
+
+def authorize(
+    projection,
+    *,
+    requested_horizon: int | None = None,
+    available_assumption_codes: frozenset[str] = frozenset(),
+) -> ProjectionDecision:
+    """Decide from RULE DATA alone whether a projection may be generated.
+
+    Nothing about the candidate's amounts, effect type, or history is consulted:
+    recurrence is a legislative question, so the only input is what the rule
+    published. A rule that said nothing authorizes nothing.
+    """
+    if projection is None:
+        return ProjectionDecision(
+            False, ProjectionStatus.NOT_GENERATED_NO_ELIGIBLE_CANDIDATES,
+            reason="the published rule declares no projection metadata",
+        )
+    if not projection.is_authorized:
+        return ProjectionDecision(
+            False, ProjectionStatus.NOT_GENERATED_NO_ELIGIBLE_CANDIDATES,
+            reason=f"projection_eligibility is {projection.eligibility!r}",
+        )
+
+    required = frozenset(projection.required_assumption_codes)
+    missing = tuple(sorted(required - available_assumption_codes))
+    if missing:
+        # A conditional authorization whose conditions are not met is not an
+        # authorization. Reported explicitly so the user can supply them.
+        return ProjectionDecision(
+            False, ProjectionStatus.NOT_GENERATED_MISSING_ASSUMPTIONS,
+            missing_assumption_codes=missing,
+            reason="required assumptions were not supplied",
+        )
+
+    # The rule caps the horizon. A caller may ask for less, never more.
+    horizon = projection.maximum_horizon
+    if requested_horizon is not None:
+        horizon = min(requested_horizon, projection.maximum_horizon)
+    return ProjectionDecision(
+        True, ProjectionStatus.GENERATED,
+        horizon_years=horizon, method=projection.method,
+    )
 
 
 @dataclass(frozen=True)
@@ -143,6 +214,9 @@ class ProjectionService:
 
 __all__ = [
     "MAX_HORIZON_YEARS",
+    "ProjectionDecision",
+    "ProjectionStatus",
+    "authorize",
     "PROJECTABLE_EFFECTS",
     "PROJECTION_METHODOLOGY_VERSION",
     "Projection",

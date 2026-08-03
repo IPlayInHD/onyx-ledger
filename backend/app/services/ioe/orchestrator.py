@@ -50,6 +50,9 @@ from app.database.models import (
     ConfidenceComponent as ConfidenceComponentRow,
 )
 from app.database.models import (
+    MultiYearProjection as MultiYearProjectionRow,
+)
+from app.database.models import (
     OptimizationCandidate as CandidateRow,
 )
 from app.database.models import (
@@ -372,6 +375,12 @@ class OptimizationOrchestrator:
 
         normalizer = OpportunityNormalizationService()
         candidates = [normalizer.normalize(o) for o in opportunities]
+        # Projection authorization travels with the opportunity, keyed by
+        # candidate. It is rule data, so it is carried, never derived.
+        authorizations = {
+            normalizer.candidate_key(o): (o.projection, o.rule_version_id)
+            for o in opportunities
+        }
 
         for candidate in candidates:
             candidate.confidence = support.compute(
@@ -404,6 +413,7 @@ class OptimizationOrchestrator:
             "candidates": ranked,
             "relationships": relationships,
             "portfolio": portfolio,
+            "projection_authorizations": authorizations,
         }
 
     # ---------------------------------------------------------------- TX-2 ---
@@ -531,6 +541,11 @@ class OptimizationOrchestrator:
                     resolution_options=list(edge.resolution_options),
                 ))
 
+            await self._persist_projections(
+                session, run_id, spec, candidates,
+                computed.get("projection_authorizations") or {},
+            )
+
             if portfolio is not None:
                 await PortfolioEvaluationService().persist(
                     session, run_id, portfolio,
@@ -550,6 +565,63 @@ class OptimizationOrchestrator:
             ))
             await session.flush()
         return result_hash
+
+    async def _persist_projections(
+        self, session, run_id, spec, candidates, authorizations: dict
+    ) -> int:
+        """Generate projections ONLY for candidates a published rule authorized.
+
+        No inference happens here. A candidate whose rule declared no projection
+        metadata, or declared it incompletely, produces nothing — and produces
+        nothing silently, because the absence is reported by the endpoint's
+        status rather than by a zero.
+        """
+        from app.services.ioe.projection import (
+            PROJECTION_METHODOLOGY_VERSION,
+            ProjectionNotApplicable,
+            authorize,
+            project_recurring,
+        )
+
+        supplied = frozenset(
+            a.get("assumption_code", "") for a in (spec.assumption_set or [])
+        )
+        written = 0
+        for candidate in candidates:
+            authorization, rule_version_id = authorizations.get(
+                candidate.candidate_key, (None, None)
+            )
+            decision = authorize(
+                authorization, available_assumption_codes=supplied
+            )
+            if not decision.authorized:
+                continue
+            for effect in candidate.economic_effects:
+                try:
+                    projection = project_recurring(
+                        annual_amount=effect.amount,
+                        effect_type=effect.effect_type,
+                        base_tax_year=spec.tax_year,
+                        horizon_years=decision.horizon_years,
+                    )
+                except ProjectionNotApplicable:
+                    # the rule authorized a projection but this effect is
+                    # one-off; authorizing does not make it recurrent
+                    continue
+                for year in projection.years:
+                    session.add(MultiYearProjectionRow(
+                        run_id=run_id,
+                        horizon_year=year.horizon_year,
+                        projected_amount=year.amount,
+                        effect_type=year.effect_type,
+                        calculation_basis="projection_estimate",
+                        is_indexation_known=year.is_indexation_known,
+                        projection_method=decision.method,
+                        methodology_version=PROJECTION_METHODOLOGY_VERSION,
+                        authorizing_rule_version_id=rule_version_id,
+                    ))
+                    written += 1
+        return written
 
     # ---------------------------------------------------------------- TX-3 ---
     async def _fail(self, run_id: uuid.UUID, error_code: str) -> None:

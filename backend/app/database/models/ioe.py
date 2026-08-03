@@ -529,6 +529,11 @@ class MultiYearProjection(Base):
     calculation_basis: Mapped[str] = mapped_column(Text, default="projection_estimate")
     assumption_set_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     is_indexation_known: Mapped[bool] = mapped_column(Boolean, default=False)
+    projection_method: Mapped[str | None] = mapped_column(Text)
+    methodology_version: Mapped[str | None] = mapped_column(Text)
+    authorizing_rule_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id")
+    )
     created_at: Mapped[datetime] = created_at_col()
 
 
@@ -733,4 +738,72 @@ class ScenarioConfidenceComponent(Base):
     weight: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
     contribution: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
     reason_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class FreshnessOutbox(Base):
+    """Transactional outbox for freshness invalidation.
+
+    Written in the SAME transaction as the change that caused it, so an event
+    exists if and only if that change committed. Carries identifiers and codes
+    only — never financial values.
+    """
+
+    __tablename__ = "freshness_outbox"
+    __table_args__ = {
+        "schema": "ioe",
+        "comment": (
+            "Transactional outbox for freshness invalidation. Written in the "
+            "same transaction as the change that caused it, so an event exists "
+            "if and only if the change committed."
+        ),
+    }
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    stale_reason_code: Mapped[str] = mapped_column(
+        Text, nullable=False,
+        comment="Resolved by the producer, which knows what actually changed. A consumer must never infer it.",
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
+    )
+    analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    tax_year: Mapped[int | None] = mapped_column(Integer)
+    dedupe_key: Mapped[str] = mapped_column(
+        Text, nullable=False,
+        comment="Uniquely identifies the logical event. Delivery is at-least-once, so processing must be idempotent and a duplicate write must collide here.",
+    )
+    # An explicit, enumerated state machine: pending -> claimed -> completed
+    # or failed. Managed exclusively by the privileged outbox functions.
+    claim_state: Mapped[str] = mapped_column(
+        Text, nullable=False, default="pending"
+    )
+    claimed_by: Mapped[str | None] = mapped_column(Text)
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    last_error_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class FreshnessOutboxAudit(Base):
+    """Append-only log of outbox claims and terminal transitions."""
+
+    __tablename__ = "freshness_outbox_audit"
+    __table_args__ = {
+        "schema": "ioe",
+        "comment": (
+            "Append-only log of outbox claims and terminal transitions. "
+            "Written by the privileged functions only."
+        ),
+    }
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    transition: Mapped[str] = mapped_column(Text, nullable=False)
+    worker_id: Mapped[str | None] = mapped_column(Text)
+    claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    error_code: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()

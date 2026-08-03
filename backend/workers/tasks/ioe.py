@@ -151,6 +151,44 @@ def invalidate_scenarios_for_tax_year(self, tax_year: int, reason_code: str) -> 
 
 
 @celery_app.task(
+    name="workers.tasks.ioe.relay_freshness_outbox",
+    bind=True,
+    max_retries=MAX_RETRIES,
+    acks_late=True,
+)
+def relay_freshness_outbox(self, batch_size: int = 50) -> int:
+    """Drain the transactional outbox — the NORMAL freshness path.
+
+    Celery is transport only. The outbox table is the source of truth: a lost
+    or duplicated message costs at most a delayed or repeated invalidation, and
+    a repeated one is a no-op.
+
+    The relay claims through a narrow privileged interface and then applies each
+    event in an ordinary RLS-protected transaction scoped to one tenant, so no
+    step of this task can read across tenants.
+    """
+    from app.services.ioe.freshness_relay import FreshnessRelay
+
+    async def _run() -> int:
+        report = await FreshnessRelay().drain(batch_size=batch_size)
+        log.info(
+            "ioe_freshness_relay",
+            claimed=report.claimed, completed=report.completed,
+            failed=report.failed, fanned_out=report.fanned_out,
+            scenarios=report.scenarios_marked,
+        )
+        return report.completed
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:  # noqa: BLE001
+        if self.request.retries >= MAX_RETRIES:
+            log.error("ioe_freshness_relay_failed", error_code=ERROR_RETRIES_EXHAUSTED)
+            raise
+        raise self.retry(exc=exc, countdown=_backoff(self.request.retries)) from exc
+
+
+@celery_app.task(
     name="workers.tasks.ioe.sweep_scenario_freshness",
     bind=True,
     max_retries=2,
@@ -184,6 +222,7 @@ __all__ = [
     "ERROR_RETRIES_EXHAUSTED",
     "MAX_RETRIES",
     "invalidate_scenarios_for_analysis",
+    "relay_freshness_outbox",
     "invalidate_scenarios_for_tax_year",
     "run_optimization",
     "sweep_scenario_freshness",

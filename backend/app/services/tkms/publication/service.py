@@ -24,6 +24,7 @@ from app.database.models import (
     ValidationReport,
 )
 from app.services.admin.service import AdminService
+from app.services.ioe.freshness_events import FreshnessEvent, emit
 from app.services.tkms.domain.lifecycle import PUBLISHED, SUPERSEDED, RuleLifecycle
 
 
@@ -70,6 +71,13 @@ class PublicationService:
             current.status = SUPERSEDED
             current.superseded_by_version_id = version.id
             await self.s.flush()
+            # Same transaction as the supersession, so the event exists if and
+            # only if the supersession committed.
+            await emit(
+                self.s, FreshnessEvent.RULE_SUPERSEDED,
+                tax_year=version.tax_year,
+                dedupe_key=f"rule_superseded:{current.id}",
+            )
 
         version.status = PUBLISHED
         version.published_at = datetime.now(tz=UTC)
@@ -79,6 +87,14 @@ class PublicationService:
             change_request_id=approved_cr.id,
             published_by=publisher_id,
         ))
+        # A newly published rule changes what every completed result for that
+        # year was evaluated against. Emitted here, inside the publishing
+        # transaction, so it cannot be lost or fire for a rollback.
+        await emit(
+            self.s, FreshnessEvent.RULE_PUBLISHED,
+            tax_year=version.tax_year,
+            dedupe_key=f"rule_published:{version.id}",
+        )
         await self.s.flush()
 
         if reindex:

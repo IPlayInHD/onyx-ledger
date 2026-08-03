@@ -42,6 +42,7 @@ celery_app.conf.task_routes = {
     "workers.tasks.ioe.invalidate_scenarios_for_analysis": {"queue": "ioe_freshness"},
     "workers.tasks.ioe.invalidate_scenarios_for_tax_year": {"queue": "ioe_freshness"},
     "workers.tasks.ioe.sweep_scenario_freshness": {"queue": "ioe_freshness"},
+    "workers.tasks.ioe.relay_freshness_outbox": {"queue": "ioe_freshness"},
 }
 
 celery_app.conf.beat_schedule = {
@@ -52,6 +53,12 @@ celery_app.conf.beat_schedule = {
     "monthly-analytics-roll": {
         "task": "workers.tasks.maintenance.roll_monthly_analytics",
         "schedule": crontab(day_of_month="1", hour="4", minute="0"),
+    },
+    # The NORMAL freshness path: drain the outbox frequently so an
+    # invalidation reaches stored results within a minute of the change.
+    "ioe-freshness-outbox-relay": {
+        "task": "workers.tasks.ioe.relay_freshness_outbox",
+        "schedule": crontab(minute="*"),
     },
     # Fallback sweep only: event-driven invalidation and read-time evaluation
     # are the primary freshness paths. Hourly so nothing lurks for long, bounded

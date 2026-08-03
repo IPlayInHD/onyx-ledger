@@ -50,6 +50,7 @@ from app.services.tax_engine.contracts import (
     Opportunity,
     OpportunityContractV2,
     PortfolioLeverRef,
+    ProjectionAuthorization,
 )
 from app.services.tax_engine.core.condition_eval import eval_group
 from app.services.tax_engine.core.formula_sandbox import evaluate_rpn
@@ -148,6 +149,7 @@ class RulesEvaluatorService:
                     reversibility=outcome.reversibility,
                     shared_resource_codes=tuple(contract["resources"].get(v.id, ())),
                     portfolio_lever_ref=_lever_ref(outcome),
+                    projection=_projection_authorization(outcome),
                 ))
         return opportunities
 
@@ -296,6 +298,22 @@ def _expiry(v: TaxRuleVersion) -> ExpiryInfo:
         expiry_date=v.expiry_date,
         effective_date=v.effective_date,
         is_expiring=v.expiry_date is not None,
+    )
+
+
+def _projection_authorization(outcome: RuleOutcome) -> ProjectionAuthorization | None:
+    """Copy the rule-authored projection metadata verbatim.
+
+    Absence is reported as absence. A rule that says nothing about recurrence
+    authorizes nothing, and the consumer must not read that as permission.
+    """
+    if not outcome.projection_eligibility:
+        return None
+    return ProjectionAuthorization(
+        eligibility=outcome.projection_eligibility,
+        method=outcome.projection_method,
+        maximum_horizon=outcome.maximum_projection_horizon,
+        required_assumption_codes=tuple(outcome.required_assumption_codes or ()),
     )
 
 

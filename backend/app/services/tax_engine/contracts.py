@@ -49,6 +49,12 @@ COST_TYPES = frozenset({
     # expenditure that is actually lost.
     "liquidity_commitment", "asset_transfer", "nonrecoverable_expenditure",
 })
+PROJECTION_ELIGIBILITY = frozenset(
+    {"eligible", "not_eligible", "conditionally_eligible"}
+)
+PROJECTION_METHODS = frozenset(
+    {"flat_recurring", "indexed_recurring", "fixed_term"}
+)
 REVERSIBILITY = frozenset({"reversible", "partially_reversible", "irreversible"})
 DEPENDENCY_TYPES = frozenset({"requires", "precedes", "excludes", "substitutes"})
 DOCUMENT_NECESSITY = frozenset({"required", "recommended", "conditional"})
@@ -114,6 +120,31 @@ class AssumptionRequirement:
 
 
 @dataclass(frozen=True)
+class ProjectionAuthorization:
+    """Whether published legislation permits projecting this opportunity forward.
+
+    Authored as RULE DATA under four-eyes governance. The IOE consumes it
+    verbatim: it never infers that an opportunity recurs, and it never projects
+    further than the rule authorizes.
+    """
+
+    eligibility: str                          # eligible | not_eligible | conditionally_eligible
+    method: str | None = None                 # flat_recurring | indexed_recurring | fixed_term
+    maximum_horizon: int | None = None
+    required_assumption_codes: tuple[str, ...] = ()
+
+    @property
+    def is_authorized(self) -> bool:
+        """Only an explicit, complete authorization permits a projection."""
+        return (
+            self.eligibility in ("eligible", "conditionally_eligible")
+            and self.method is not None
+            and self.maximum_horizon is not None
+            and self.maximum_horizon > 0
+        )
+
+
+@dataclass(frozen=True)
 class PortfolioLeverRef:
     """A reference into the IOE lever registry — NOT a field mapping.
 
@@ -168,6 +199,10 @@ class OpportunityContractV2:
     reversibility: str | None = None
     shared_resource_codes: tuple[str, ...] = ()
     portfolio_lever_ref: PortfolioLeverRef | None = None
+    # Governed projection metadata. None means the rule said nothing,
+    # which is NOT the same as saying the opportunity does not recur —
+    # it means no projection may be generated.
+    projection: ProjectionAuthorization | None = None
 
     @property
     def estimated_impact(self) -> Decimal | None:

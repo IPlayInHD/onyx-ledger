@@ -21,6 +21,7 @@ from app.database.models import (
     Recommendation,
     ReconciliationCheck,
 )
+from app.services.ioe.freshness_events import FreshnessEvent, emit
 from app.services.optimization.service import rank
 from app.services.tax_engine.rules_service import RulesEvaluatorService
 from app.services.tax_engine.service import ENGINE_VERSION, TaxEngineService
@@ -90,5 +91,16 @@ class AnalysisService:
         run.average_rate = result.average_rate
         run.confidence_score = 90 if tie else 50
         run.data_verified = True
+        await self.s.flush()
+
+        # A completed analysis is a new baseline: any scenario or optimization
+        # measured against an older one no longer describes today's position.
+        # Emitted in this transaction so the event and the analysis commit
+        # together.
+        await emit(
+            self.s, FreshnessEvent.ANALYSIS_COMPLETED,
+            user_id=user_id, tax_year=tax_year,
+            dedupe_key=f"analysis_completed:{run.id}",
+        )
         await self.s.flush()
         return run

@@ -226,6 +226,26 @@ class ScenarioFreshnessService:
         )
         return result.rowcount or 0
 
+    async def invalidate_for_user(self, reason: StaleReason) -> int:
+        """Every completed scenario this tenant owns.
+
+        Ordinary RLS applies: the session is scoped to one user, so this can
+        only ever reach that user's rows however it is called.
+        """
+        result = await self.s.execute(
+            update(Scenario)
+            .where(
+                Scenario.workflow_status == "completed",
+                Scenario.freshness_status == FreshnessStatus.CURRENT.value,
+            )
+            .values(
+                freshness_status=FreshnessStatus.STALE.value,
+                stale_reason_code=reason.value,
+                freshness_evaluated_at=datetime.now(tz=UTC),
+            )
+        )
+        return result.rowcount or 0
+
     # ----------------------------------------------------------- scheduled ---
     async def sweep(self, *, limit: int = SWEEP_BATCH_SIZE) -> list[FreshnessTransition]:
         """SCHEDULED path: re-evaluate the least-recently-checked scenarios.

@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
     api_v1_prefix: str = "/api/v1"
+    # Multi-year projections are governed by published rule metadata; the flag
+    # lets the surface be turned off entirely without that looking like "no
+    # rule authorized one".
+    ioe_projections_enabled: bool = True
 
     # --- database (async URL for the app; sync URL for Alembic) ---
     database_url: str = "postgresql+asyncpg://onyx_app_rw@localhost:5432/onyx"
