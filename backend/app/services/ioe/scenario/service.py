@@ -34,6 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import Conflict, DomainError, NotFound
+from app.database.bulk import bulk_insert
 from app.database.models import (
     AnalysisInputSnapshot,
     AnalysisRun,
@@ -350,25 +351,31 @@ class ScenarioService:
             ))
             # The pinned SPEC is written now, before compute: it is what the
             # hash was taken over, so it must exist even if compute fails.
-            for lever in spec.levers:
-                session.add(ScenarioLever(
-                    scenario_id=scenario.id,
-                    apply_order=lever.apply_order,
-                    lever_code=lever.lever_code,
-                    parameters={k: str(v) for k, v in sorted(lever.parameters.items())},
-                ))
-            for assumption in spec.assumptions:
-                session.add(ScenarioAssumption(
-                    scenario_id=scenario.id,
-                    assumption_code=assumption.assumption_code,
-                    value_number=assumption.value_number,
-                    value_text=assumption.value_text,
-                    value_boolean=assumption.value_boolean,
-                    materiality=assumption.materiality,
-                    source=assumption.source,
-                    certainty=assumption.certainty,
-                    affects_eligibility=assumption.affects_eligibility,
-                ))
+            await bulk_insert(session, ScenarioLever, [
+                {
+                    "scenario_id": scenario.id,
+                    "apply_order": lever.apply_order,
+                    "lever_code": lever.lever_code,
+                    "parameters": {
+                        k: str(v) for k, v in sorted(lever.parameters.items())
+                    },
+                }
+                for lever in spec.levers
+            ])
+            await bulk_insert(session, ScenarioAssumption, [
+                {
+                    "scenario_id": scenario.id,
+                    "assumption_code": assumption.assumption_code,
+                    "value_number": assumption.value_number,
+                    "value_text": assumption.value_text,
+                    "value_boolean": assumption.value_boolean,
+                    "materiality": assumption.materiality,
+                    "source": assumption.source,
+                    "certainty": assumption.certainty,
+                    "affects_eligibility": assumption.affects_eligibility,
+                }
+                for assumption in spec.assumptions
+            ])
             await session.flush()
             scenario_id = scenario.id
 
@@ -485,27 +492,32 @@ class ScenarioService:
                 support_cap_reason_code=breakdown.cap_reason_code,
                 affected_rule_versions=[str(v) for v in pinned.pinned_rule_version_ids],
             ))
-            for component in breakdown.components:
-                session.add(ScenarioConfidenceComponent(
-                    scenario_id=scenario_id,
-                    factor_code=component.factor_code.value,
-                    value=component.value, weight=component.weight,
-                    contribution=component.contribution,
-                    reason_code=component.reason_code,
-                ))
+            await bulk_insert(session, ScenarioConfidenceComponent, [
+                {
+                    "scenario_id": scenario_id,
+                    "factor_code": component.factor_code.value,
+                    "value": component.value,
+                    "weight": component.weight,
+                    "contribution": component.contribution,
+                    "reason_code": component.reason_code,
+                }
+                for component in breakdown.components
+            ])
 
             # The applied-change trace records FIELD NAMES and the values the
             # registry produced. It does not copy the user's other financial
             # inputs; those stay in the frozen analysis snapshot.
-            for change in computed["changes"]:
-                session.add(ScenarioInputChange(
-                    scenario_id=scenario_id,
-                    lever_code=change.lever_code,
-                    field=change.field,
-                    old_value=str(change.old_value),
-                    new_value=str(change.new_value),
-                    apply_order=change.apply_order,
-                ))
+            await bulk_insert(session, ScenarioInputChange, [
+                {
+                    "scenario_id": scenario_id,
+                    "lever_code": change.lever_code,
+                    "field": change.field,
+                    "old_value": str(change.old_value),
+                    "new_value": str(change.new_value),
+                    "apply_order": change.apply_order,
+                }
+                for change in computed["changes"]
+            ])
 
             WorkflowStateMachine.assert_transition(
                 WorkflowStatus.RUNNING, WorkflowStatus.COMPLETED

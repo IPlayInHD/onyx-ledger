@@ -26,6 +26,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.bulk import bulk_insert
 from app.database.models import (
     PortfolioEvaluationStep as StepRow,
 )
@@ -149,67 +150,81 @@ class PortfolioEvaluationService:
         )
         session.add(row)
         await session.flush()
+        portfolio_id = row.id
 
-        for member in portfolio.members:
-            candidate_id = candidate_ids.get(member.candidate_key)
-            if candidate_id is None:            # never invent an association
-                continue
-            session.add(MemberRow(
-                portfolio_id=row.id,
-                candidate_id=candidate_id,
-                apply_order=member.apply_order,
-                incremental_benefit=member.incremental_benefit,
-                resource_allocations={
+        members = [
+            {
+                "portfolio_id": portfolio_id,
+                "candidate_id": candidate_ids[member.candidate_key],
+                "apply_order": member.apply_order,
+                "incremental_benefit": member.incremental_benefit,
+                "resource_allocations": {
                     code: str(amount) for code, amount in member.resource_allocations
                 },
-            ))
+            }
+            for member in portfolio.members
+            if member.candidate_key in candidate_ids   # never invent an association
+        ]
 
-        for entry in portfolio.ledger:
-            session.add(LedgerRow(
-                portfolio_id=row.id,
-                resource_code=entry.resource_code,
-                capacity=entry.capacity,
-                allocated=entry.allocated,
-                remaining=entry.remaining,
-            ))
+        ledger = [
+            {
+                "portfolio_id": portfolio_id,
+                "resource_code": entry.resource_code,
+                "capacity": entry.capacity,
+                "allocated": entry.allocated,
+                "remaining": entry.remaining,
+            }
+            for entry in portfolio.ledger
+        ]
 
         # The trace records objective values and codes only. The user's financial
         # inputs already live in the frozen analysis snapshot and are deliberately
         # not duplicated here.
-        for step in portfolio.trace:
-            session.add(StepRow(
-                portfolio_id=row.id,
-                step_index=step.step_index,
-                stage=step.stage,
-                candidate_id=candidate_ids.get(step.candidate_key)
-                if step.candidate_key else None,
-                apply_order=step.apply_order,
-                objective_value=step.objective_value,
-                objective_delta=step.objective_delta,
-                accepted=step.accepted,
-                reason_code=step.reason_code,
-            ))
+        trace = [
+            {
+                "portfolio_id": portfolio_id,
+                "step_index": step.step_index,
+                "stage": step.stage,
+                "candidate_id": (
+                    candidate_ids.get(step.candidate_key) if step.candidate_key else None
+                ),
+                "apply_order": step.apply_order,
+                "objective_value": step.objective_value,
+                "objective_delta": step.objective_delta,
+                "accepted": step.accepted,
+                "reason_code": step.reason_code,
+            }
+            for step in portfolio.trace
+        ]
 
         # Excluded candidates are retained with a structured reason and what
         # would change the answer — "not recommended" is itself a result.
-        for exclusion in portfolio.exclusions:
-            candidate_id = candidate_ids.get(exclusion.candidate_key)
-            if candidate_id is None:
-                continue
-            session.add(ExclusionRow(
-                portfolio_id=row.id,
-                candidate_id=candidate_id,
-                membership=exclusion.membership.value,
-                reason_code=exclusion.reason_code,
-                blocking_candidate_id=candidate_ids.get(
-                    exclusion.blocking_candidate_key
-                ) if exclusion.blocking_candidate_key else None,
-                shared_resource_code=exclusion.shared_resource_code,
-                resolution_options=list(exclusion.resolution_options),
-            ))
+        exclusions = [
+            {
+                "portfolio_id": portfolio_id,
+                "candidate_id": candidate_ids[exclusion.candidate_key],
+                "membership": exclusion.membership.value,
+                "reason_code": exclusion.reason_code,
+                "blocking_candidate_id": (
+                    candidate_ids.get(exclusion.blocking_candidate_key)
+                    if exclusion.blocking_candidate_key else None
+                ),
+                "shared_resource_code": exclusion.shared_resource_code,
+                "resolution_options": list(exclusion.resolution_options),
+            }
+            for exclusion in portfolio.exclusions
+            if exclusion.candidate_key in candidate_ids
+        ]
+
+        # One statement per table. Every row belongs to the caller's transaction,
+        # so the portfolio and its complete evidence still commit together.
+        await bulk_insert(session, MemberRow, members)
+        await bulk_insert(session, LedgerRow, ledger)
+        await bulk_insert(session, StepRow, trace)
+        await bulk_insert(session, ExclusionRow, exclusions)
 
         await session.flush()
-        return row.id
+        return portfolio_id
 
 
 __all__ = [

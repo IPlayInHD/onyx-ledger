@@ -92,29 +92,39 @@ class RulesEvaluatorService:
             return []
 
         # Evaluate gates first, then load contract data only for matched versions.
+        # Every load below is keyed by the WHOLE version set: reading a condition
+        # tree, a rule, an outcome, a citation or an impact formula per version
+        # made evaluation cost a round trip per published rule.
+        trees = await self._load_condition_trees([v.id for v in versions])
         matched: list[TaxRuleVersion] = []
         for v in versions:
-            tree = await self._load_condition_tree(v.id)
+            tree = trees.get(v.id)
             if tree is not None and not eval_group(tree, facts):
                 continue
             matched.append(v)
         if not matched:
             return []
 
-        contract = await self._load_contract_data([v.id for v in matched])
+        matched_ids = [v.id for v in matched]
+        contract = await self._load_contract_data(matched_ids)
         jurisdictions = await self._load_jurisdictions(matched)
+        rules = await self._load_rules(matched)
+        outcomes_by_version = await self._load_outcomes(matched_ids)
+        citations_by_version = await self._load_citations(matched)
+        impacts = await self._load_impacts(
+            [o.impact_formula_id for group in outcomes_by_version.values() for o in group],
+            facts,
+        )
 
         opportunities: list[OpportunityContractV2] = []
         for v in matched:
-            rule = await self.s.get(TaxRule, v.tax_rule_id)
+            rule = rules.get(v.tax_rule_id)
             basis_codes = tuple(v.eligibility_basis_codes or ())
             documents = tuple(contract["documents"].get(v.id, ()))
-            citations = await self._citations(v)
+            citations = citations_by_version.get(v.id, ())
 
-            for outcome in await self.s.scalars(
-                select(RuleOutcome).where(RuleOutcome.rule_version_id == v.id)
-            ):
-                impact = await self._impact(outcome.impact_formula_id, facts)
+            for outcome in outcomes_by_version.get(v.id, ()):
+                impact = impacts.get(outcome.impact_formula_id)
                 opportunities.append(OpportunityContractV2(
                     rule_version_id=v.id,
                     opportunity_code=(rule.code.lower() if rule else "opportunity"),
@@ -215,66 +225,157 @@ class RulesEvaluatorService:
         )
         return {rule_id: code for rule_id, code in rows.all()}
 
-    async def _citations(self, v: TaxRuleVersion) -> tuple[CitationSpec, ...]:
-        if v.legislation_reference_id is None:
-            return ()
-        ref = await self.s.get(LegislationReference, v.legislation_reference_id)
-        if ref is None:
-            return ()
-        return (CitationSpec(
-            citation_text=ref.citation,
-            legislation_reference_id=ref.id,
-            source_url=ref.url or v.source_url,
-        ),)
+    async def _load_rules(self, versions: list[TaxRuleVersion]) -> dict[object, TaxRule]:
+        rule_ids = {v.tax_rule_id for v in versions}
+        if not rule_ids:
+            return {}
+        return {
+            r.id: r for r in
+            await self.s.scalars(select(TaxRule).where(TaxRule.id.in_(rule_ids)))
+        }
+
+    async def _load_outcomes(self, version_ids: list) -> dict[object, list[RuleOutcome]]:
+        by_version: dict[object, list[RuleOutcome]] = defaultdict(list)
+        if not version_ids:
+            return by_version
+        for o in await self.s.scalars(
+            select(RuleOutcome)
+            .where(RuleOutcome.rule_version_id.in_(version_ids))
+            .order_by(RuleOutcome.rule_version_id, RuleOutcome.priority, RuleOutcome.id)
+        ):
+            by_version[o.rule_version_id].append(o)
+        return by_version
+
+    async def _load_citations(
+        self, versions: list[TaxRuleVersion]
+    ) -> dict[object, tuple[CitationSpec, ...]]:
+        reference_ids = {
+            v.legislation_reference_id for v in versions
+            if v.legislation_reference_id is not None
+        }
+        if not reference_ids:
+            return {}
+        refs = {
+            r.id: r for r in await self.s.scalars(
+                select(LegislationReference).where(
+                    LegislationReference.id.in_(reference_ids)
+                )
+            )
+        }
+        out: dict[object, tuple[CitationSpec, ...]] = {}
+        for v in versions:
+            if v.legislation_reference_id is None:
+                continue
+            ref = refs.get(v.legislation_reference_id)
+            if ref is None:
+                continue
+            out[v.id] = (CitationSpec(
+                citation_text=ref.citation,
+                legislation_reference_id=ref.id,
+                source_url=ref.url or v.source_url,
+            ),)
+        return out
 
     # ---- unchanged evaluation internals -------------------------------------
-    async def _load_condition_tree(self, version_id) -> dict | None:
+    async def _load_condition_trees(self, version_ids: list) -> dict[object, dict]:
+        """Every version's condition tree in two queries, not two per version.
+
+        Trees are assembled per version exactly as before; only the loading
+        changed. A version with no groups is absent from the result, which the
+        caller reads as "no gate" — the same meaning the per-version loader's
+        `None` carried.
+        """
+        if not version_ids:
+            return {}
         groups = list(await self.s.scalars(
-            select(RuleConditionGroup).where(RuleConditionGroup.rule_version_id == version_id)
+            select(RuleConditionGroup).where(
+                RuleConditionGroup.rule_version_id.in_(version_ids)
+            )
         ))
         if not groups:
-            return None
-        by_id = {g.id: {"logical_op": g.logical_op, "conditions": [], "groups": [],
-                        "_parent": g.parent_group_id} for g in groups}
-        for g in groups:
-            for c in await self.s.scalars(
-                select(RuleCondition).where(RuleCondition.group_id == g.id)
-            ):
-                by_id[g.id]["conditions"].append({
-                    "fact_key": c.fact_key, "operator": c.operator,
-                    "value_type": c.value_type, "value_number": c.value_number,
-                    "value_number_high": c.value_number_high, "value_text": c.value_text,
-                    "value_boolean": c.value_boolean, "value_set": None,
-                })
-        root = None
-        for node in by_id.values():
-            parent = node.pop("_parent")
-            if parent is None:
-                root = node
-            else:
-                by_id[parent]["groups"].append(node)
-        return root
+            return {}
 
-    async def _impact(self, formula_id, facts: dict) -> Decimal | None:
-        if not formula_id:
-            return None
-        formula = await self.s.get(CalcFormula, formula_id)
-        if not formula:
-            return None
-        variables: dict[str, Decimal] = {}
-        for fi in await self.s.scalars(
-            select(CalcFormulaInput).where(CalcFormulaInput.formula_id == formula_id)
+        leaves_by_group: dict[object, list] = defaultdict(list)
+        for c in await self.s.scalars(
+            select(RuleCondition).where(
+                RuleCondition.group_id.in_([g.id for g in groups])
+            )
         ):
-            if fi.fact_key is not None and fi.fact_key in facts and facts[fi.fact_key] is not None:
-                variables[fi.param_name] = Decimal(str(facts[fi.fact_key]))
-            elif fi.literal_value is not None:
-                variables[fi.param_name] = Decimal(str(fi.literal_value))
-            else:
-                variables[fi.param_name] = Decimal(0)
-        try:
-            return evaluate_rpn(formula.expression, variables).quantize(Decimal("0.01"))
-        except Exception:  # noqa: BLE001
-            return None
+            leaves_by_group[c.group_id].append(c)
+
+        groups_by_version: dict[object, list] = defaultdict(list)
+        for g in groups:
+            groups_by_version[g.rule_version_id].append(g)
+
+        trees: dict[object, dict] = {}
+        for version_id, version_groups in groups_by_version.items():
+            by_id = {
+                g.id: {"logical_op": g.logical_op, "conditions": [], "groups": [],
+                       "_parent": g.parent_group_id}
+                for g in version_groups
+            }
+            for g in version_groups:
+                for c in leaves_by_group.get(g.id, ()):
+                    by_id[g.id]["conditions"].append({
+                        "fact_key": c.fact_key, "operator": c.operator,
+                        "value_type": c.value_type, "value_number": c.value_number,
+                        "value_number_high": c.value_number_high,
+                        "value_text": c.value_text,
+                        "value_boolean": c.value_boolean, "value_set": None,
+                    })
+            root = None
+            for node in by_id.values():
+                parent = node.pop("_parent")
+                if parent is None:
+                    root = node
+                elif parent in by_id:
+                    by_id[parent]["groups"].append(node)
+            if root is not None:
+                trees[version_id] = root
+        return trees
+
+    async def _load_impacts(self, formula_ids: list, facts: dict) -> dict[object, Decimal]:
+        """Evaluate every referenced formula once, in two queries.
+
+        The formula and its inputs are rule data and the fact map is fixed for
+        this evaluation, so the same formula cannot produce two different impacts
+        within one call — computing it per outcome was pure repetition.
+        """
+        wanted = {fid for fid in formula_ids if fid}
+        if not wanted:
+            return {}
+        formulas = {
+            f.id: f for f in await self.s.scalars(
+                select(CalcFormula).where(CalcFormula.id.in_(wanted))
+            )
+        }
+        inputs_by_formula: dict[object, list] = defaultdict(list)
+        for fi in await self.s.scalars(
+            select(CalcFormulaInput).where(CalcFormulaInput.formula_id.in_(wanted))
+        ):
+            inputs_by_formula[fi.formula_id].append(fi)
+
+        out: dict[object, Decimal] = {}
+        for formula_id, formula in formulas.items():
+            variables: dict[str, Decimal] = {}
+            for fi in inputs_by_formula.get(formula_id, ()):
+                if (
+                    fi.fact_key is not None
+                    and fi.fact_key in facts
+                    and facts[fi.fact_key] is not None
+                ):
+                    variables[fi.param_name] = Decimal(str(facts[fi.fact_key]))
+                elif fi.literal_value is not None:
+                    variables[fi.param_name] = Decimal(str(fi.literal_value))
+                else:
+                    variables[fi.param_name] = Decimal(0)
+            try:
+                out[formula_id] = evaluate_rpn(
+                    formula.expression, variables
+                ).quantize(Decimal("0.01"))
+            except Exception:  # noqa: BLE001
+                continue
+        return out
 
 
 # ---- rules-layer determinations (kept here, never in a consumer) ------------

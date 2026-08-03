@@ -35,14 +35,24 @@ async def unit_of_work(
     """Transactional scope with RLS context set for the acting principal."""
     async with SessionLocal() as session:
         async with session.begin():
-            # set_config(..., is_local=true) scopes the GUC to this transaction
-            await session.execute(
-                text("SELECT set_config('app.actor_type', :atype, true)"),
-                {"atype": actor_type},
-            )
+            # set_config(..., is_local=true) scopes the GUC to this transaction.
+            #
+            # Both GUCs go in ONE statement when there is a user: two statements
+            # meant two round trips on every transaction, and a request that
+            # opens three transactions paid six. `app.user_id` is still left
+            # UNSET when there is no user — deny-by-default depends on its
+            # absence, so it must never be set to an empty string instead.
             if user_id is not None:
                 await session.execute(
-                    text("SELECT set_config('app.user_id', :uid, true)"),
-                    {"uid": str(user_id)},
+                    text(
+                        "SELECT set_config('app.actor_type', :atype, true),"
+                        "       set_config('app.user_id', :uid, true)"
+                    ),
+                    {"atype": actor_type, "uid": str(user_id)},
+                )
+            else:
+                await session.execute(
+                    text("SELECT set_config('app.actor_type', :atype, true)"),
+                    {"atype": actor_type},
                 )
             yield session

@@ -31,6 +31,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import Conflict, DomainError, NotFound
+from app.database.base import uuid7
+from app.database.bulk import bulk_insert
 from app.database.models import (
     AnalysisInputSnapshot,
     AnalysisRun,
@@ -452,110 +454,146 @@ class OptimizationOrchestrator:
             if run is None:
                 raise NotFound("Optimization run not found")
 
-            session.add(RunRuleSnapshot(
-                run_id=run_id, snapshot_id=spec.rule_snapshot_id, replay_status="verified",
-            ))
-            for version_id in spec.pinned_rule_version_ids:
-                session.add(RunRuleVersion(run_id=run_id, tax_rule_version_id=version_id))
+            # Candidate ids are generated here rather than read back per row.
+            # Children reference their parent, so the alternative is one
+            # `INSERT ... RETURNING` round trip per candidate — the fan-out this
+            # is removing. `uuid7()` produces the same value shape as the column
+            # default, and the ordering below is still the domain's.
+            candidate_ids = [uuid7() for _ in candidates]
+            key_to_id: dict[str, uuid.UUID] = {
+                candidate.candidate_key: candidate_id
+                for candidate, candidate_id in zip(candidates, candidate_ids, strict=True)
+            }
 
-            key_to_row: dict[str, CandidateRow] = {}
-            for candidate in candidates:
-                row = CandidateRow(
-                    run_id=run_id,
-                    opportunity_code=candidate.opportunity_code,
-                    tax_rule_version_id=(
+            candidate_rows: list[dict] = []
+            effect_rows: list[dict] = []
+            cost_rows: list[dict] = []
+            score_rows: list[dict] = []
+            support_rows: list[dict] = []
+
+            for candidate, candidate_id in zip(candidates, candidate_ids, strict=True):
+                candidate_rows.append({
+                    "id": candidate_id,
+                    "run_id": run_id,
+                    "opportunity_code": candidate.opportunity_code,
+                    "tax_rule_version_id": (
                         uuid.UUID(candidate.rule_version_id)
                         if candidate.rule_version_id else None
                     ),
-                    eligibility_status=candidate.eligibility_status.value,
-                    calculation_basis=(
+                    "eligibility_status": candidate.eligibility_status.value,
+                    "calculation_basis": (
                         candidate.calculation_basis.value
                         if candidate.calculation_basis else None
                     ),
-                    evidence_status=candidate.evidence_status.value,
-                    portfolio_membership=candidate.portfolio_membership.value,
-                    exclusion_reason_code=candidate.exclusion_reason_code,
-                    candidate_rank=candidate.rank,
-                    recommendation_score=candidate.score.overall if candidate.score else None,
+                    "evidence_status": candidate.evidence_status.value,
+                    "portfolio_membership": candidate.portfolio_membership.value,
+                    "exclusion_reason_code": candidate.exclusion_reason_code,
+                    "candidate_rank": candidate.rank,
+                    "recommendation_score": (
+                        candidate.score.overall if candidate.score else None
+                    ),
                     # five-stage support score (migration 0029); confidence_score
                     # is derived from display_support_score by DB trigger
-                    raw_support_score=candidate.confidence.raw_support_score,
-                    assumption_adjusted_score=candidate.confidence.assumption_adjusted_score,
-                    display_support_score=candidate.confidence.display_support_score,
-                    support_cap_applied=candidate.confidence.cap_applied,
-                    support_cap_reason_code=candidate.confidence.cap_reason_code,
+                    "raw_support_score": candidate.confidence.raw_support_score,
+                    "assumption_adjusted_score":
+                        candidate.confidence.assumption_adjusted_score,
+                    "display_support_score": candidate.confidence.display_support_score,
+                    "support_cap_applied": candidate.confidence.cap_applied,
+                    "support_cap_reason_code": candidate.confidence.cap_reason_code,
                     # eligibility that earlier actions unsettled, left visible
-                    requires_re_evaluation=(
+                    "requires_re_evaluation": (
                         candidate.portfolio_membership
                         is PortfolioMembership.REQUIRES_RE_EVALUATION
                     ),
-                    re_evaluation_reason_code=(
+                    "re_evaluation_reason_code": (
                         candidate.exclusion_reason_code
                         if candidate.portfolio_membership
                         is PortfolioMembership.REQUIRES_RE_EVALUATION else None
                     ),
-                )
-                session.add(row)
-                await session.flush()
-                key_to_row[candidate.candidate_key] = row
+                })
 
                 # The economics behind every displayed figure, kept auditable.
                 for effect in candidate.economic_effects:
-                    session.add(EconomicEffectRow(
-                        candidate_id=row.id,
-                        effect_type=effect.effect_type.value,
-                        amount=effect.amount,
-                        calculation_basis=effect.calculation_basis.value,
-                        tax_year=effect.tax_year,
-                        horizon_years=effect.horizon_years,
-                        is_permanent=effect.is_permanent,
-                        reversibility=(
+                    effect_rows.append({
+                        "candidate_id": candidate_id,
+                        "effect_type": effect.effect_type.value,
+                        "amount": effect.amount,
+                        "calculation_basis": effect.calculation_basis.value,
+                        "tax_year": effect.tax_year,
+                        "horizon_years": effect.horizon_years,
+                        "is_permanent": effect.is_permanent,
+                        "reversibility": (
                             effect.reversibility.value if effect.reversibility else None
                         ),
-                    ))
+                    })
                 for cost in candidate.costs:
-                    session.add(CostRow(
-                        candidate_id=row.id,
-                        cost_type=cost.cost_type.value,
-                        amount=cost.amount,
-                        timing=cost.timing,
+                    cost_rows.append({
+                        "candidate_id": candidate_id,
+                        "cost_type": cost.cost_type.value,
+                        "amount": cost.amount,
+                        "timing": cost.timing,
                         # what the RULE said, kept beside what it resolved to
-                        authored_cost_type=(
+                        "authored_cost_type": (
                             cost.authored_cost_type.value
                             if cost.authored_cost_type else None
                         ),
-                        cost_type_source=cost.cost_type_source,
-                        taxonomy_version=cost.taxonomy_version,
-                    ))
-
+                        "cost_type_source": cost.cost_type_source,
+                        "taxonomy_version": cost.taxonomy_version,
+                    })
                 for comp in candidate.score.components if candidate.score else ():
-                    session.add(ScoreComponentRow(
-                        candidate_id=row.id, factor_code=comp.factor_code.value,
-                        raw_value=comp.raw_value, normalized_value=comp.normalized_value,
-                        weight=comp.weight, contribution=comp.contribution,
-                    ))
+                    score_rows.append({
+                        "candidate_id": candidate_id,
+                        "factor_code": comp.factor_code.value,
+                        "raw_value": comp.raw_value,
+                        "normalized_value": comp.normalized_value,
+                        "weight": comp.weight,
+                        "contribution": comp.contribution,
+                    })
                 for comp in candidate.confidence.components:
-                    session.add(ConfidenceComponentRow(
-                        candidate_id=row.id, factor_code=comp.factor_code.value,
-                        value=comp.value, weight=comp.weight,
-                        contribution=comp.contribution, reason_code=comp.reason_code,
-                    ))
+                    support_rows.append({
+                        "candidate_id": candidate_id,
+                        "factor_code": comp.factor_code.value,
+                        "value": comp.value,
+                        "weight": comp.weight,
+                        "contribution": comp.contribution,
+                        "reason_code": comp.reason_code,
+                    })
 
+            relationship_rows: list[dict] = []
             for edge in relationships:
-                source, target = key_to_row.get(edge.source_key), key_to_row.get(edge.target_key)
-                if source is None or target is None:
+                source_id = key_to_id.get(edge.source_key)
+                target_id = key_to_id.get(edge.target_key)
+                if source_id is None or target_id is None:
                     continue
-                session.add(RelationshipRow(
-                    run_id=run_id,
-                    source_candidate_id=source.id, target_candidate_id=target.id,
-                    relationship_type=edge.relationship_type.value,
-                    shared_resource_code=edge.shared_resource_code,
-                    maximum_shared_amount=edge.maximum_shared_amount,
-                    measured_delta=edge.measured_delta,
-                    explanation_code=edge.explanation_code,
-                    derivation_source=edge.derivation_source.value,
-                    resolution_options=list(edge.resolution_options),
-                ))
+                relationship_rows.append({
+                    "run_id": run_id,
+                    "source_candidate_id": source_id,
+                    "target_candidate_id": target_id,
+                    "relationship_type": edge.relationship_type.value,
+                    "shared_resource_code": edge.shared_resource_code,
+                    "maximum_shared_amount": edge.maximum_shared_amount,
+                    "measured_delta": edge.measured_delta,
+                    "explanation_code": edge.explanation_code,
+                    "derivation_source": edge.derivation_source.value,
+                    "resolution_options": list(edge.resolution_options),
+                })
+
+            # Parents before children, so every foreign key resolves. The whole
+            # set is one atomic unit: a failure anywhere leaves no evidence.
+            await bulk_insert(session, RunRuleSnapshot, [{
+                "run_id": run_id, "snapshot_id": spec.rule_snapshot_id,
+                "replay_status": "verified",
+            }])
+            await bulk_insert(session, RunRuleVersion, [
+                {"run_id": run_id, "tax_rule_version_id": version_id}
+                for version_id in spec.pinned_rule_version_ids
+            ])
+            await bulk_insert(session, CandidateRow, candidate_rows)
+            await bulk_insert(session, EconomicEffectRow, effect_rows)
+            await bulk_insert(session, CostRow, cost_rows)
+            await bulk_insert(session, ScoreComponentRow, score_rows)
+            await bulk_insert(session, ConfidenceComponentRow, support_rows)
+            await bulk_insert(session, RelationshipRow, relationship_rows)
 
             await self._persist_projections(
                 session, run_id, spec, candidates,
@@ -564,8 +602,7 @@ class OptimizationOrchestrator:
 
             if portfolio is not None:
                 await PortfolioEvaluationService().persist(
-                    session, run_id, portfolio,
-                    {key: row.id for key, row in key_to_row.items()},
+                    session, run_id, portfolio, key_to_id,
                 )
 
             WorkflowStateMachine.assert_transition(
@@ -602,7 +639,7 @@ class OptimizationOrchestrator:
         supplied = frozenset(
             a.get("assumption_code", "") for a in (spec.assumption_set or [])
         )
-        written = 0
+        rows: list[dict] = []
         for candidate in candidates:
             authorization, rule_version_id = authorizations.get(
                 candidate.candidate_key, (None, None)
@@ -625,19 +662,18 @@ class OptimizationOrchestrator:
                     # one-off; authorizing does not make it recurrent
                     continue
                 for year in projection.years:
-                    session.add(MultiYearProjectionRow(
-                        run_id=run_id,
-                        horizon_year=year.horizon_year,
-                        projected_amount=year.amount,
-                        effect_type=year.effect_type,
-                        calculation_basis="projection_estimate",
-                        is_indexation_known=year.is_indexation_known,
-                        projection_method=decision.method,
-                        methodology_version=PROJECTION_METHODOLOGY_VERSION,
-                        authorizing_rule_version_id=rule_version_id,
-                    ))
-                    written += 1
-        return written
+                    rows.append({
+                        "run_id": run_id,
+                        "horizon_year": year.horizon_year,
+                        "projected_amount": year.amount,
+                        "effect_type": year.effect_type,
+                        "calculation_basis": "projection_estimate",
+                        "is_indexation_known": year.is_indexation_known,
+                        "projection_method": decision.method,
+                        "methodology_version": PROJECTION_METHODOLOGY_VERSION,
+                        "authorizing_rule_version_id": rule_version_id,
+                    })
+        return await bulk_insert(session, MultiYearProjectionRow, rows)
 
     # ---------------------------------------------------------------- TX-3 ---
     async def _fail(self, run_id: uuid.UUID, error_code: str) -> None:

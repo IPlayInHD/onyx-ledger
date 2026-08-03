@@ -17,12 +17,14 @@ run count.
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.bulk import bulk_insert
 from app.database.models import (
     CalcConstant,
     CalcFormula,
@@ -104,15 +106,19 @@ class RuleSnapshotService:
                 )
                 self.s.add(snapshot)
                 await self.s.flush()
-                for a in artifacts:
-                    self.s.add(RuleSnapshotArtifact(
-                        snapshot_id=snapshot.id,
-                        artifact_kind=a.artifact_kind,
-                        artifact_id=a.artifact_id,
-                        artifact_key=a.artifact_key,
-                        content_hash=a.content_hash,
-                        content=a.content if a.artifact_kind in MATERIALIZED_KINDS else None,
-                    ))
+                await bulk_insert(self.s, RuleSnapshotArtifact, [
+                    {
+                        "snapshot_id": snapshot.id,
+                        "artifact_kind": a.artifact_kind,
+                        "artifact_id": a.artifact_id,
+                        "artifact_key": a.artifact_key,
+                        "content_hash": a.content_hash,
+                        "content": (
+                            a.content if a.artifact_kind in MATERIALIZED_KINDS else None
+                        ),
+                    }
+                    for a in artifacts
+                ])
                 await self.s.flush()
                 snapshot_id = snapshot.id
         except IntegrityError:
@@ -223,13 +229,19 @@ class RuleSnapshotService:
         formula_ids = [v.formula_id for v in versions if v.formula_id]
         if not formula_ids:
             return []
+        # One query for every formula's inputs, grouped in memory. Reading them
+        # per formula made snapshot capture cost a round trip per rule version.
+        inputs_by_formula: dict[uuid.UUID, list] = defaultdict(list)
+        for i in await self.s.scalars(
+            select(CalcFormulaInput).where(CalcFormulaInput.formula_id.in_(formula_ids))
+        ):
+            inputs_by_formula[i.formula_id].append(i)
+
         out: list[SnapshotArtifact] = []
         for f in await self.s.scalars(
             select(CalcFormula).where(CalcFormula.id.in_(formula_ids))
         ):
-            inputs = list(await self.s.scalars(
-                select(CalcFormulaInput).where(CalcFormulaInput.formula_id == f.id)
-            ))
+            inputs = inputs_by_formula.get(f.id, [])
             out.append(SnapshotArtifact(
                 artifact_kind="calc_formula", artifact_id=f.id, artifact_key=f.code,
                 content={
@@ -251,11 +263,20 @@ class RuleSnapshotService:
                 RuleConditionGroup.rule_version_id.in_(version_ids)
             )
         ))
+        # Same shape as the formula inputs: all leaves in one query, grouped in
+        # memory, rather than a round trip per condition group.
+        leaves_by_group: dict[uuid.UUID, list] = defaultdict(list)
+        if groups:
+            for x in await self.s.scalars(
+                select(RuleCondition).where(
+                    RuleCondition.group_id.in_([g.id for g in groups])
+                )
+            ):
+                leaves_by_group[x.group_id].append(x)
+
         out: list[SnapshotArtifact] = []
         for g in groups:
-            leaves = list(await self.s.scalars(
-                select(RuleCondition).where(RuleCondition.group_id == g.id)
-            ))
+            leaves = leaves_by_group.get(g.id, [])
             out.append(SnapshotArtifact(
                 artifact_kind="rule_condition_group", artifact_id=g.id,
                 artifact_key=str(g.id),
