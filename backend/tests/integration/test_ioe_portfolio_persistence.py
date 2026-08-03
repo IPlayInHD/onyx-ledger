@@ -178,19 +178,21 @@ def _suffix() -> str:
 @pytest.mark.asyncio
 async def test_portfolio_is_persisted_with_its_pinned_objective_and_three_values():
     uid, analysis_id = await _user_with_income()
-    await _publish_lever_rule(
+    versions = [await _publish_lever_rule(
         f"P4RRSP_{_suffix()}", lever_code="INCREASE_RRSP_DEDUCTION", amount="8000",
-    )
+    )]
 
     outcome = await OptimizationOrchestrator(uid).generate(analysis_id)
     assert outcome.workflow_status == "completed"
-    assert outcome.portfolio_member_count == 1
+    assert outcome.portfolio_member_count >= 1
 
     async with unit_of_work(user_id=uid, actor_type="user") as s:
         pf = await s.scalar(
             select(StrategyPortfolio).where(StrategyPortfolio.run_id == outcome.run_id)
         )
         assert pf is not None
+        # published rules accumulate across tests, so scope to this test's rule
+        assert len(await _members_for(s, pf.id, versions)) == 1
 
         # the objective is PINNED by code and version, not implied
         assert pf.portfolio_objective_code == savings_domain.PORTFOLIO_OBJECTIVE_CODE.value
