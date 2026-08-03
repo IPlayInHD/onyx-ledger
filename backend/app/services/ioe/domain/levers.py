@@ -19,7 +19,12 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-LEVER_REGISTRY_VERSION = "1.0.0"
+from app.services.ioe.domain.enums import CostType
+
+# 1.1.0 — levers declare `commitment_class`, which resolves the ambiguous legacy
+# cost value. The registry now affects stored amounts, so it is versioned and
+# carried in the run version manifest.
+LEVER_REGISTRY_VERSION = "1.1.0"
 
 
 class LeverNotRegistered(KeyError):
@@ -60,6 +65,11 @@ class LeverSpec:
     # lever to those jurisdictions / tax years.
     jurisdictions: tuple[str, ...] = ()
     tax_years: tuple[int, ...] = ()
+    # What the money DOES under this lever. Consulted ONLY to resolve the
+    # ambiguous legacy cost value `required_cash_contribution`, because the
+    # registry is already the pinned, reviewable authority for what an action
+    # does. None means 'no declaration', never 'no cost'.
+    commitment_class: CostType | None = None
 
     def applies_to(self, *, jurisdiction: str | None, tax_year: int | None) -> bool:
         if self.jurisdictions and jurisdiction is not None:
@@ -95,42 +105,51 @@ _LEVERS: dict[str, LeverSpec] = {
             description="Contribute to an RRSP and deduct it this year",
             writable_fields=("rrsp_deduction",), direction="increase",
             parameters=(_AMOUNT,), shared_resource_code="RRSP_ROOM", effort_rating=2,
+            # the contribution stays the user's money, inside a registered plan
+            commitment_class=CostType.ASSET_TRANSFER,
         ),
         LeverSpec(
             code="INCREASE_FHSA_DEDUCTION",
             description="Contribute to an FHSA and deduct it this year",
             writable_fields=("fhsa_deduction",), direction="increase",
             parameters=(_AMOUNT,), shared_resource_code="FHSA_ROOM", effort_rating=2,
+            commitment_class=CostType.ASSET_TRANSFER,
         ),
         LeverSpec(
             code="INCREASE_DONATIONS",
             description="Make an eligible charitable donation",
             writable_fields=("donations",), direction="increase",
             parameters=(_AMOUNT,), shared_resource_code="DONATION_POOL", effort_rating=1,
+            # a donation leaves for good
+            commitment_class=CostType.NONRECOVERABLE_EXPENDITURE,
         ),
         LeverSpec(
             code="INCREASE_MEDICAL_EXPENSES",
             description="Claim additional eligible medical expenses",
             writable_fields=("medical_expenses",), direction="increase",
             parameters=(_AMOUNT,), shared_resource_code="MEDICAL_POOL", effort_rating=1,
+            commitment_class=CostType.NONRECOVERABLE_EXPENDITURE,
         ),
         LeverSpec(
             code="INCREASE_CHILDCARE",
             description="Claim additional eligible child-care expenses",
             writable_fields=("child_care",), direction="increase",
             parameters=(_AMOUNT,), shared_resource_code="CHILDCARE_POOL", effort_rating=1,
+            commitment_class=CostType.NONRECOVERABLE_EXPENDITURE,
         ),
         LeverSpec(
             code="INCREASE_TUITION",
             description="Claim eligible tuition",
             writable_fields=("tuition",), direction="increase",
             parameters=(_AMOUNT,), shared_resource_code="TUITION_POOL", effort_rating=1,
+            commitment_class=CostType.NONRECOVERABLE_EXPENDITURE,
         ),
         LeverSpec(
             code="INCREASE_BUSINESS_EXPENSES",
             description="Claim additional eligible self-employment expenses",
             writable_fields=("self_employment_expenses",), direction="increase",
             parameters=(_AMOUNT,), effort_rating=3,
+            commitment_class=CostType.NONRECOVERABLE_EXPENDITURE,
         ),
         LeverSpec(
             code="REALIZE_CAPITAL_GAINS",
@@ -193,6 +212,17 @@ _LEVERS: dict[str, LeverSpec] = {
 
 def registry_version() -> str:
     return LEVER_REGISTRY_VERSION
+
+
+def commitment_class(lever_code: str | None) -> CostType | None:
+    """What the money does under this lever, or None if the registry is silent.
+
+    An unregistered code returns None rather than raising: this is consulted
+    while classifying a cost, and a missing declaration must fall back to the
+    conservative default rather than fail the run.
+    """
+    spec = _LEVERS.get(lever_code) if lever_code else None
+    return spec.commitment_class if spec else None
 
 
 def get(lever_code: str) -> LeverSpec:

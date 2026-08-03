@@ -41,6 +41,12 @@ from app.database.models import (
     WeightConfig,
 )
 from app.database.models import (
+    CandidateCost as CostRow,
+)
+from app.database.models import (
+    CandidateEconomicEffect as EconomicEffectRow,
+)
+from app.database.models import (
     ConfidenceComponent as ConfidenceComponentRow,
 )
 from app.database.models import (
@@ -55,16 +61,26 @@ from app.database.models import (
 from app.database.session import unit_of_work
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import confidence as support
+from app.services.ioe.domain import cost_taxonomy, scoring
 from app.services.ioe.domain import levers as lever_registry
 from app.services.ioe.domain import portfolio as assembly
 from app.services.ioe.domain import relationships as relationship_rules
 from app.services.ioe.domain import savings as savings_domain
-from app.services.ioe.domain import scoring
-from app.services.ioe.domain.enums import ScoreFactor, WorkflowStatus
+from app.services.ioe.domain.enums import (
+    PortfolioMembership,
+    ScoreFactor,
+    WorkflowStatus,
+)
 from app.services.ioe.domain.workflow import WorkflowStateMachine
 from app.services.ioe.normalization.service import (
     NORMALIZATION_VERSION,
     OpportunityNormalizationService,
+)
+from app.services.ioe.portfolio.eligibility import (
+    ELIGIBILITY_RECHECK_VERSION,
+    PinnedEligibilityRechecker,
+    engine_facts_for,
+    load_pinned_condition_trees,
 )
 from app.services.ioe.portfolio.service import (
     PORTFOLIO_SERVICE_VERSION,
@@ -182,6 +198,8 @@ class OptimizationOrchestrator:
             "portfolio_service_version": PORTFOLIO_SERVICE_VERSION,
             "portfolio_assembly_version": assembly.PORTFOLIO_ASSEMBLY_VERSION,
             "lever_registry_version": lever_registry.LEVER_REGISTRY_VERSION,
+            "cost_taxonomy_version": cost_taxonomy.COST_TAXONOMY_VERSION,
+            "eligibility_recheck_version": ELIGIBILITY_RECHECK_VERSION,
             "portfolio_objective_code": savings_domain.PORTFOLIO_OBJECTIVE_CODE.value,
             "portfolio_objective_version": savings_domain.PORTFOLIO_OBJECTIVE_VERSION,
             "rule_snapshot_hash": pinned.snapshot_hash,
@@ -346,6 +364,11 @@ class OptimizationOrchestrator:
                 spec.tax_year, facts,
                 pinned_rule_version_ids=spec.pinned_rule_version_ids,
             )
+            # Loaded ONCE, from the pinned versions only. Re-evaluation during
+            # assembly is then pure and cannot reach the rules tables at all.
+            condition_trees = await load_pinned_condition_trees(
+                session, spec.pinned_rule_version_ids
+            )
 
         normalizer = OpportunityNormalizationService()
         candidates = [normalizer.normalize(o) for o in opportunities]
@@ -364,6 +387,7 @@ class OptimizationOrchestrator:
         relationships = relationship_rules.derive(ranked)
 
         # ---- P4: constrained assembly, every figure measured by the engine ----
+        rechecker = PinnedEligibilityRechecker(condition_trees, engine_facts_for)
         constraints = assembly.AssemblyConstraints(
             available_cash=available_cash,
             objective_metric=savings_domain.PORTFOLIO_OBJECTIVE_CODE,
@@ -371,6 +395,7 @@ class OptimizationOrchestrator:
             resource_capacities=_resource_capacities(spec.user_constraints),
             jurisdiction=spec.jurisdiction,
             tax_year=spec.tax_year,
+            eligibility_recheck=rechecker.check,
         )
         portfolio = PortfolioEvaluationService().evaluate(
             ranked, relationships, inp, constraints
@@ -434,10 +459,49 @@ class OptimizationOrchestrator:
                     display_support_score=candidate.confidence.display_support_score,
                     support_cap_applied=candidate.confidence.cap_applied,
                     support_cap_reason_code=candidate.confidence.cap_reason_code,
+                    # eligibility that earlier actions unsettled, left visible
+                    requires_re_evaluation=(
+                        candidate.portfolio_membership
+                        is PortfolioMembership.REQUIRES_RE_EVALUATION
+                    ),
+                    re_evaluation_reason_code=(
+                        candidate.exclusion_reason_code
+                        if candidate.portfolio_membership
+                        is PortfolioMembership.REQUIRES_RE_EVALUATION else None
+                    ),
                 )
                 session.add(row)
                 await session.flush()
                 key_to_row[candidate.candidate_key] = row
+
+                # The economics behind every displayed figure, kept auditable.
+                for effect in candidate.economic_effects:
+                    session.add(EconomicEffectRow(
+                        candidate_id=row.id,
+                        effect_type=effect.effect_type.value,
+                        amount=effect.amount,
+                        calculation_basis=effect.calculation_basis.value,
+                        tax_year=effect.tax_year,
+                        horizon_years=effect.horizon_years,
+                        is_permanent=effect.is_permanent,
+                        reversibility=(
+                            effect.reversibility.value if effect.reversibility else None
+                        ),
+                    ))
+                for cost in candidate.costs:
+                    session.add(CostRow(
+                        candidate_id=row.id,
+                        cost_type=cost.cost_type.value,
+                        amount=cost.amount,
+                        timing=cost.timing,
+                        # what the RULE said, kept beside what it resolved to
+                        authored_cost_type=(
+                            cost.authored_cost_type.value
+                            if cost.authored_cost_type else None
+                        ),
+                        cost_type_source=cost.cost_type_source,
+                        taxonomy_version=cost.taxonomy_version,
+                    ))
 
                 for comp in candidate.score.components if candidate.score else ():
                     session.add(ScoreComponentRow(

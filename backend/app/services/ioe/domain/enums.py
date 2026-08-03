@@ -120,6 +120,10 @@ class PortfolioMembership(StrEnum):
     # NOT discarded: near ceilings and thresholds it may become beneficial once
     # other candidates are applied (architecture §D.3).
     DEFERRED_PENDING_COMBINATION = "deferred_pending_combination"
+    # An earlier action changed the facts this candidate's eligibility rests
+    # on, and re-evaluation against the pinned snapshot could not resolve it.
+    # "We could not tell" is kept distinct from "we checked and it failed".
+    REQUIRES_RE_EVALUATION = "requires_re_evaluation"
 
 
 class AssemblyMethod(StrEnum):

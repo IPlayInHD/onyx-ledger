@@ -77,6 +77,16 @@ class TaxEngineService:
 
     def facts(self, inp: TaxInput, result: TaxResult) -> dict[str, object]:
         """Fact map keyed by fact_definition.fact_key for the rules evaluator."""
+        return self.facts_for(inp, result)
+
+    @staticmethod
+    def facts_for(inp: TaxInput, result: TaxResult) -> dict[str, object]:
+        """The same mapping, without a session.
+
+        Portfolio assembly re-derives facts from HYPOTHETICAL inputs and must
+        get a map identical to the one the initial evaluation used; sharing this
+        one function is what guarantees that rather than hoping for it.
+        """
         return {
             "profile.province": inp.province,
             "profile.marital_status": inp.marital_status,

@@ -101,13 +101,28 @@ class OpportunityNormalizationService:
         ),)
 
     def _costs(self, o: OpportunityContractV2) -> tuple[CostComponent, ...]:
-        """Costs come from rules-supplied ActionSpecs; none are imputed."""
+        """Costs come from rules-supplied ActionSpecs; none are imputed.
+
+        The AMOUNT is always the rule's. The cost TYPE may be a deterministic
+        resolution of an ambiguous legacy value, so the authored value and the
+        basis of the resolution travel with it (P4 item 3).
+        """
+        from app.services.ioe.domain.cost_taxonomy import resolve_cost_type
+
+        lever_code = o.portfolio_lever_ref.lever_code if o.portfolio_lever_ref else None
         out: list[CostComponent] = []
         for action in o.required_actions:
             if action.cost_type and action.cost_amount is not None:
                 cost_type = _cost_type(action.cost_type)
                 if cost_type is not None:
-                    out.append(CostComponent(cost_type=cost_type, amount=action.cost_amount))
+                    resolved = resolve_cost_type(cost_type, lever_code=lever_code)
+                    out.append(CostComponent(
+                        cost_type=resolved.cost_type,
+                        amount=action.cost_amount,
+                        authored_cost_type=resolved.authored_cost_type,
+                        cost_type_source=resolved.source,
+                        taxonomy_version=resolved.taxonomy_version,
+                    ))
         return tuple(out)
 
     def _lever(self, o: OpportunityContractV2) -> LeverApplication | None:

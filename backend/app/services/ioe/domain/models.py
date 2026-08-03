@@ -65,6 +65,11 @@ class CostComponent:
     cost_type: CostType
     amount: Decimal
     timing: str | None = None
+    # Normalization provenance (P4 item 3). `cost_type` may be a resolution of
+    # an ambiguous legacy value, so what the rule actually authored is kept.
+    authored_cost_type: CostType | None = None
+    cost_type_source: str = "authored_verbatim"
+    taxonomy_version: str | None = None
 
     @property
     def is_true_cost(self) -> bool:
@@ -86,6 +91,8 @@ class CostComponent:
             "cost_type": self.cost_type,
             "amount": c.money(self.amount),
             "timing": self.timing,
+            "authored_cost_type": self.authored_cost_type,
+            "cost_type_source": self.cost_type_source,
         }
 
 

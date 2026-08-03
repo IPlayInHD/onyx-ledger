@@ -160,10 +160,14 @@ class AssemblyConstraints:
     tax_year: int | None = None
     max_deferred_retests: int = MAX_DEFERRED_RETESTS
     max_engine_runs: int = 200
-    # Optional hook: re-check eligibility against the SAME pinned rule snapshot
-    # after earlier actions have changed the facts. Returning False excludes the
-    # candidate safely rather than acting on stale eligibility.
-    eligibility_recheck: Callable[[OptimizationCandidate, dict], bool] | None = None
+    # Re-check eligibility against the SAME pinned rule snapshot once earlier
+    # actions have changed the facts. Tri-state on purpose: 'eligible',
+    # 'ineligible', or 'indeterminate'. Only 'eligible' lets a candidate
+    # through; 'indeterminate' produces an explicit requires_re_evaluation
+    # exclusion instead of a silent assumption in either direction.
+    eligibility_recheck: (
+        Callable[[OptimizationCandidate, dict], bool | str] | None
+    ) = None
 
 
 # Structured next steps for every exclusion reason the assembler can emit. A
@@ -177,6 +181,7 @@ RESOLUTION_OPTIONS: dict[str, tuple[str, ...]] = {
     "SHARED_RESOURCE_EXHAUSTED": ("INCREASE_CONTRIBUTION_ROOM", "SPLIT_ALLOCATION"),
     "INSUFFICIENT_CASH": ("INCREASE_AVAILABLE_CASH", "REDUCE_CONTRIBUTION_AMOUNT"),
     "ELIGIBILITY_CHANGED_BY_EARLIER_ACTION": ("REVIEW_EARLIER_ACTION", "RE_RUN_WITHOUT_IT"),
+    "REQUIRES_RE_EVALUATION": ("RE_RUN_OPTIMIZATION", "REVIEW_EARLIER_ACTION"),
     "SEARCH_BUDGET_EXHAUSTED": ("RE_RUN_WITH_FEWER_CANDIDATES",),
     "NO_STANDALONE_IMPROVEMENT_AT_THIS_POINT": ("REVIEW_IN_A_LATER_YEAR",),
 }
@@ -368,11 +373,19 @@ def assemble(
                     "INSUFFICIENT_CASH")
             return "hard_reject", None, None
         # Earlier actions may have changed the facts this candidate depends on.
-        # Re-check against the SAME pinned rule snapshot; on doubt, exclude.
-        if cons.eligibility_recheck is not None:
-            if not cons.eligibility_recheck(candidate, state.inputs):
+        # Prefer RE-EVALUATION against the same pinned rule snapshot; where the
+        # answer cannot be resolved, say so explicitly rather than assume it.
+        if cons.eligibility_recheck is not None and state.selected:
+            verdict = cons.eligibility_recheck(candidate, state.inputs)
+            if verdict is False or verdict == "ineligible":
                 _reject(candidate, PortfolioMembership.EXCLUDED_CONSTRAINT,
-                        "ELIGIBILITY_CHANGED_BY_EARLIER_ACTION")
+                        "ELIGIBILITY_CHANGED_BY_EARLIER_ACTION",
+                        blocking_key=state.selected[-1].candidate_key)
+                return "hard_reject", None, None
+            if verdict == "indeterminate":
+                _reject(candidate, PortfolioMembership.REQUIRES_RE_EVALUATION,
+                        "REQUIRES_RE_EVALUATION",
+                        blocking_key=state.selected[-1].candidate_key)
                 return "hard_reject", None, None
         if not _budget_left():
             _reject(candidate, PortfolioMembership.EXCLUDED_CONSTRAINT,
@@ -538,6 +551,7 @@ _HARD_EXCLUSIONS = frozenset({
     PortfolioMembership.EXCLUDED_CONSTRAINT,
     PortfolioMembership.EXCLUDED_NOT_EVALUABLE,
     PortfolioMembership.DEFERRED_TIMING,
+    PortfolioMembership.REQUIRES_RE_EVALUATION,
 })
 
 

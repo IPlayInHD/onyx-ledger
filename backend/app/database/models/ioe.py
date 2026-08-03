@@ -253,6 +253,11 @@ class OptimizationCandidate(Base):
         SmallInteger,
         comment="DERIVED from display_support_score by trigger; never supplied by callers. A support score, not a probability.",
     )
+    requires_re_evaluation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+        comment="True when an earlier portfolio action changed the facts this candidate's eligibility depends on and re-evaluation against the pinned rule snapshot could not resolve it. The candidate is excluded, never acted on.",
+    )
+    re_evaluation_reason_code: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
 
 
@@ -289,6 +294,18 @@ class CandidateCost(Base):
         UUID(as_uuid=True), ForeignKey("ioe.optimization_candidate.id", ondelete="CASCADE")
     )
     cost_type: Mapped[str] = mapped_column(Text, nullable=False)
+    authored_cost_type: Mapped[str | None] = mapped_column(
+        Text,
+        comment="The cost_type exactly as the rule authored it, before P4 normalization. NULL only for rows written before this column existed.",
+    )
+    cost_type_source: Mapped[str] = mapped_column(
+        Text, nullable=False, default="authored_verbatim",
+        comment="How cost_type was arrived at. Anything other than authored_verbatim means the value is an IOE derivation from a legacy rule value, not rule data.",
+    )
+    taxonomy_version: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Version of the cost-taxonomy resolution rules that produced cost_type.",
+    )
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     timing: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
