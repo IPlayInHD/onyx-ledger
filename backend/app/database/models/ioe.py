@@ -549,10 +549,46 @@ class Scenario(Base):
     base_analysis_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("analysis.analysis_run.id", ondelete="CASCADE")
     )
-    label: Mapped[str | None] = mapped_column(Text)
+    label: Mapped[str | None] = mapped_column(
+        Text,
+        comment="User-supplied name. Deliberately excluded from scenario_spec_hash and scenario_result_hash: renaming must not change identity or invalidate evidence.",
+    )
+    note: Mapped[str | None] = mapped_column(
+        Text,
+        comment="User-supplied note. Excluded from both hashes, exactly as label is.",
+    )
     workflow_status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     visibility_status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # ---- P5: pinned specification inputs ----
+    baseline_input_snapshot_hash: Mapped[str | None] = mapped_column(Text)
+    baseline_result_hash: Mapped[str | None] = mapped_column(
+        Text,
+        comment="The baseline engine result the scenario was measured against, pinned before the spec hash. Without it a stored delta cannot be shown to be a delta from anything in particular.",
+    )
+    baseline_tax: Mapped[Decimal | None] = mapped_column(MONEY)
+    tax_year: Mapped[int | None] = mapped_column(Integer)
+    jurisdiction: Mapped[str | None] = mapped_column(Text)
+    objective_code: Mapped[str | None] = mapped_column(Text)
+    objective_version: Mapped[str | None] = mapped_column(Text)
+    result_schema_version: Mapped[str | None] = mapped_column(Text)
+
+    # ---- P5: freshness + supersession ----
+    freshness_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="unknown",
+        comment="Explicit lifecycle state. A stale result is LABELLED, never silently refreshed and never silently shown as current.",
+    )
+    stale_reason_code: Mapped[str | None] = mapped_column(Text)
+    freshness_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_by_scenario_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.scenario.id"),
+        comment="Set when a refresh produced a newer scenario. The superseded row keeps its own pinned versions and its own result; it is never recomputed in place.",
+    )
+    refreshed_from_scenario_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.scenario.id")
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     scenario_spec_hash: Mapped[str | None] = mapped_column(Text)
     scenario_result_hash: Mapped[str | None] = mapped_column(Text)
@@ -614,6 +650,87 @@ class ScenarioResult(Base):
     tax_delta: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     net_benefit: Mapped[Decimal | None] = mapped_column(MONEY)
     calculation_basis: Mapped[str] = mapped_column(Text, default="scenario_estimate")
-    confidence_score: Mapped[int | None] = mapped_column(SmallInteger)
+    confidence_score: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        comment="DERIVED from display_support_score by trigger; never supplied by callers. A support score, not a probability.",
+    )
     affected_rule_versions: Mapped[dict | None] = mapped_column(JSONB)
+
+    # ---- P5: the five support-score fields ----
+    raw_support_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    assumption_adjusted_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    display_support_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    support_cap_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    support_cap_reason_code: Mapped[str | None] = mapped_column(Text)
+
+    # ---- P5: the objective this result was measured on ----
+    result_schema_version: Mapped[str | None] = mapped_column(Text)
+    objective_code: Mapped[str | None] = mapped_column(Text)
+    objective_version: Mapped[str | None] = mapped_column(Text)
+    objective_value_baseline: Mapped[Decimal | None] = mapped_column(MONEY)
+    objective_value_scenario: Mapped[Decimal | None] = mapped_column(MONEY)
+    objective_delta: Mapped[Decimal | None] = mapped_column(MONEY)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class ScenarioLever(Base):
+    """The typed scenario specification: a lever CODE plus structured parameters.
+
+    There is deliberately no column for a field path, a patch, or an expression.
+    The shape of this table is itself the control.
+    """
+
+    __tablename__ = "scenario_lever"
+    __table_args__ = {"schema": "ioe"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    scenario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.scenario.id", ondelete="CASCADE")
+    )
+    apply_order: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    lever_code: Mapped[str] = mapped_column(Text, nullable=False)
+    parameters: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class ScenarioAssumption(Base):
+    """A registered assumption code plus exactly one typed value."""
+
+    __tablename__ = "scenario_assumption"
+    __table_args__ = {"schema": "ioe"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    scenario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.scenario.id", ondelete="CASCADE")
+    )
+    assumption_code: Mapped[str] = mapped_column(Text, nullable=False)
+    value_number: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    value_text: Mapped[str | None] = mapped_column(Text)
+    value_boolean: Mapped[bool | None] = mapped_column(Boolean)
+    materiality: Mapped[str] = mapped_column(Text, nullable=False, default="medium")
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="user_supplied")
+    certainty: Mapped[str] = mapped_column(Text, nullable=False, default="estimated")
+    affects_eligibility: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class ScenarioConfidenceComponent(Base):
+    """Per-factor uncertainty, so a support score can be audited not trusted."""
+
+    __tablename__ = "scenario_confidence_component"
+    __table_args__ = {"schema": "ioe"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    scenario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.scenario.id", ondelete="CASCADE")
+    )
+    factor_code: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    weight: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    contribution: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
