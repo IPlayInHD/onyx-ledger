@@ -110,6 +110,17 @@ class RelationshipType(StrEnum):
     OVERLAPS = "overlaps"
 
 
+class DerivationSource(StrEnum):
+    """Why a relationship exists. Persisted, so a reader can tell an
+    authoritative rules-supplied fact from a registry-derived structural
+    pattern or an engine-measured interaction."""
+
+    RULES_CONTRACT = "rules_contract"
+    SHARED_RESOURCE = "shared_resource"
+    RELATIONSHIP_REGISTRY = "relationship_registry"
+    MEASURED_INTERACTION = "measured_interaction"
+
+
 class PortfolioMembership(StrEnum):
     SELECTED = "selected"
     EXCLUDED_CONFLICT = "excluded_conflict"

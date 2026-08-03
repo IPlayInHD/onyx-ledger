@@ -15,6 +15,7 @@ from app.services.ioe.domain.enums import (
     AssemblyMethod,
     CalculationBasis,
     CostType,
+    DerivationSource,
     EconomicEffectType,
     EligibilityStatus,
     EvidenceStatus,
@@ -188,6 +189,7 @@ def test_excluding_relationship_blocks_the_lower_ranked_candidate():
     edge = RecommendationRelationship(
         source_key="A", target_key="B", relationship_type=RelationshipType.EXCLUDES,
         explanation_code="MUTUALLY_EXCLUSIVE",
+        derivation_source=DerivationSource.RULES_CONTRACT,
     )
     result = pf.assemble([a, b], [edge], BASE, _linear_engine())
     assert [m.candidate_key for m in result.members] == ["A"]
@@ -199,6 +201,7 @@ def test_requires_relationship_defers_when_prerequisite_absent():
     edge = RecommendationRelationship(
         source_key="B", target_key="A", relationship_type=RelationshipType.REQUIRES,
         explanation_code="PREREQUISITE",
+        derivation_source=DerivationSource.RULES_CONTRACT,
     )
     result = pf.assemble([b], [edge], BASE, _linear_engine())
     assert result.members == ()

@@ -18,6 +18,7 @@ from app.services.ioe.domain.enums import (
     CalculationBasis,
     ConfidenceFactor,
     CostType,
+    DerivationSource,
     EconomicEffectType,
     EligibilityStatus,
     EvidenceStatus,
@@ -366,6 +367,9 @@ class RecommendationRelationship:
     target_key: str
     relationship_type: RelationshipType
     explanation_code: str
+    # No default: every producer must state WHY the edge exists, so an
+    # authoritative rules-supplied fact is never confused with a derived one.
+    derivation_source: DerivationSource
     shared_resource_code: str | None = None
     maximum_shared_amount: Decimal | None = None
     measured_delta: Decimal | None = None
@@ -377,6 +381,7 @@ class RecommendationRelationship:
             "target_key": self.target_key,
             "relationship_type": self.relationship_type,
             "explanation_code": self.explanation_code,
+            "derivation_source": self.derivation_source,
             "shared_resource_code": self.shared_resource_code,
             "maximum_shared_amount": c.money(self.maximum_shared_amount),
             "measured_delta": c.money(self.measured_delta),

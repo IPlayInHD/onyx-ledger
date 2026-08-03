@@ -16,6 +16,7 @@ from app.services.ioe.domain.enums import (
     AssemblyMethod,
     CalculationBasis,
     CostType,
+    DerivationSource,
     EconomicEffectType,
     EligibilityStatus,
     EvidenceStatus,
@@ -182,8 +183,10 @@ def test_typed_relationships_are_all_honoured():
     c_ = _candidate("C", "INCREASE_MEDICAL_EXPENSES", "300")
     edges = [
         RecommendationRelationship("A", "B", RelationshipType.EXCLUDES, "MUTUALLY_EXCLUSIVE",
+                                   DerivationSource.RULES_CONTRACT,
                                    resolution_options=("CHOOSE_ONE",)),
-        RecommendationRelationship("C", "ZZZ", RelationshipType.REQUIRES, "PREREQUISITE"),
+        RecommendationRelationship("C", "ZZZ", RelationshipType.REQUIRES, "PREREQUISITE",
+                                   DerivationSource.RULES_CONTRACT),
     ]
     result = pf.assemble([a, b, c_], edges, BASE, _linear())
 

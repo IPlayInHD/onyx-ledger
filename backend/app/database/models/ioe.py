@@ -361,6 +361,13 @@ class RecommendationRelationship(Base):
     maximum_shared_amount: Mapped[Decimal | None] = mapped_column(MONEY)
     measured_delta: Mapped[Decimal | None] = mapped_column(MONEY)
     explanation_code: Mapped[str] = mapped_column(Text, nullable=False)
+    # Provenance. `rules_contract` edges are authoritative; the rest are derived
+    # and may be trimmed by the derivation budget. No server default — a writer
+    # must say why the edge exists.
+    derivation_source: Mapped[str] = mapped_column(
+        Text, nullable=False,
+        comment="Provenance of the edge. rules_contract edges are authoritative and are never dropped by the sparse-derivation budget; the other sources are derived and may be trimmed.",
+    )
     resolution_options: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = created_at_col()
 

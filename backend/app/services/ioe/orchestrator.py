@@ -409,6 +409,21 @@ class OptimizationOrchestrator:
         portfolio = PortfolioEvaluationService().evaluate(
             ranked, relationships, inp, constraints
         )
+
+        # Measured interactions exist only among the candidates the engine
+        # actually evaluated together, so they are derived after assembly and
+        # never fed back into it — the portfolio was decided before these edges
+        # existed, and rewriting it from them would be circular. Apply order is
+        # the portfolio's own, so each edge names the member that was already in
+        # place when the engine measured the next one.
+        by_key = {x.candidate_key: x for x in ranked}
+        applied = [
+            by_key[m.candidate_key]
+            for m in sorted(portfolio.members, key=lambda m: m.apply_order)
+            if m.candidate_key in by_key
+        ]
+        relationships = relationships + relationship_rules.measured_edges(applied)
+
         return {
             "candidates": ranked,
             "relationships": relationships,
@@ -538,6 +553,7 @@ class OptimizationOrchestrator:
                     maximum_shared_amount=edge.maximum_shared_amount,
                     measured_delta=edge.measured_delta,
                     explanation_code=edge.explanation_code,
+                    derivation_source=edge.derivation_source.value,
                     resolution_options=list(edge.resolution_options),
                 ))
 

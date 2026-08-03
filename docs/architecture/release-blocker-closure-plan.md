@@ -99,6 +99,52 @@ numbers are not reassuring, they are an artefact of co-located PostgreSQL.
 **Beta gate:** step 6's test must pass, and staging must show p95 optimization ≤ 1.5 s at the
 expected candidate count on the real database. Until then this remains a **beta blocker**.
 
+### Closure record — step 5, sparse relationship derivation (DONE)
+
+Remediation step 5 is closed. Steps 1–4 and 6 remain open and are the next item.
+
+Derivation no longer compares every candidate with every other one. Candidates are indexed by
+**relationship key** — resource code, engine input field, lever code, opportunity code — in a
+single pass, and edges are generated only inside a group that a key actually populated. Within a
+symmetric group the edges form a **star around the group's canonical anchor** (its lowest
+candidate key) rather than a clique, so a group of *k* members costs *k−1* edges instead of
+*k(k−1)/2* while every member remains an endpoint and the group is still recoverable from the
+stored rows.
+
+Declared facts are **not** starred. Explicit exclusions, dependencies and registry-declared lever
+conflicts decide portfolio membership, so every declared pair is emitted exactly as declared; their
+volume is bounded by the rules contract, not by *n²*. `MAX_EDGES_PER_CANDIDATE = 4` is a backstop
+only, and it trims explanatory edges (`overlaps`, `shares_limit`) — never a rules-supplied or
+decision-bearing one.
+
+Every edge now persists a `derivation_source` (`rules_contract`, `shared_resource`,
+`relationship_registry`, `measured_interaction`), enforced by a CHECK constraint, so an
+authoritative legal fact is distinguishable from a derived structural hint at read time.
+
+**Measured, same fixture, same clean database, 75 candidates:**
+
+| Fixture | Metric | Before | After | Change |
+|---|---|---:|---:|---:|
+| 4 levers / 3 pools | relationship rows | 666 | 100 | **−85.0 %** |
+| | rows per candidate | 8.88 | 1.33 | −85.0 % |
+| | total SQL statements | 2,450 | 1,884 | −23.1 % |
+| | statements per candidate | 32.67 | 25.12 | −23.1 % |
+| 1 lever / 1 pool (worst case) | relationship rows | 2,775 | 115 | **−95.9 %** |
+| | rows per candidate | 37.00 | 1.53 | −95.9 % |
+| | total SQL statements | 4,558 | 1,898 | −58.4 % |
+| | statements per candidate | 60.77 | 25.31 | −58.4 % |
+
+Reads are unchanged at 260 statements in every run — confirming again that the fan-out is write
+side, not the N+1 read the gate originally reported.
+
+The `≤ 4 × candidate count` acceptance target is met with an order of magnitude of headroom.
+The **≤ 60 statements per run** target is *not* yet met (1,884) and is exactly what remediation
+steps 1–4 address; relationship inserts are no longer the dominant term, `score_component` (525)
+and `confidence_component` (300) are.
+
+**Evidence:** `tests/unit/ioe/test_relationship_sparsity.py` (29 tests),
+`tests/integration/test_relationship_sparsity_persisted.py` (5 tests).
+
 ---
 
 ## Blocker closure table
