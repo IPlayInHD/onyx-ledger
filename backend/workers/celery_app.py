@@ -16,7 +16,12 @@ celery_app = Celery(
     "onyx",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["workers.tasks.analysis", "workers.tasks.maintenance", "workers.tasks.tkms"],
+    include=[
+        "workers.tasks.analysis",
+        "workers.tasks.maintenance",
+        "workers.tasks.tkms",
+        "workers.tasks.ioe",
+    ],
 )
 
 celery_app.conf.task_routes = {
@@ -32,6 +37,11 @@ celery_app.conf.task_routes = {
     "workers.tasks.tkms.validate": {"queue": "tkms_validate"},
     "workers.tasks.tkms.compare": {"queue": "tkms_compare"},
     "workers.tasks.tkms.reindex": {"queue": "tkms_index"},
+    # IOE: optimization is slow, freshness maintenance must never block it
+    "workers.tasks.ioe.run_optimization": {"queue": "ioe"},
+    "workers.tasks.ioe.invalidate_scenarios_for_analysis": {"queue": "ioe_freshness"},
+    "workers.tasks.ioe.invalidate_scenarios_for_tax_year": {"queue": "ioe_freshness"},
+    "workers.tasks.ioe.sweep_scenario_freshness": {"queue": "ioe_freshness"},
 }
 
 celery_app.conf.beat_schedule = {
@@ -42,6 +52,13 @@ celery_app.conf.beat_schedule = {
     "monthly-analytics-roll": {
         "task": "workers.tasks.maintenance.roll_monthly_analytics",
         "schedule": crontab(day_of_month="1", hour="4", minute="0"),
+    },
+    # Fallback sweep only: event-driven invalidation and read-time evaluation
+    # are the primary freshness paths. Hourly so nothing lurks for long, bounded
+    # per run so it can never become a full scan.
+    "ioe-scenario-freshness-sweep": {
+        "task": "workers.tasks.ioe.sweep_scenario_freshness",
+        "schedule": crontab(minute="20"),
     },
     "yearly-legislation-import": {
         "task": "workers.tasks.maintenance.import_new_legislation",

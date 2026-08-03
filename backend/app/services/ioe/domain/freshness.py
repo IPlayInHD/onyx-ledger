@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.core.exceptions import DomainError
 from app.services.ioe.domain.scenario import FreshnessStatus, StaleReason
 
 FRESHNESS_POLICY_VERSION = "1.0.0"
@@ -29,8 +30,16 @@ COMPARISON_POLICY_VERSION = "1.0.0"
 MONEY = Decimal("0.01")
 
 
-class ScenariosNotComparable(ValueError):
-    """Two scenarios are not answers to questions of the same shape."""
+class ScenariosNotComparable(DomainError):
+    """Two scenarios are not answers to questions of the same shape.
+
+    A DomainError rather than a bare ValueError so the API refuses the request
+    with a 409 and an explanation, instead of a 500 that reads like a bug.
+    """
+
+    status_code = 409
+    error_type = "https://onyx.ledger/errors/scenarios-not-comparable"
+    title = "Scenarios Not Comparable"
 
     def __init__(self, reasons: list[str]):
         self.reasons = reasons
