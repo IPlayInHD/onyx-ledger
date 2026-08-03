@@ -97,8 +97,8 @@ class AssumptionRequest:
     value_text: str | None = None
     value_boolean: bool | None = None
     materiality: str = "medium"
-    source: str = "user_supplied"
-    certainty: str = "estimated"
+    source: str = "user"
+    certainty: str = "user_asserted"
     affects_eligibility: bool = False
 
     def as_canonical(self) -> dict:
@@ -284,8 +284,8 @@ class ScenarioSpec:
                 value_text=raw.get("value_text"),
                 value_boolean=raw.get("value_boolean"),
                 materiality=raw.get("materiality", "medium"),
-                source=raw.get("source", "user_supplied"),
-                certainty=raw.get("certainty", "estimated"),
+                source=raw.get("source", "user"),
+                certainty=raw.get("certainty", "user_asserted"),
                 affects_eligibility=bool(raw.get("affects_eligibility", False)),
             ))
         # Sorted so two requests differing only in assumption order are the same

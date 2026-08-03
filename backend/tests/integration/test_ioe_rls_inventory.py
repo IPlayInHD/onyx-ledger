@@ -49,6 +49,9 @@ OWNERSHIP_CHAIN = {
     "scenario_event": "scenario_id -> scenario.user_id",
     "scenario_input_change": "scenario_id -> scenario.user_id",
     "scenario_result": "scenario_id -> scenario.user_id",
+    "scenario_lever": "scenario_id -> scenario.user_id",
+    "scenario_assumption": "scenario_id -> scenario.user_id",
+    "scenario_confidence_component": "scenario_id -> scenario.user_id",
 }
 
 # The column each ownership policy resolves through, and the two parents the
@@ -63,6 +66,8 @@ TRAVERSAL_COLUMN = {
     "portfolio_exclusion": "portfolio_id", "resource_ledger_entry": "portfolio_id",
     "scenario_event": "scenario_id", "scenario_input_change": "scenario_id",
     "scenario_result": "scenario_id",
+    "scenario_lever": "scenario_id", "scenario_assumption": "scenario_id",
+    "scenario_confidence_component": "scenario_id",
     "optimization_run": "user_id", "scenario": "user_id",
 }
 

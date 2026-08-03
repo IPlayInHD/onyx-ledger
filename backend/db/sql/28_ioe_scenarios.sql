@@ -146,10 +146,12 @@ CREATE TABLE ioe.scenario_assumption (
     value_boolean       boolean,
     materiality         text NOT NULL DEFAULT 'medium'
                         CHECK (materiality IN ('low','medium','high')),
-    source              text NOT NULL DEFAULT 'user_supplied'
-                        CHECK (source IN ('user_supplied','derived','default')),
-    certainty           text NOT NULL DEFAULT 'estimated'
-                        CHECK (certainty IN ('verified','estimated','assumed')),
+    -- vocabularies mirror the domain enums AssumptionSource / AssumptionCertainty
+    source              text NOT NULL DEFAULT 'user'
+                        CHECK (source IN ('user','platform','analysis')),
+    certainty           text NOT NULL DEFAULT 'user_asserted'
+                        CHECK (certainty IN ('user_asserted','platform_default',
+                                             'derived_from_data','statutory_known')),
     affects_eligibility boolean NOT NULL DEFAULT false,
     created_at          timestamptz NOT NULL DEFAULT now(),
     UNIQUE (scenario_id, assumption_code),

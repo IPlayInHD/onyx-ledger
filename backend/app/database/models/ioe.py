@@ -710,8 +710,8 @@ class ScenarioAssumption(Base):
     value_text: Mapped[str | None] = mapped_column(Text)
     value_boolean: Mapped[bool | None] = mapped_column(Boolean)
     materiality: Mapped[str] = mapped_column(Text, nullable=False, default="medium")
-    source: Mapped[str] = mapped_column(Text, nullable=False, default="user_supplied")
-    certainty: Mapped[str] = mapped_column(Text, nullable=False, default="estimated")
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="user")
+    certainty: Mapped[str] = mapped_column(Text, nullable=False, default="user_asserted")
     affects_eligibility: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

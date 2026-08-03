@@ -431,7 +431,7 @@ class ScenarioService:
         ).quantize(MONEY, ROUND_HALF_UP)
 
         breakdown = support.compute(
-            evidence_status=EvidenceStatus.VERIFIED,
+            evidence_status=EvidenceStatus.DOCUMENTED_VERIFIED,
             calculation_basis=CalculationBasis.SCENARIO_ESTIMATE,
             assumptions=self._structured_assumptions(pinned.spec),
         )
