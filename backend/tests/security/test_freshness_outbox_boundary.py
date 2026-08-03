@@ -21,8 +21,9 @@ from app.database.models import FreshnessOutbox, FreshnessOutboxAudit
 from app.database.session import unit_of_work
 from app.services.ioe.freshness_events import FreshnessEvent, emit
 from app.services.ioe.freshness_relay import FreshnessRelay
+from tests.conftest import owner_dsn
 
-OWNER_DSN = "postgresql://onyx_migrator@localhost:5432/onyx_test"
+OWNER_DSN = owner_dsn()
 
 
 @pytest.fixture(autouse=True)

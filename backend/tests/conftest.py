@@ -29,3 +29,19 @@ async def client():
         yield c
     # Dispose the pool so connections aren't reused across per-test event loops.
     await engine.dispose()
+
+
+def owner_dsn() -> str:
+    """Owner-role DSN for the database the harness actually provisioned.
+
+    Derived from ONYX_DATABASE_URL rather than hardcoded: a test that names a
+    database the harness never creates passes only where someone happens to
+    have created it by hand, and fails on a clean machine.
+    """
+    import os
+    from urllib.parse import urlparse
+
+    url = os.environ.get("ONYX_DATABASE_URL", "")
+    parsed = urlparse(url)
+    database = (parsed.path or "/onyx_test").lstrip("/").split("?")[0]
+    return f"postgresql://onyx_migrator@localhost:5432/{database}"

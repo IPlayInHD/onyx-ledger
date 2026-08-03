@@ -500,7 +500,9 @@ def test_check_constraint_holds_independently_of_the_trigger():
     """
     import psycopg2
 
-    conn = psycopg2.connect("postgresql://onyx_migrator@localhost:5432/onyx")
+    from tests.conftest import owner_dsn
+
+    conn = psycopg2.connect(owner_dsn())
     conn.autocommit = False
     try:
         cur = conn.cursor()
