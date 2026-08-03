@@ -515,3 +515,11 @@ COMMENT ON FUNCTION ioe.fan_out_freshness_event(uuid, text) IS
 -- The runtime role runs the relay, so it must be able to assume the restricted
 -- worker role. It gains only what that role has: EXECUTE on four functions.
 GRANT onyx_freshness_worker TO onyx_app_rw;
+
+-- Hardening found while testing the worker's privilege surface: the audit
+-- trigger function was EXECUTE-able by PUBLIC, so every role — including the
+-- restricted freshness worker — inherited the right to call a SECURITY DEFINER
+-- function directly. A trigger fires with the table owner's rights regardless of
+-- the caller's EXECUTE privilege, so revoking it costs nothing and removes a
+-- definer-rights entry point that no application code needs.
+REVOKE EXECUTE ON FUNCTION audit.log_change() FROM PUBLIC;
