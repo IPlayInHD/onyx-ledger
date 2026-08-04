@@ -307,12 +307,16 @@ class IntegrityVerificationService:
         guard permits exactly these four columns to move and rejects an UPDATE
         that changes anything else, so this cannot become a repair path.
         """
-        model = {
-            EntityType.OPTIMIZATION: OptimizationRun,
-            EntityType.SCENARIO: Scenario,
-            EntityType.PORTFOLIO: StrategyPortfolio,
-        }[kind]
-        row = await session.get(model, entity_id)
+        # Branched rather than looked up in a dict: a dict of model classes
+        # erases the concrete type, and these four attributes only exist on the
+        # three parents that actually carry integrity metadata.
+        row: OptimizationRun | Scenario | StrategyPortfolio | None
+        if kind is EntityType.OPTIMIZATION:
+            row = await session.get(OptimizationRun, entity_id)
+        elif kind is EntityType.SCENARIO:
+            row = await session.get(Scenario, entity_id)
+        else:
+            row = await session.get(StrategyPortfolio, entity_id)
         if row is None:
             return
         row.integrity_status = status.value

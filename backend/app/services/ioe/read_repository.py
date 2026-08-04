@@ -205,12 +205,13 @@ class IoeReadRepository:
         from app.services.ioe.domain.integrity import EntityType
 
         kind = EntityType(entity_type)
+        owned: OptimizationRun | Scenario | None
         if kind is EntityType.OPTIMIZATION:
-            row = await self.s.get(OptimizationRun, entity_id)
-            return row if row is not None and row.user_id == self.user_id else None
+            owned = await self.s.get(OptimizationRun, entity_id)
+            return owned if owned is not None and owned.user_id == self.user_id else None
         if kind is EntityType.SCENARIO:
-            row = await self.s.get(Scenario, entity_id)
-            return row if row is not None and row.user_id == self.user_id else None
+            owned = await self.s.get(Scenario, entity_id)
+            return owned if owned is not None and owned.user_id == self.user_id else None
         portfolio = await self.s.get(StrategyPortfolio, entity_id)
         if portfolio is None:
             return None

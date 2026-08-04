@@ -239,6 +239,37 @@ gains no replacement, and the check row stores expected `e3f0…` and actual `aa
 rebuilt. → `unavailable`, `BASELINE_SNAPSHOT_UNAVAILABLE`, `actual_result_hash` NULL, sealed result
 untouched.
 
+## 14b. Performance evidence
+
+Measured on the container reference environment (unix-socket PostgreSQL, single
+process, 40 candidates per run, 40 published rules).
+
+| Operation | p50 | p95 | SQL statements | Engine runs | Target | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Optimization replay | 44.8 ms | 87.4 ms | 29 (26 R / 1 I / 2 U) | 92 | ≤ 5 s | met |
+| Portfolio replay | 30.9 ms | 30.9 ms | 21 (18 R / 1 I / 2 U) | 1 | ≤ 5 s | met |
+| Scenario replay | 19.6 ms | 19.6 ms | 15 (12 R / 1 I / 2 U) | 1 | ≤ 5 s | met |
+| Integrity metadata read | 1.8 ms | 2.1 ms | 2 | 0 | ≤ 250 ms | met |
+| Batch claim (50 requested) | 3.2 ms | — | 2 | 0 | ≤ 50 entities | 11 claimed, capped at 50 |
+
+Peak RSS for the whole measuring process, including fixture creation: 80.5 MiB.
+Verification is not a separately significant allocator.
+
+Writes per verification are exactly three statements — one INSERT for the claim
+and two UPDATEs (the terminal transition and the entity's current metadata) —
+independent of entity size. Reads are bounded by the sealed evidence the replay
+loads, not by history: a hundredth verification costs the same as the first.
+
+**These are unix-socket numbers and are not a managed-database claim.** The
+figure that transfers is the round-trip count: 15–29 statements per replay, so
+at a 2 ms RTT a replay costs roughly 0.03–0.06 s of waiting plus compute — two
+orders of magnitude inside the 5 s target. Optimization replay is the expensive
+one because it re-runs the whole assembly (92 engine runs); it is also the only
+one that must, since its result hash covers the assembled portfolio.
+
+Replay is deliberately never on a read path: `GET …/integrity` costs 2
+statements and reads stored columns only.
+
 ## 15. Known limitations and remaining risks
 
 1. **Historical executable code is not archived.** When a pinned executable version differs from the
