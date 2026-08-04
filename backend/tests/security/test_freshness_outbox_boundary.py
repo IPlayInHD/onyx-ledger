@@ -410,7 +410,7 @@ def test_the_worker_role_cannot_read_any_user_financial_table():
         conn.close()
 
 
-def test_the_worker_role_can_execute_only_the_outbox_functions():
+def test_the_worker_role_can_execute_only_the_keyhole_functions():
     conn = psycopg2.connect(OWNER_DSN)
     try:
         cur = conn.cursor()
@@ -425,9 +425,12 @@ def test_the_worker_role_can_execute_only_the_outbox_functions():
         executable = sorted({r[0] for r in cur.fetchall()})
         assert executable == [
             "claim_freshness_events",
+            # integrity scheduling: identifiers only, same keyhole discipline
+            "claim_integrity_targets",
             "complete_freshness_event",
             "fail_freshness_event",
             "fan_out_freshness_event",
+            "recover_stale_integrity_checks",
         ], f"the worker can execute unexpected definer functions: {executable}"
     finally:
         conn.close()

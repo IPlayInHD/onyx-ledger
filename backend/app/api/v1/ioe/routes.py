@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import current_user_id, db_authed
 from app.core.exceptions import NotFound
 from app.schemas.ioe import (
+    IntegrityCheckOut,
+    IntegrityOut,
     ProjectionResponse,
     ScenarioComparisonOut,
     ScenarioCreateRequest,
@@ -25,8 +27,10 @@ from app.schemas.ioe import (
     StrategyPortfolioOut,
 )
 from app.services.ioe import presentation
+from app.services.ioe.domain.integrity import EntityType
 from app.services.ioe.projection_query import ProjectionQueryService
 from app.services.ioe.read_repository import IoeReadRepository
+from app.services.ioe.replay import IntegrityVerificationService
 from app.services.ioe.scenario.comparison_service import ScenarioComparisonService
 from app.services.ioe.scenario.query_service import ScenarioQueryService
 from app.services.ioe.scenario.service import ScenarioService
@@ -191,6 +195,73 @@ async def get_projections(
     session: AsyncSession = Depends(db_authed),
 ) -> ProjectionResponse:
     return await ProjectionQueryService(session, user_id).for_run(run_id)
+
+
+# ---------------------------------------------------------------- integrity --
+@router.get(
+    "/{entity_type}/{entity_id}/integrity",
+    response_model=IntegrityOut,
+    summary="Read current replay-integrity metadata",
+    description=(
+        "Whether the SEALED result can still be reproduced from its own pinned "
+        "inputs. A different question from freshness: a result can be stale and "
+        "reproducible, or current and non-reproducible. Reads stored metadata "
+        "only — this never triggers a replay. Hashes are not exposed."
+    ),
+)
+async def get_integrity(
+    entity_type: str,
+    entity_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> IntegrityOut:
+    row = await IoeReadRepository(session, user_id).integrity_target(
+        _entity_type(entity_type), entity_id
+    )
+    if row is None:
+        raise NotFound("Not found")
+    return presentation.integrity_of(row)
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/integrity/verify",
+    response_model=IntegrityCheckOut,
+    status_code=status.HTTP_200_OK,
+    summary="Replay-verify a sealed result",
+    description=(
+        "Re-executes the sealed calculation against its pinned dependencies and "
+        "records the outcome. The historical result is never modified, "
+        "regenerated, or repaired — a mismatch is recorded and preserved, not "
+        "corrected. Returns 409 while another verification of the same entity "
+        "is already running."
+    ),
+)
+async def verify_integrity(
+    entity_type: str,
+    entity_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+) -> IntegrityCheckOut:
+    result = await IntegrityVerificationService(user_id).verify(
+        _entity_type(entity_type), entity_id
+    )
+    return IntegrityCheckOut(
+        check_id=result.check_id,
+        entity_type=result.entity_type,
+        entity_id=result.entity_id,
+        integrity_status=result.status.value,
+        integrity_state=result.integrity_state,
+        integrity_reason_code=result.reason_code.value,
+        integrity_warning=result.integrity_warning,
+        duration_ms=result.duration_ms,
+    )
+
+
+def _entity_type(value: str) -> EntityType:
+    """Reject an unknown entity type before any lookup happens."""
+    try:
+        return EntityType(value)
+    except ValueError:
+        raise NotFound("Not found") from None
 
 
 __all__ = ["router"]

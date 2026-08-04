@@ -31,6 +31,7 @@ from app.schemas.ioe import (
     AssumptionInput,
     ComparisonSideOut,
     FreshnessOut,
+    IntegrityOut,
     LeverInput,
     MonetaryAmount,
     MultiYearProjectionOut,
@@ -64,6 +65,25 @@ def freshness_of(scenario: Scenario) -> FreshnessOut:
         stale_reason_code=scenario.stale_reason_code,
         freshness_evaluated_at=scenario.freshness_evaluated_at,
         superseded_by_scenario_id=scenario.superseded_by_scenario_id,
+    )
+
+
+def integrity_of(row) -> IntegrityOut:
+    """Current reproducibility metadata for a sealed entity.
+
+    Reads stored columns only — this never triggers a replay. Verifying on every
+    read would put an engine run behind a page load, and a badge is not worth
+    that.
+    """
+    from app.services.ioe.domain.integrity import integrity_warning, user_visible_state
+
+    status = getattr(row, "integrity_status", None) or "not_checked"
+    return IntegrityOut(
+        integrity_status=status,
+        integrity_state=user_visible_state(status),
+        integrity_reason_code=getattr(row, "integrity_reason_code", None) or "NONE",
+        last_integrity_checked_at=getattr(row, "last_integrity_checked_at", None),
+        integrity_warning=integrity_warning(status),
     )
 
 
@@ -156,6 +176,7 @@ def scenario_detail(
         completed_at=scenario.completed_at,
         error_code=scenario.error_code,
         freshness=fresh,
+        integrity=integrity_of(scenario),
         levers=[
             LeverInput(
                 lever_code=x.lever_code,
@@ -235,6 +256,7 @@ def portfolio_detail(
     return StrategyPortfolioOut(
         id=portfolio.id,
         run_id=portfolio.run_id,
+        integrity=integrity_of(portfolio),
         objective_code=portfolio.portfolio_objective_code or portfolio.objective_metric,
         objective_version=portfolio.portfolio_objective_version
         or portfolio.objective_version,

@@ -42,6 +42,7 @@ from app.database.models import (
 from app.database.models import (
     StrategyPortfolio as PortfolioRow,
 )
+from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import portfolio as assembly
 from app.services.ioe.domain import savings as savings_domain
 from app.services.ioe.domain.models import OptimizationCandidate, StrategyPortfolio
@@ -136,6 +137,7 @@ class PortfolioEvaluationService:
             total_deferral_amount=breakdown.deferral_amount,
             total_recurring_annual=breakdown.recurring_annual,
             total_multi_year_projected=breakdown.multi_year_projected,
+            total_future_option_value=breakdown.future_option_value,
             total_liquidity_commitment=breakdown.liquidity_commitment,
             total_asset_transfer=breakdown.asset_transfer,
             total_nonrecoverable_expenditure=breakdown.nonrecoverable_expenditure,
@@ -147,6 +149,10 @@ class PortfolioEvaluationService:
             improvement_runs_used=portfolio.improvement_runs_used,
             unexplored_alternatives_count=portfolio.unexplored_alternatives_count,
             engine_runs_used=portfolio.engine_runs_used,
+            # The portfolio's own identity. The column existed but was never
+            # written, so a portfolio had no expected hash to be replayed
+            # against; integrity verification needs one.
+            portfolio_result_hash=c.portfolio_result_hash(portfolio.as_canonical()),
         )
         session.add(row)
         await session.flush()

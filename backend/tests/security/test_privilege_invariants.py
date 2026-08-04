@@ -27,6 +27,11 @@ WORKER_FUNCTION_ALLOWLIST = frozenset({
     "ioe.complete_freshness_event",
     "ioe.fail_freshness_event",
     "ioe.fan_out_freshness_event",
+    # Integrity scheduling follows the same keyhole discipline: identifiers and
+    # an owner id out, no financial column read, no sealed row touched. The
+    # replay itself runs under ordinary tenant RLS.
+    "ioe.claim_integrity_targets",
+    "ioe.recover_stale_integrity_checks",
 })
 
 SYSTEM_SCHEMAS = ("pg_catalog", "information_schema", "pg_toast")
@@ -104,7 +109,7 @@ def test_the_worker_allowlist_is_minimal():
         "the worker needs no direct table access at all; if this changed, the "
         "reason must be recorded here"
     )
-    assert len(WORKER_FUNCTION_ALLOWLIST) == 4
+    assert len(WORKER_FUNCTION_ALLOWLIST) == 6
 
 
 def test_the_worker_can_execute_only_the_allowlisted_functions():

@@ -64,6 +64,7 @@ from app.database.models import (
     ScoreComponent as ScoreComponentRow,
 )
 from app.database.session import unit_of_work
+from app.services.ioe.domain import assumptions as assumption_registry
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import confidence as support
 from app.services.ioe.domain import cost_taxonomy, scoring
@@ -91,6 +92,7 @@ from app.services.ioe.portfolio.service import (
     PORTFOLIO_SERVICE_VERSION,
     PortfolioEvaluationService,
 )
+from app.services.ioe.projection import PROJECTION_METHODOLOGY_VERSION
 from app.services.ioe.snapshot.service import RuleSnapshotService
 from app.services.tax_engine.contracts import CONTRACT_VERSION
 from app.services.tax_engine.core import data as engine_data
@@ -207,6 +209,8 @@ class OptimizationOrchestrator:
             "eligibility_recheck_version": ELIGIBILITY_RECHECK_VERSION,
             "portfolio_objective_code": savings_domain.PORTFOLIO_OBJECTIVE_CODE.value,
             "portfolio_objective_version": savings_domain.PORTFOLIO_OBJECTIVE_VERSION,
+            "assumption_registry_version": assumption_registry.ASSUMPTION_REGISTRY_VERSION,
+            "projection_methodology_version": PROJECTION_METHODOLOGY_VERSION,
             "rule_snapshot_hash": pinned.snapshot_hash,
             "weight_config_version": weight_config.version if weight_config else "default",
         }
@@ -304,6 +308,10 @@ class OptimizationOrchestrator:
                 weight_config_id=spec.weight_config_id,
                 version_manifest=spec.version_manifest,
                 manifest_hash=spec.manifest_hash,
+                # Both entered the spec hash. Storing them is what makes that
+                # hash independently recomputable during replay verification.
+                user_constraints=spec.user_constraints,
+                assumption_set=spec.assumption_set,
                 idempotency_key=idempotency_key,
                 started_at=datetime.now(tz=UTC),
             )
@@ -355,11 +363,21 @@ class OptimizationOrchestrator:
             ),
         )
 
-    async def _compute(self, spec: PinnedSpec) -> dict:
-        """Read-only reads plus pure domain maths. Holds no transaction."""
+    async def _compute(self, spec: PinnedSpec, *, baseline_input=None) -> dict:
+        """Read-only reads plus pure domain maths. Holds no transaction.
+
+        `baseline_input` lets a REPLAY supply the frozen baseline the run pinned
+        instead of rebuilding one from live financial tables. Production passes
+        nothing and behaves exactly as before; a replay that read live data
+        would report a mismatch every time a user edited last year's income,
+        which says nothing about whether the sealed result was reproducible.
+        """
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             engine = TaxEngineService(session)
-            inp = await engine.build_input(self.user_id, spec.tax_year)
+            inp = (
+                baseline_input if baseline_input is not None
+                else await engine.build_input(self.user_id, spec.tax_year)
+            )
             result = engine.run(inp)
             facts = engine.facts(inp, result)
 

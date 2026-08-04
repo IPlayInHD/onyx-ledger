@@ -193,6 +193,30 @@ class IoeReadRepository:
             .order_by(MultiYearProjection.horizon_year)
         ))
 
+    # ----------------------------------------------------------- integrity ---
+    async def integrity_target(self, entity_type, entity_id: uuid.UUID):
+        """The row carrying current integrity metadata, or None.
+
+        Every lookup is by primary key and every one is RLS-protected: the
+        portfolio resolves ownership through its run, so a caller cannot use an
+        integrity read to discover that another tenant's entity exists — the
+        answer is the same None either way.
+        """
+        from app.services.ioe.domain.integrity import EntityType
+
+        kind = EntityType(entity_type)
+        if kind is EntityType.OPTIMIZATION:
+            row = await self.s.get(OptimizationRun, entity_id)
+            return row if row is not None and row.user_id == self.user_id else None
+        if kind is EntityType.SCENARIO:
+            row = await self.s.get(Scenario, entity_id)
+            return row if row is not None and row.user_id == self.user_id else None
+        portfolio = await self.s.get(StrategyPortfolio, entity_id)
+        if portfolio is None:
+            return None
+        run = await self.s.get(OptimizationRun, portfolio.run_id)
+        return portfolio if run is not None and run.user_id == self.user_id else None
+
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",

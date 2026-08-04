@@ -133,6 +133,25 @@ class OptimizationRun(Base):
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
 
+    # ---- spec inputs that enter optimization_spec_hash ----
+    user_constraints: Mapped[dict | None] = mapped_column(
+        JSONB,
+        comment="The canonicalized constraints that entered optimization_spec_hash. Stored so the spec hash can be recomputed during replay verification.",
+    )
+    assumption_set: Mapped[dict | None] = mapped_column(
+        JSONB,
+        comment="The assumption set that entered optimization_spec_hash. Stored for the same reason as user_constraints.",
+    )
+
+    # ---- current replay-integrity metadata (history lives in integrity_check) ----
+    integrity_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="not_checked",
+        comment="Reproducibility of the SEALED result, independent of freshness. A run may be stale and still verified, or current and non-reproducible. mismatch is surfaced to users as non_reproducible.",
+    )
+    integrity_reason_code: Mapped[str] = mapped_column(Text, nullable=False, default="NONE")
+    last_integrity_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_integrity_check_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
 
 class OptimizationRunEvent(Base):
     __tablename__ = "optimization_run_event"
@@ -413,6 +432,10 @@ class StrategyPortfolio(Base):
     total_deferral_amount: Mapped[Decimal | None] = mapped_column(MONEY)
     total_recurring_annual: Mapped[Decimal | None] = mapped_column(MONEY)
     total_multi_year_projected: Mapped[Decimal | None] = mapped_column(MONEY)
+    total_future_option_value: Mapped[Decimal | None] = mapped_column(
+        MONEY,
+        comment="Future option value. Part of the portfolio canonical form and therefore of portfolio_result_hash; stored so the hash can be independently recomputed from this row.",
+    )
 
     deferred_count: Mapped[int] = mapped_column(Integer, default=0)
     excluded_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -421,7 +444,18 @@ class StrategyPortfolio(Base):
     unexplored_alternatives_count: Mapped[int] = mapped_column(Integer, default=0)
     engine_runs_used: Mapped[int] = mapped_column(Integer, default=0)
 
-    portfolio_result_hash: Mapped[str | None] = mapped_column(Text)
+    portfolio_result_hash: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Domain-separated hash of the portfolio's canonical form. The expected value a portfolio integrity check replays against.",
+    )
+
+    integrity_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="not_checked",
+        comment="Reproducibility of the SEALED portfolio, independent of the run's freshness.",
+    )
+    integrity_reason_code: Mapped[str] = mapped_column(Text, nullable=False, default="NONE")
+    last_integrity_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_integrity_check_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     # ---- P4: pinned objective + per-concept totals ----
     portfolio_objective_code: Mapped[str | None] = mapped_column(Text)
@@ -609,6 +643,14 @@ class Scenario(Base):
     assumption_set_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     version_manifest: Mapped[dict | None] = mapped_column(JSONB)
     manifest_hash: Mapped[str | None] = mapped_column(Text)
+
+    integrity_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="not_checked",
+        comment="Reproducibility of the SEALED result, independent of freshness. See ioe.optimization_run.integrity_status.",
+    )
+    integrity_reason_code: Mapped[str] = mapped_column(Text, nullable=False, default="NONE")
+    last_integrity_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_integrity_check_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     idempotency_key: Mapped[str | None] = mapped_column(Text)
     error_code: Mapped[str | None] = mapped_column(Text)
@@ -813,4 +855,65 @@ class FreshnessOutboxAudit(Base):
     worker_id: Mapped[str | None] = mapped_column(Text)
     claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     error_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class IntegrityCheck(Base):
+    """One replay-verification attempt. Append-only history.
+
+    A row is INSERTed `running` and transitions exactly once to a terminal
+    status. That single transition is workflow, not evidence: the outcome is
+    unknown when the claim is taken, and holding a transaction open across an
+    engine replay to avoid the update would be far worse than allowing it. The
+    columns that ARE evidence — both hashes, the reason code, the pinned
+    versions — are write-once, enforced by `ioe.guard_integrity_check_transition`.
+
+    Hashes here are diagnostic. They are never accepted as proof of ownership
+    and are not exposed to ordinary users.
+    """
+
+    __tablename__ = "integrity_check"
+    __table_args__ = {"schema": "ioe"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
+    )
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    optimization_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.optimization_run.id", ondelete="CASCADE")
+    )
+    portfolio_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.strategy_portfolio.id", ondelete="CASCADE")
+    )
+    scenario_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.scenario.id", ondelete="CASCADE")
+    )
+
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False, default="NONE")
+
+    expected_spec_hash: Mapped[str | None] = mapped_column(Text)
+    expected_result_hash: Mapped[str] = mapped_column(
+        Text, nullable=False,
+        comment="The hash sealed with the original result. Diagnostic evidence. Never overwritten by an observed value and never accepted as proof of ownership.",
+    )
+    actual_result_hash: Mapped[str | None] = mapped_column(
+        Text,
+        comment="The hash the replay produced. NULL when the replay never reached a result (unavailable dependency, execution failure).",
+    )
+
+    verifier_version: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_serialization_version: Mapped[str] = mapped_column(Text, nullable=False)
+    integrity_check_policy_version: Mapped[str] = mapped_column(Text, nullable=False)
+
+    claimed_by: Mapped[str | None] = mapped_column(Text)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    engine_runs_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    operational_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+    started_at: Mapped[datetime] = created_at_col()
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at_col()

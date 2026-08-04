@@ -67,6 +67,7 @@ from app.database.models.ioe import (  # noqa: F401
     ConfidenceComponent,
     FreshnessOutbox,
     FreshnessOutboxAudit,
+    IntegrityCheck,
     MultiYearProjection,
     OptimizationCandidate,
     OptimizationRun,

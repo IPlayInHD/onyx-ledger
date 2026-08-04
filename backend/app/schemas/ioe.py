@@ -65,6 +65,57 @@ class FreshnessOut(BaseModel):
     superseded_by_scenario_id: uuid.UUID | None = None
 
 
+class IntegrityOut(BaseModel):
+    """Whether the SEALED result can still be reproduced.
+
+    A different question from freshness, and never merged with it: a result can
+    be stale and perfectly reproducible, or current and non-reproducible. The
+    second is far more serious and must not hide behind the word "stale".
+
+    `integrity_state` is what a client should render. A `mismatch` appears here
+    as `non_reproducible`, which is the wording the user sees.
+
+    Hashes are deliberately absent. They are restricted diagnostic metadata,
+    they are not proof of ownership, and an ordinary user has no use for them.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    integrity_status: str = Field(
+        description="not_checked | verified | mismatch | unavailable"
+    )
+    integrity_state: str = Field(
+        description="User-visible classification. mismatch is reported as non_reproducible."
+    )
+    integrity_reason_code: str = "NONE"
+    last_integrity_checked_at: datetime | None = None
+    integrity_warning: str = Field(
+        description=(
+            "Plain statement about REPRODUCIBILITY only. It says nothing about "
+            "whether the figure is correct, accepted by the CRA, or legally sound."
+        )
+    )
+
+
+class IntegrityCheckOut(BaseModel):
+    """The outcome of one explicit verification request."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    check_id: uuid.UUID
+    entity_type: str
+    entity_id: uuid.UUID
+    integrity_status: str
+    integrity_state: str
+    integrity_reason_code: str
+    integrity_warning: str
+    duration_ms: int
+    disclaimer: str = (
+        "Replay verification checks that a stored result can be reproduced from "
+        "its own sealed inputs. It is not a statement of tax correctness."
+    )
+
+
 class MonetaryAmount(BaseModel):
     """A dollar figure that cannot be shown without its meaning.
 
@@ -215,6 +266,7 @@ class ScenarioDetailOut(BaseModel):
     error_code: str | None
 
     freshness: FreshnessOut
+    integrity: IntegrityOut
     levers: list[LeverInput]
     assumptions: list[AssumptionInput]
 
@@ -333,6 +385,10 @@ class StrategyPortfolioOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Projections — kept apart from current-year totals
 # ---------------------------------------------------------------------------
+
+    integrity: IntegrityOut | None = None
+
+
 class ProjectionAssumptionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

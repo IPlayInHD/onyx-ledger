@@ -59,6 +59,11 @@ OWNERSHIP_CHAIN = {
     # so one user cannot enumerate another's activity. Rows with a NULL user_id
     # are global (an engine version moved) and are readable by design.
     "freshness_outbox": "user_id (direct, NULL = global event)",
+    # Replay-verification history. Carries `user_id` directly and deliberately:
+    # resolving ownership through three nullable entity parents on every row
+    # would make the policy unindexable. Hashes here are diagnostic, never
+    # authorization.
+    "integrity_check": "user_id (direct)",
 }
 
 # The column each ownership policy resolves through, and the two parents the
