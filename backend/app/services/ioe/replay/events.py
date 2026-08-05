@@ -29,6 +29,7 @@ from app.services.ioe.domain.integrity import (
     CheckStatus,
     EntityType,
     IntegrityReason,
+    is_legacy_unverifiable,
 )
 
 log = get_logger("onyx.ioe.integrity")
@@ -52,6 +53,11 @@ class IntegrityMetrics:
     mismatch: int = 0
     unavailable: int = 0
     failed: int = 0
+    # A subset of `unavailable`: results sealed before the frozen-input
+    # correction, which never carried what a replay would need. Counted
+    # separately so a dashboard does not have to know the reason vocabulary to
+    # avoid reporting the age of the estate as a fleet of broken dependencies.
+    legacy_unverifiable: int = 0
     stale_claims_recovered: int = 0
     total_duration_ms: int = 0
     completed: int = 0
@@ -60,12 +66,20 @@ class IntegrityMetrics:
     def average_duration_ms(self) -> float:
         return self.total_duration_ms / self.completed if self.completed else 0.0
 
+    @property
+    def unavailable_dependency(self) -> int:
+        """`unavailable` minus age: the count an operator can actually act on."""
+        return self.unavailable - self.legacy_unverifiable
+
     def as_dict(self) -> dict:
         return {
             "integrity_verification_started": self.started,
             "integrity_verification_verified": self.verified,
             "integrity_verification_mismatch": self.mismatch,
             "integrity_verification_unavailable": self.unavailable,
+            "integrity_verification_unavailable_dependency": (
+                self.unavailable_dependency),
+            "integrity_verification_legacy_unverifiable": self.legacy_unverifiable,
             "integrity_verification_failed": self.failed,
             "integrity_stale_claims_recovered": self.stale_claims_recovered,
             "integrity_verification_avg_duration_ms": round(self.average_duration_ms, 2),
@@ -105,6 +119,8 @@ class IntegrityEventService:
         METRICS.total_duration_ms += duration_ms
         REASON_COUNTS[reason.value] += 1
         setattr(METRICS, status.value, getattr(METRICS, status.value, 0) + 1)
+        if is_legacy_unverifiable(reason):
+            METRICS.legacy_unverifiable += 1
 
         if status not in LOGGED_OUTCOMES:
             return None

@@ -72,8 +72,23 @@ class IntegrityOut(BaseModel):
     be stale and perfectly reproducible, or current and non-reproducible. The
     second is far more serious and must not hide behind the word "stale".
 
-    `integrity_state` is what a client should render. A `mismatch` appears here
-    as `non_reproducible`, which is the wording the user sees.
+    `integrity_state` is what a client should render, and it distinguishes four
+    cases the two-word status cannot:
+
+      verified             reproduced from its own pinned inputs
+      non_reproducible     a `mismatch` — the replay ran on a result that was
+                           contractually reproducible and produced a DIFFERENT
+                           identity. The only case that implies a defect.
+      unavailable          a pinned artifact is missing, replaced, malformed or
+                           fails its identity check. NOTHING was compared, and
+                           the next sweep may well verify it.
+      legacy_unverifiable  the result predates the frozen-input guarantee, so it
+                           never carried what a replay would need. Not a defect
+                           and not fixable by waiting — re-run it.
+
+    `integrity_reason_code` is the machine-readable axis; `integrity_state` is
+    the human one. A client that counts failures should count
+    `non_reproducible`, never `legacy_unverifiable`.
 
     Hashes are deliberately absent. They are restricted diagnostic metadata,
     they are not proof of ownership, and an ordinary user has no use for them.
@@ -85,7 +100,12 @@ class IntegrityOut(BaseModel):
         description="not_checked | verified | mismatch | unavailable"
     )
     integrity_state: str = Field(
-        description="User-visible classification. mismatch is reported as non_reproducible."
+        description=(
+            "User-visible classification: not_checked | verified | "
+            "non_reproducible | unavailable | legacy_unverifiable. A mismatch "
+            "is reported as non_reproducible; an unavailable explained by the "
+            "result's age is reported as legacy_unverifiable."
+        )
     )
     integrity_reason_code: str = "NONE"
     last_integrity_checked_at: datetime | None = None

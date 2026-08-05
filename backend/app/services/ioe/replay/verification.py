@@ -276,8 +276,8 @@ class IntegrityVerificationService:
                 entity_id=entity_id,
                 status=entity_status,
                 reason_code=reason,
-                integrity_state=user_visible_state(entity_status),
-                integrity_warning=integrity_warning(entity_status),
+                integrity_state=user_visible_state(entity_status, reason),
+                integrity_warning=integrity_warning(entity_status, reason),
                 duration_ms=duration_ms,
                 engine_runs=engine_runs,
             )
@@ -291,8 +291,8 @@ class IntegrityVerificationService:
         return VerificationResult(
             check_id=check.id, entity_type=kind.value, entity_id=entity_id,
             status=status, reason_code=IntegrityReason(check.reason_code),
-            integrity_state=user_visible_state(status),
-            integrity_warning=integrity_warning(status),
+            integrity_state=user_visible_state(status, check.reason_code),
+            integrity_warning=integrity_warning(status, check.reason_code),
             duration_ms=duration_ms, engine_runs=engine_runs,
         )
 

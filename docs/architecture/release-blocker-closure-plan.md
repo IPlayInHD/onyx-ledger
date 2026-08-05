@@ -301,7 +301,7 @@ and `confidence_component` (300) are.
 | **Evidence required** | `mypy` exit 0 for the protected scope; CI failing on a deliberately introduced type error |
 | **Test / drill** | CI check on a branch that introduces a type error in `app/services/ioe/` — must fail the build |
 | **Residual risk** | Low. Some errors are genuine (`Result[Any].rowcount` in `freshness_relay.py`, `JSONResponse` returned where `dict` is declared in `main.py`) and may surface real defects |
-| **Status** | **NOT STARTED** — closable by engineering alone |
+| **Status** | **OPEN** — re-measured at the item 3B closeout (`d97f86a`..): `mypy app/services/tax_engine app/services/ioe app/core app/schemas app/api workers` reports **59 errors in 20 files**, down from 67 only because items 1–3B fixed errors in modules they touched. Neither acceptance condition is met: exit code is not 0, and there is **no CI configuration in this repository at all** (`.github/` does not exist), so "remove `\|\| true` from CI" and the failing-build drill have nothing to act on. Closing this item now requires standing up CI as well as fixing the errors. Closable by engineering alone. |
 
 ### 8. Production replay verification and `non_reproducible` state
 
@@ -311,8 +311,36 @@ and `confidence_component` (300) are.
 | **Change** | Add `integrity_status` ∈ {`unverified`, `verified`, `non_reproducible`} to `ioe.optimization_run` and `ioe.scenario`, with `integrity_verified_at` and `integrity_reason_code`. A scheduled verifier samples completed records, replays the sealed hash from persisted rows (the mechanism `test_golden_replay.py` already proves), and records the outcome. A mismatch sets `non_reproducible`, emits a metric, and fires a high-severity alert. **The sealed evidence is never altered** — `non_reproducible` is a label beside it, exactly as `stale` is |
 | **Evidence required** | Migration adding the columns with the state CHECK; the verifier task; the alert rule; a runbook |
 | **Test / drill** | A test that tampers with a stored result via an owner connection, runs the verifier, and asserts the record becomes `non_reproducible` while the original hash and every child row remain untouched. Confirm `non_reproducible` is distinct from `stale` and that a record can be both |
-| **Residual risk** | Low once implemented. Currently **High** — nothing would detect sealed evidence ceasing to reproduce |
-| **Status** | **NOT STARTED** — the replay mechanism exists and is tested; only the persisted state, scheduling, and alerting are missing |
+| **Residual risk** | Was **High**. Now **Low–Medium**: detection exists and is proven, but nothing invokes it on a schedule, so a mismatch is found only when someone asks |
+| **Status** | **PARTIALLY CLOSED** — see the reconciliation below. Engineering half delivered; scheduling and the Ops artifacts are not. |
+
+#### Entry 8 reconciliation (item 3 + item 3B closeout)
+
+Measured against the stated evidence, not against "related infrastructure exists".
+
+| Required evidence | State | Where |
+|---|---|---|
+| Migration adding the state columns with a CHECK | **DONE** | `0038_integrity_verification` → `db/sql/32_integrity_verification.sql`: `integrity_status`, `integrity_reason_code`, `last_integrity_checked_at`, `latest_integrity_check_id` on `optimization_run`, `scenario` and `strategy_portfolio`, each with `ck_*_integrity_status`. The state set delivered is richer than the plan asked for — `not_checked / verified / mismatch / unavailable`, with `mismatch` surfaced to users as `non_reproducible` — because "unverified" conflated "never checked" with "could not check" |
+| The verifier itself | **DONE** | `app/services/ioe/replay/{resolver,services,verification}.py`. TX-1 claim → replay outside any transaction → TX-2 append outcome + move current metadata. Replays optimizations, portfolios and scenarios against **pinned** versions, refusing when a pinned executable version is not the running one |
+| Sealed evidence never altered | **DONE** | `ioe.reject_result_mutation()` compares stripped row images; only the four integrity columns may move on `strategy_portfolio`. `test_integrity_verification.py` asserts the original hash and every child row survive |
+| A mismatch emits a metric | **DONE** | `IntegrityMetrics` / `REASON_COUNTS` in `replay/events.py`; `ALERTING_OUTCOMES = {MISMATCH}` |
+| **A *scheduled* verifier samples completed records** | **NOT DONE** | `IntegrityScheduler` (`replay/scheduler.py`) exists, is bounded, and uses the `ioe.claim_integrity_targets` keyhole — but it has **no Celery task and no `beat_schedule` entry**. `workers/celery_app.py` schedules the freshness relay and sweep and nothing for integrity. Verification therefore runs only when the API is called |
+| **A high-severity alert rule** | **NOT DONE** | `log.error("alert.integrity_mismatch", …)` emits the signal; no alerting backend consumes it. Depends on §4 |
+| **A runbook** | **NOT DONE** | Depends on §4. No operations function exists |
+| Drill: tamper via an owner connection, verify, assert `non_reproducible` | **DONE** | `test_scenario_integrity_closeout.py::test_a_frozen_scenario_whose_result_was_altered_is_a_genuine_mismatch` — tampers with the sealed `scenario_result_hash` over a superuser connection (the application cannot: the column is sealed) and asserts `mismatch` / `non_reproducible` |
+| Drill: `non_reproducible` distinct from `stale`, and a record can be both | **DONE** | `test_scenario_integrity_closeout.py::test_freshness_may_label_stale_without_moving_any_pin_or_result` — the world changes, freshness may relabel, no pin or stored number moves, and the replay still verifies |
+
+**Closeout finding.** The item 3B closeout also found that `mismatch` was being applied to
+results that predate the frozen-input correction, which asserts a deterministic replay
+regression that nothing demonstrates. Corrected: `LEGACY_EXECUTION_POLICY_UNVERIFIABLE`
+(migration `0040_legacy_integrity_reason`) makes those `unavailable` with a distinct reason,
+distinct user-visible state (`legacy_unverifiable`), distinct wording, and a distinct metric
+so readiness reporting does not count age as failure. Evidence:
+`test_scenario_integrity_closeout.py` (30 tests) and
+`docs/architecture/ioe-frozen-scenario-baseline-integrity.md` §6b.
+
+**To close entry 8:** a Celery task wrapping `IntegrityScheduler` plus a `beat_schedule` entry
+(engineering, small), then the alert rule and runbook (blocked on §4).
 
 ### 9. Real freshness producer wiring
 
@@ -323,7 +351,7 @@ and `confidence_component` (300) are.
 | **Evidence required** | A call site for each of the six categories; a test per category asserting the outbox row commits with the change and rolls back with it |
 | **Test / drill** | Per category: make the change, assert the event exists in the same transaction, drain the relay, assert affected records go stale and sealed evidence is untouched. Plus a **coverage test** asserting every `FreshnessEvent` member has at least one production call site — so a helper cannot go uncalled again |
 | **Residual risk** | Low once wired. Currently **Medium**: read-time evaluation and the hourly sweep still prevent a stale result being shown as current, so this is a *timeliness* gap, not a correctness one |
-| **Status** | **NOT STARTED** — 2 of 6 wired (analysis completion, rule publication/supersession); closable by engineering alone |
+| **Status** | **OPEN** — re-measured at the item 3B closeout. **Zero of the six required categories are wired.** A repository-wide search for producer calls outside `freshness_events.py` / `freshness_producers.py` finds exactly three call sites: `analysis/service.py:104` (`ANALYSIS_COMPLETED`) and `tkms/publication/service.py:77,94` (`RULE_SUPERSEDED`, `RULE_PUBLISHED`) — none of which is one of the six. Financial, profile, document, TKMS-withdrawal, reference-data and version-change producers have no call site, and the `FreshnessEvent` coverage test the plan asks for does not exist. The earlier "2 of 6" wording counted events that are not on the list. Closable by engineering alone. |
 
 ### 10. External sign-offs
 
@@ -378,17 +406,49 @@ Staging may proceed under the gate's recommendation, with these constraints held
 
 ---
 
+## Blocker status — as measured, not as remembered
+
+Every status below was re-derived from the repository during the item 3B closeout. A row may
+only say CLOSED if its own **Evidence required** line is satisfied; related infrastructure
+existing is not closure. The date and commit are the last time the row was *measured*, not the
+last time it was edited.
+
+| # | Item | Status | Measured at | How it was measured |
+|---|---|---|---|---|
+| — | Partition security fix | **CLOSED** | item 1 | `tests/security/test_partition_invariant.py`, 8 tests |
+| — | Query fan-out | **CLOSED** (steps 1–6) | items 1–2 | statement counts before/after on a clean database |
+| 1 | Backup, PITR, restore drill | **OPEN** | — | staffing-blocked (no Ops function) |
+| 2 | Forward-only migration recovery | **OPEN** | — | staffing-blocked; depends on 1 |
+| 3 | Rate limits, request bounds | **OPEN** | — | not started; closure-phase item 5 |
+| 4 | Monitoring, alerts, runbooks | **OPEN** | — | staffing-blocked for the alerting half |
+| 5 | Log redaction and scanning | **OPEN** | — | not started |
+| 6 | Reproducible dependency locking | **OPEN** | — | not started; closure-phase item 6 |
+| 7 | Blocking type checking | **OPEN** | 3B closeout | `mypy` over the protected scope → **59 errors in 20 files**; no `.github/` in the repository, so there is no CI to gate |
+| 8 | Replay verification + `non_reproducible` | **PARTIALLY CLOSED** | 3B closeout | evidence table above: schema, verifier, immutability, metrics and both drills **done**; **beat scheduling, alert rule and runbook not done** |
+| 9 | Real freshness producer wiring | **OPEN** | 3B closeout | producer call-site search → **0 of 6 required categories**; the three existing call sites are not among them |
+| 10 | External sign-offs | **OPEN** | — | staffing-blocked; long lead time |
+
+**Rule for the final report.** The delta-readiness report must recompute this table from the
+repository — `mypy` over the protected scope, the producer call-site search, the `beat_schedule`
+contents, and the per-item test files — and must not copy a status from an earlier revision of
+this document. A status with no *Measured at* entry is unverified and counts as OPEN.
+
+---
+
 ## Delta readiness gate
 
 On closure, run a gate covering **only**:
 
-- the eleven items above, each against its stated evidence and drill;
+- the eleven items above, each against its stated evidence and drill, **re-measured** per the
+  rule above;
 - the partition security fix (re-run `test_partition_invariant.py`);
 - the full test suite, to confirm no regression;
 - `alembic check`, migration smoke on all four database shapes, and the golden replay suite.
 
 **Do not repeat the full architecture review.** Reopen an architecture item only if closing a
-blocker forces a material redesign — the most likely candidate is §8, if adding `integrity_status`
-to sealed records turns out to require changing how evidence is sealed rather than labelled beside
-it. On current reading it does not: `non_reproducible` is a label on the record, exactly as `stale`
-is, and the sealed columns stay untouched.
+blocker forces a material redesign — the most likely candidate was §8, if adding
+`integrity_status` to sealed records turned out to require changing how evidence is sealed
+rather than labelled beside it. **It did not.** `non_reproducible` is a label on the record,
+exactly as `stale` is; the sealed columns stay untouched, and `ioe.reject_result_mutation()`
+enforces that by comparing stripped row images rather than by trusting the caller. No
+architecture item was reopened by items 3, 3A or 3B.

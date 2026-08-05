@@ -76,9 +76,14 @@ def integrity_of(row) -> IntegrityOut:
     that.
     """
     from app.services.ioe.domain.integrity import integrity_warning, user_visible_state
-    from app.services.ioe.frozen.models import scenario_execution_policy
+    from app.services.ioe.frozen.models import (
+        SCENARIO_EXECUTION_POLICY_INVALID,
+        FrozenSnapshotError,
+        scenario_execution_policy,
+    )
 
     status = getattr(row, "integrity_status", None) or "not_checked"
+    reason = getattr(row, "integrity_reason_code", None) or "NONE"
     # An optimization records the policy in a column; a scenario records it in
     # its version manifest, where absence means legacy — silence is never read
     # as the corrected policy, or a historical row would inherit a guarantee it
@@ -86,13 +91,18 @@ def integrity_of(row) -> IntegrityOut:
     # inventing one here would be a claim nothing backs.
     policy: str | None = getattr(row, "input_execution_policy_version", None)
     if policy is None and hasattr(row, "scenario_spec_hash"):
-        policy = scenario_execution_policy(getattr(row, "version_manifest", None))
+        try:
+            policy = scenario_execution_policy(getattr(row, "version_manifest", None))
+        except FrozenSnapshotError:
+            # A read must not 500 on one corrupt row, and it must not pretend
+            # the row is ordinary either. The defect is named, not swallowed.
+            policy = SCENARIO_EXECUTION_POLICY_INVALID
     return IntegrityOut(
         integrity_status=status,
-        integrity_state=user_visible_state(status),
-        integrity_reason_code=getattr(row, "integrity_reason_code", None) or "NONE",
+        integrity_state=user_visible_state(status, reason),
+        integrity_reason_code=reason,
         last_integrity_checked_at=getattr(row, "last_integrity_checked_at", None),
-        integrity_warning=integrity_warning(status),
+        integrity_warning=integrity_warning(status, reason),
         execution_policy=policy,
     )
 

@@ -120,6 +120,99 @@ An operator reading an alert can tell which workflow refused from the code alone
 client can offer the right remedy — "re-run the analysis" for an unsupported legacy format
 is a different action from "the snapshot no longer matches its hash".
 
+## 6b. Integrity-state semantics (closeout)
+
+Four verdicts, and the distinctions between them are the point. Three have different
+remedies; one is an accusation.
+
+| Case | `integrity_status` | `integrity_reason_code` | `integrity_state` (user-visible) | Meaning |
+|---|---|---|---|---|
+| Replay reproduced the sealed identity | `verified` | `NONE` | `verified` | The recorded calculation still reproduces from its own pinned inputs. |
+| A **frozen-policy** scenario replayed and produced a different identity | `mismatch` | `RESULT_HASH_MISMATCH` | `non_reproducible` | A genuine deterministic replay regression. The only case that may be reported as non-reproducible. |
+| A pinned artifact is missing, replaced, malformed or fails its identity check | `unavailable` | `BASELINE_SNAPSHOT_UNAVAILABLE`, `BASELINE_RESULT_UNAVAILABLE`, `PINNED_RULE_SNAPSHOT_UNAVAILABLE`, `SEALED_EVIDENCE_INCOMPLETE`, … | `unavailable` | Nothing was compared. Fixable: when the dependency returns, the next sweep verifies. |
+| The result predates the frozen-baseline guarantee | `unavailable` | `LEGACY_EXECUTION_POLICY_UNVERIFIABLE` | `legacy_unverifiable` | It was computed from live sources that were never recorded. Not fixable and not a fault — re-run it to obtain a verifiable result. |
+
+**Why legacy is not a mismatch.** Replaying a legacy scenario compares its sealed numbers
+against a snapshot it was never computed from. The difference that produces is not evidence of
+regression — the guarantee did not exist yet. Recording it as `mismatch` would assert a fault
+nothing has demonstrated, and would bury genuine regressions inside a population of old rows
+that can only grow. `_refuse_legacy()` in `replay/services.py` short-circuits before any
+dependency work, for scenarios, optimizations and portfolios alike (a portfolio inherits its
+run's policy).
+
+**Why legacy is not an ordinary `unavailable` either.** `LEGACY_UNVERIFIABLE` is a distinct
+user-visible state with its own wording, because "a pinned dependency is unavailable" tells a
+user to wait for something that is never coming.
+
+The three requirements for an umbrella status are met:
+
+1. **Machine-readable.** `LEGACY_EXECUTION_POLICY_UNVERIFIABLE` is its own enumerated reason,
+   admitted to the `ioe.integrity_check` CHECK constraint by migration `0040`, and excluded from
+   `ck_integrity_check_mismatch_reason` by construction.
+2. **Not counted as failure.** `IntegrityMetrics` carries `legacy_unverifiable` and derives
+   `unavailable_dependency = unavailable − legacy_unverifiable`, so a dashboard reports the
+   actionable count without knowing the reason vocabulary.
+   `test_readiness_counting_can_exclude_legacy_from_genuine_failures` asserts a legacy scenario
+   contributes zero to the mismatch count.
+3. **Preserved in the API and the docs.** `IntegrityOut` carries `integrity_status`,
+   `integrity_reason_code`, `integrity_state` and `execution_policy`, and `integrity_warning`
+   is reason-aware — the legacy text says "Nothing indicates it is wrong", the mismatch text
+   says "could not be reproduced … under review".
+
+## 6c. Policy validation (closeout)
+
+`scenario_execution_policy(manifest)` is strict, and it is the only reading of the key —
+presentation, sealing and replay all call it.
+
+| Stored value | Interpretation |
+|---|---|
+| key absent (or manifest `None`) | `live_baseline_legacy` — the **only** tolerated silence |
+| `"frozen_snapshot_v1"` | current policy |
+| `"live_baseline_legacy"` | legacy, stated explicitly |
+| unknown string, wrong case, unsupported version | **fails closed** — `SCENARIO_EXECUTION_POLICY_INVALID` |
+| explicit `null`, number, array, nested object | **fails closed** |
+| manifest itself not an object | **fails closed** |
+
+A malformed value never degrades to `live_baseline_legacy`. A corrupt manifest is not a
+historical manifest, and filing it beside genuinely old rows is how a defect stops being looked
+at. In replay it becomes `unavailable / SEALED_EVIDENCE_INCOMPLETE`, never a legacy verdict.
+
+Absence is a *reliable* marker rather than a guess because `assert_current_scenario_policy()`
+runs in TX-1 on the manifest the service has just built: after that line no scenario can be
+created without an explicit, current, well-formed policy, so any stored row lacking one was
+necessarily written before the policy existed.
+
+**Immutability.** `version_manifest` is in the sealed column list of `trg_guard_transition`, so
+the policy cannot be changed once `workflow_status = 'completed'`.
+`test_the_sealed_policy_cannot_be_changed_after_completion` asserts the database refuses the
+UPDATE. The manifest is also hashed into `manifest_hash`, which is itself sealed and enters
+`scenario_spec_hash`, so a policy change would additionally invalidate the scenario's identity.
+
+## 6d. Hash coverage (closeout)
+
+Normative order: **pins → `scenario_spec_hash` → `frozen.bind(spec_hash)` → idempotency**.
+Every execution-relevant component is committed before idempotency resolves.
+
+| Component | Reaches the identity via |
+|---|---|
+| Frozen baseline input identity | `baseline_input_snapshot_hash` (top-level argument) |
+| Baseline result identity | `{"baseline_result_hash": …}` in the canonical input, **and** the manifest |
+| Objective code / version | `{"objective_code", "objective_version"}`, **and** the manifest |
+| Lever-registry version | `lever_registry_version` argument, **and** the manifest |
+| Assumption-registry version | manifest → `manifest_hash` |
+| Support-score version (`confidence_algorithm_version`) | manifest → `manifest_hash` |
+| Engine version / reference data | `engine_version`, `engine_config_version` arguments, **and** the manifest |
+| Rule-version set and snapshot hash | `rule_version_set`, `reference_data_versions` |
+| Snapshot schema version | manifest → `manifest_hash` |
+| **Frozen-baseline execution policy** | manifest → `manifest_hash` |
+| Tax year, jurisdiction | top-level arguments |
+
+`test_every_execution_relevant_pin_changes_the_scenario_identity` moves each of these and
+asserts the identity moves with it; `test_non_semantic_metadata_does_not_change_the_identity`
+asserts label and note do not. Idempotency resolves against `scenario_spec_hash` and never
+against raw request JSON, so two requests differing only in label replay the same scenario
+while a different policy, registry or baseline is a different scenario.
+
 ## 7. API surface
 
 `ScenarioBaselineUnavailable` (`409`,
@@ -132,7 +225,18 @@ user's financial data and does not travel with the error.
 `IntegrityOut` gains `execution_policy`. An optimization reads it from its
 `input_execution_policy_version` column; a scenario reads it from its version manifest,
 where **absence means legacy** — see §10. A portfolio reports `null`: its policy is its
-run's, and inventing one here would be a claim nothing backs.
+run's, and inventing one here would be a claim nothing backs. A stored manifest that is
+malformed rather than merely old reports `SCENARIO_EXECUTION_POLICY_INVALID`: a read must not
+500 on one bad row, and it must not pretend the row is ordinary either.
+
+**Internal diagnostics.** The 409 body carries one enumerated code, which is correct and also
+useless to an operator at 3am. `_record_baseline_failure()` emits a sanitized structured log —
+`user_id`, `analysis_id`, `failure_stage`, `expected_artifact`, `expected_artifact_id`,
+`expected_snapshot_hash`, `analysis_status`, `execution_policy`, `reason_code`. Every field is
+an identifier, an enumerated value or a **content hash**: a snapshot hash names a payload
+without revealing a byte of it, which is exactly the property wanted for a line that will be
+shipped to a log aggregator. `test_the_internal_diagnostic_names_the_snapshot_by_hash_only`
+asserts the hash is present and the figures behind it are not.
 
 ## 8. Live-access audit
 
@@ -251,10 +355,20 @@ inside a snapshot and asserts it appears in no log record, no manifest and no ch
 
 ## 15. Migration
 
-**None.** The execution policy and the baseline-result pin both live in the existing
-`version_manifest` JSONB column and on the existing `scenario.baseline_result_hash` column.
-No table, column, constraint, index or RLS policy changed in this item. `alembic upgrade head`
-and `alembic check` are unchanged from item 3A's `0039_input_execution_policy`.
+The item itself needed none: the execution policy and the baseline-result pin both live in the
+existing `version_manifest` JSONB column and on the existing `scenario.baseline_result_hash`
+column.
+
+The **closeout** added one, `0040_legacy_integrity_reason` → `db/sql/34_legacy_integrity_reason.sql`,
+because the reason enumeration on `ioe.integrity_check` is a closed CHECK constraint and
+`LEGACY_EXECUTION_POLICY_UNVERIFIABLE` could not be recorded without widening it. Reusing an
+existing reason was rejected: none of them means "legacy", and the whole purpose is a
+machine-readable distinction.
+
+Additive in effect — one CHECK widened by one value, one index added. Every row valid under the
+old constraint is valid under the new one, so the constraint rewrite is a validation pass with
+no data change and no lock beyond the ALTER itself. Forward-only downgrade, consistent with the
+chain.
 
 ## 16. Performance
 

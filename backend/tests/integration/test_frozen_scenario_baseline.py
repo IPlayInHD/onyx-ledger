@@ -47,6 +47,7 @@ from app.services.ioe.frozen.models import (
     PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE,
     FrozenScenarioExecutionInput,
     ScenarioExecutionPolicy,
+    ScenarioPolicyError,
     scenario_execution_policy,
     snapshot_hash,
 )
@@ -537,11 +538,12 @@ async def test_a_manifest_without_the_policy_key_reads_as_legacy():
     assert scenario_execution_policy(None) == (
         ScenarioExecutionPolicy.LIVE_BASELINE_LEGACY.value)
     assert scenario_execution_policy(
-        {"scenario_execution_policy_version": "made_up"}
-    ) == ScenarioExecutionPolicy.LIVE_BASELINE_LEGACY.value
-    assert scenario_execution_policy(
         {"scenario_execution_policy_version": "frozen_snapshot_v1"}
     ) == ScenarioExecutionPolicy.FROZEN_SNAPSHOT_V1.value
+    # A malformed value is NOT silently read as legacy — see the closeout suite,
+    # `test_a_malformed_policy_fails_closed_and_never_falls_back`.
+    with pytest.raises(ScenarioPolicyError):
+        scenario_execution_policy({"scenario_execution_policy_version": "made_up"})
 
 
 @pytest.mark.asyncio

@@ -41,6 +41,10 @@ from app.services.ioe.frozen import FrozenScenarioInputService, FrozenSnapshotEr
 from app.services.ioe.frozen.models import (
     PINNED_SCENARIO_BASELINE_HASH_MISMATCH,
     PINNED_SCENARIO_BASELINE_UNAVAILABLE,
+    SCENARIO_EXECUTION_POLICY_INVALID,
+    SCENARIO_EXECUTION_POLICY_VERSION,
+    InputExecutionPolicy,
+    scenario_execution_policy,
 )
 from app.services.ioe.portfolio.service import engine_evaluator
 from app.services.ioe.replay.resolver import ReplayDependencyResolver
@@ -55,7 +59,25 @@ _SCENARIO_DEPENDENCY_REASON: dict[str, IntegrityReason] = {
     PINNED_SCENARIO_BASELINE_UNAVAILABLE: IntegrityReason.BASELINE_RESULT_UNAVAILABLE,
     PINNED_SCENARIO_BASELINE_HASH_MISMATCH: (
         IntegrityReason.BASELINE_RESULT_UNAVAILABLE),
+    SCENARIO_EXECUTION_POLICY_INVALID: IntegrityReason.SEALED_EVIDENCE_INCOMPLETE,
 }
+
+
+def _refuse_legacy(policy: str | None, current: str) -> None:
+    """Refuse to replay a result produced before the frozen-input correction.
+
+    Replaying one would compare its sealed numbers against a snapshot it was
+    never computed from. The difference that produces is not a replay
+    regression — the guarantee simply did not exist yet — so reporting it as a
+    `mismatch` would assert something no evidence supports, and would bury real
+    regressions inside a population of old rows.
+
+    `unavailable` with an explicit legacy reason is the honest verdict: the
+    dependency that would make verification possible was never recorded.
+    """
+    if (policy or "") != current:
+        raise DependencyUnavailable(
+            IntegrityReason.LEGACY_EXECUTION_POLICY_UNVERIFIABLE)
 
 
 @dataclass
@@ -91,6 +113,10 @@ class OptimizationReplayService:
                 raise SealedEvidenceIncomplete()
             if run.workflow_status != "completed" or not run.optimization_result_hash:
                 raise SealedEvidenceIncomplete()
+            _refuse_legacy(
+                run.input_execution_policy_version,
+                InputExecutionPolicy.FROZEN_SNAPSHOT_V1.value,
+            )
 
             deps = await ReplayDependencyResolver(session, self.user_id).for_optimization(run)
             expected_result_hash = run.optimization_result_hash
@@ -180,6 +206,12 @@ class PortfolioReplayService:
                 # Sealed before the portfolio hash was written. Nothing to
                 # compare against; that is unavailable, not a mismatch.
                 raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
+            # A portfolio has no policy of its own; it inherits its run's, and
+            # a legacy run's portfolio is exactly as unverifiable as the run.
+            _refuse_legacy(
+                run.input_execution_policy_version,
+                InputExecutionPolicy.FROZEN_SNAPSHOT_V1.value,
+            )
 
             deps = await ReplayDependencyResolver(session, self.user_id).for_optimization(run)
             canonical, engine_runs = await self._rebuild(session, portfolio, deps)
@@ -364,6 +396,17 @@ class ScenarioReplayService:
                 raise SealedEvidenceIncomplete()
             if scenario.workflow_status != "completed" or not scenario.scenario_result_hash:
                 raise SealedEvidenceIncomplete()
+
+            # Before any dependency work: was this scenario computed under a
+            # policy that makes deterministic replay meaningful at all?
+            try:
+                policy = scenario_execution_policy(scenario.version_manifest)
+            except FrozenSnapshotError as exc:
+                raise DependencyUnavailable(
+                    _SCENARIO_DEPENDENCY_REASON.get(
+                        exc.reason, IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
+                ) from exc
+            _refuse_legacy(policy, SCENARIO_EXECUTION_POLICY_VERSION.value)
 
             deps = await ReplayDependencyResolver(
                 session, self.user_id).for_scenario(scenario)

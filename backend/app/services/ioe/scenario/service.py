@@ -34,8 +34,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import Conflict, DomainError, NotFound
+from app.core.logging import get_logger
 from app.database.bulk import bulk_insert
 from app.database.models import (
+    AnalysisInputSnapshot,
     AnalysisRun,
     RunRuleSnapshot,
     Scenario,
@@ -79,7 +81,9 @@ from app.services.ioe.frozen import (
 )
 from app.services.ioe.frozen.models import (
     SCENARIO_EXECUTION_POLICY_VERSION,
+    ScenarioExecutionPolicy,
     ScenarioFrozenInputError,
+    assert_current_scenario_policy,
 )
 from app.services.ioe.portfolio.service import to_tax_input
 from app.services.ioe.snapshot.service import RuleSnapshotService
@@ -91,6 +95,8 @@ from app.services.tax_engine.service import ENGINE_VERSION
 SCENARIO_SERVICE_VERSION = "1.0.0"
 
 MONEY = Decimal("0.01")
+
+log = get_logger("onyx.ioe.scenario")
 
 # Sanitized, enumerated failure codes. Never a message, stack trace, or PII.
 ERROR_ANALYSIS_NOT_READY = "ANALYSIS_NOT_READY"
@@ -251,6 +257,13 @@ class ScenarioService:
                 frozen.frozen_analysis_input.snapshot_schema_version),
             "baseline_result_hash": frozen.baseline_result_hash,
         }
+        # Re-read what we just wrote, through the same normalizer replay and
+        # presentation use. This is what makes "an absent policy key means the
+        # scenario is historical" a property of the data rather than an
+        # assumption about it: after this line no scenario can be created
+        # without an explicit, current, well-formed policy, so any stored row
+        # lacking one was necessarily written before the policy existed.
+        assert_current_scenario_policy(manifest)
         manifest_hash = c.version_manifest_hash(manifest)
 
         pinned_spec = PinnedScenarioSpec(
@@ -272,6 +285,52 @@ class ScenarioService:
         pinned_spec.spec_hash = self.compute_spec_hash(pinned_spec)
         pinned_spec.frozen = frozen.bind(scenario_spec_hash=pinned_spec.spec_hash)
         return pinned_spec
+
+    async def _record_baseline_failure(
+        self, session: AsyncSession, analysis_id: uuid.UUID,
+        exc: ScenarioFrozenInputError,
+    ) -> None:
+        """Sanitized internal diagnostics for a refused baseline.
+
+        The external 409 carries one enumerated code, which is correct and also
+        useless to an operator at 3am: it says a baseline could not be resolved
+        but not which artifact, which stage, or whether the analysis is even
+        capable of producing one. This records the missing half.
+
+        Everything here is an identifier, an enumerated value, or a content
+        HASH. No decoded snapshot, no financial figure, no document content and
+        no user-supplied text — a snapshot hash names a payload without
+        revealing a byte of it, which is exactly the property wanted for a log
+        line that will be shipped to an aggregator.
+        """
+        analysis_state = "unknown"
+        expected_snapshot_hash = None
+        snapshot_present = False
+        try:
+            analysis = await session.get(AnalysisRun, analysis_id)
+            analysis_state = str(getattr(analysis, "status", "absent"))
+            snapshot = await session.get(AnalysisInputSnapshot, analysis_id)
+            snapshot_present = snapshot is not None
+            expected_snapshot_hash = getattr(snapshot, "snapshot_hash", None)
+        except Exception:  # noqa: BLE001 - diagnostics must never mask the refusal
+            pass
+
+        log.warning(
+            "scenario_baseline_unavailable",
+            user_id=str(self.user_id),
+            analysis_id=str(analysis_id),
+            failure_stage="tx1_pin_specification",
+            expected_artifact="analysis_input_snapshot",
+            expected_artifact_id=str(analysis_id),
+            expected_snapshot_hash=expected_snapshot_hash,
+            snapshot_present=snapshot_present,
+            analysis_status=analysis_state,
+            # The policy this attempt ran UNDER. Always the current one — no
+            # scenario row exists to be legacy, and reporting `legacy` merely
+            # because a snapshot is missing would conflate two different facts.
+            execution_policy=ScenarioExecutionPolicy.FROZEN_SNAPSHOT_V1.value,
+            reason_code=exc.reason,
+        )
 
     @staticmethod
     def compute_spec_hash(pinned: PinnedScenarioSpec) -> str:
@@ -353,6 +412,7 @@ class ScenarioService:
                 # Fail closed BEFORE the header exists: an unresolvable baseline
                 # produces no scenario row, no levers, no assumptions and no
                 # sealed children — nothing that would later look like a result.
+                await self._record_baseline_failure(session, analysis_id, exc)
                 raise ScenarioBaselineUnavailable(exc.reason) from None
             existing = await self._resolve_idempotency(session, pinned, idempotency_key)
             if existing is not None:

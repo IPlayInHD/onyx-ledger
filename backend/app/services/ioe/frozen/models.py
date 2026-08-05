@@ -250,6 +250,7 @@ PINNED_SCENARIO_BASELINE_REPRODUCTION_FAILED = (
     "PINNED_SCENARIO_BASELINE_REPRODUCTION_FAILED")
 SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED = (
     "SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED")
+SCENARIO_EXECUTION_POLICY_INVALID = "SCENARIO_EXECUTION_POLICY_INVALID"
 
 # The optimization reason a scenario failure maps FROM. One reconstruction
 # service raises the analysis-level codes; the scenario layer translates them so
@@ -264,25 +265,79 @@ SCENARIO_REASON_FOR: dict[str, str] = {
     FROZEN_INPUT_RECONSTRUCTION_FAILED: SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED,
 }
 
-SCENARIO_SNAPSHOT_REASONS = frozenset(SCENARIO_REASON_FOR.values())
+SCENARIO_SNAPSHOT_REASONS = frozenset(SCENARIO_REASON_FOR.values()) | {
+    # not reachable by translation — raised directly when the stored manifest
+    # itself is the problem rather than the snapshot behind it
+    SCENARIO_EXECUTION_POLICY_INVALID,
+}
 
 
 class ScenarioFrozenInputError(FrozenSnapshotError):
     """A scenario-scoped snapshot or baseline failure."""
 
 
-def scenario_execution_policy(manifest: dict[str, Any] | None) -> str:
-    """How a stored scenario's baseline was obtained.
+class ScenarioPolicyError(ScenarioFrozenInputError):
+    """The stored execution policy is absent where required, or malformed.
 
-    Absence means legacy. A manifest written before this correction cannot
-    carry the key, and reading its silence as `frozen_snapshot_v1` would hand a
-    historical scenario a guarantee it never had — the one failure mode worse
-    than the original defect, because it is undetectable afterwards.
+    A subclass of the scenario input error so it reaches the same sanitized 409
+    the other refusals do: a client cannot act differently on it, and the
+    difference that matters — which code — is already carried by `reason`.
     """
-    value = (manifest or {}).get("scenario_execution_policy_version")
-    if value in tuple(ScenarioExecutionPolicy):
-        return str(value)
-    return ScenarioExecutionPolicy.LIVE_BASELINE_LEGACY.value
+
+
+def scenario_execution_policy(manifest: dict[str, Any] | None) -> str:
+    """How a stored scenario's baseline was obtained. Strict.
+
+    Exactly one thing is tolerated: **absence**. A manifest written before this
+    correction cannot carry the key, and every manifest written after it must
+    (`assert_current_scenario_policy` refuses to seal one that does not), so an
+    absent key is a reliable marker of a historical scenario rather than a
+    guess. Reading that silence as `frozen_snapshot_v1` would hand a historical
+    scenario a guarantee it never had — undetectably.
+
+    Everything else fails closed. An explicit `null`, an unknown string, a
+    number, a nested object or a manifest that is not an object at all is a
+    defect in the stored evidence, and quietly answering `live_baseline_legacy`
+    would bury it: the row would be filed beside genuinely historical scenarios
+    and never looked at again. A corrupt manifest is not a historical manifest.
+    """
+    if manifest is None:
+        return ScenarioExecutionPolicy.LIVE_BASELINE_LEGACY.value
+    if not isinstance(manifest, dict):
+        raise ScenarioPolicyError(SCENARIO_EXECUTION_POLICY_INVALID)
+    if "scenario_execution_policy_version" not in manifest:
+        return ScenarioExecutionPolicy.LIVE_BASELINE_LEGACY.value
+
+    value = manifest["scenario_execution_policy_version"]
+    if not isinstance(value, str) or value not in tuple(ScenarioExecutionPolicy):
+        # includes explicit null, wrong JSON type, and unsupported versions
+        raise ScenarioPolicyError(SCENARIO_EXECUTION_POLICY_INVALID)
+    return value
+
+
+def is_legacy_scenario_policy(manifest: dict[str, Any] | None) -> bool:
+    """True when the scenario predates the frozen-baseline guarantee.
+
+    The one interpretation of the policy, shared by presentation, sealing and
+    replay verification. A second reading of the same key is how two parts of a
+    system come to disagree about what a stored row means.
+    """
+    return scenario_execution_policy(manifest) == (
+        ScenarioExecutionPolicy.LIVE_BASELINE_LEGACY.value)
+
+
+def assert_current_scenario_policy(manifest: dict[str, Any] | None) -> str:
+    """Refuse to seal a scenario that does not state the current policy.
+
+    This is what makes "absent means historical" a property of the data rather
+    than an assumption about it: after this check, no scenario can be created
+    without an explicit, current, well-formed policy, so any row lacking one was
+    necessarily written before the policy existed.
+    """
+    policy = scenario_execution_policy(manifest)
+    if policy != SCENARIO_EXECUTION_POLICY_VERSION.value:
+        raise ScenarioPolicyError(SCENARIO_EXECUTION_POLICY_INVALID)
+    return policy
 
 
 def as_scenario_failure(error: FrozenSnapshotError) -> ScenarioFrozenInputError:
@@ -385,6 +440,7 @@ __all__ = [
     "PINNED_SNAPSHOT_INCOMPLETE",
     "PINNED_SNAPSHOT_SCHEMA_UNSUPPORTED",
     "PINNED_SNAPSHOT_UNAVAILABLE",
+    "SCENARIO_EXECUTION_POLICY_INVALID",
     "SCENARIO_EXECUTION_POLICY_VERSION",
     "SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED",
     "SCENARIO_REASON_FOR",
@@ -398,8 +454,11 @@ __all__ = [
     "InputExecutionPolicy",
     "ScenarioExecutionPolicy",
     "ScenarioFrozenInputError",
+    "ScenarioPolicyError",
     "as_scenario_failure",
+    "assert_current_scenario_policy",
     "canonical_snapshot",
+    "is_legacy_scenario_policy",
     "scenario_execution_policy",
     "reconstruct_tax_input",
     "snapshot_hash",
