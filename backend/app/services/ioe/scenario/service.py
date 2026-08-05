@@ -168,7 +168,7 @@ class ScenarioService:
 
         # The frozen baseline. Read once, then cloned for every hypothetical.
         engine = TaxEngineService(session)
-        baseline_input = await engine.build_input(self.user_id, analysis.tax_year)
+        baseline_input = await engine.build_input_from_live_sources(self.user_id, analysis.tax_year)
         baseline_result = engine.run(baseline_input)
         baseline_inputs = inputs_from(baseline_input)
         baseline_tax = baseline_result.total_payable.quantize(MONEY, ROUND_HALF_UP)

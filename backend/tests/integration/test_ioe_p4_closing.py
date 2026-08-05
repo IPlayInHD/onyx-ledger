@@ -163,7 +163,7 @@ async def test_re_evaluation_uses_the_same_facts_the_first_evaluation_used():
     uid, _ = await _user_with_income(employment="88000")
     async with unit_of_work(user_id=uid, actor_type="user") as s:
         engine = TaxEngineService(s)
-        inp = await engine.build_input(uid, 2025)
+        inp = await engine.build_input_from_live_sources(uid, 2025)
         first = engine.facts(inp, engine.run(inp))
 
     assert engine_facts_for(inputs_from(inp)) == first
@@ -178,7 +178,7 @@ async def test_a_lower_net_income_after_an_action_changes_what_rules_match():
 
     uid, _ = await _user_with_income(employment="95000")
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        inp = await TaxEngineService(s).build_input(uid, 2025)
+        inp = await TaxEngineService(s).build_input_from_live_sources(uid, 2025)
 
     before = engine_facts_for(inputs_from(inp))
     after_inputs = dict(inputs_from(inp))

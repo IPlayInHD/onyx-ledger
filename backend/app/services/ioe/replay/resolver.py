@@ -19,10 +19,9 @@ one is likewise `unavailable`.
 """
 from __future__ import annotations
 
-import dataclasses
 import uuid
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -47,6 +46,10 @@ from app.services.ioe.domain.integrity import (
     SUPPORTED_CANONICAL_SERIALIZATION_VERSIONS,
     DependencyUnavailable,
     IntegrityReason,
+)
+from app.services.ioe.frozen.models import (
+    FrozenSnapshotError,
+    reconstruct_tax_input,
 )
 from app.services.ioe.normalization.service import NORMALIZATION_VERSION
 from app.services.ioe.portfolio.eligibility import ELIGIBILITY_RECHECK_VERSION
@@ -174,7 +177,13 @@ class ReplayDependencyResolver:
         row = await self.s.get(AnalysisInputSnapshot, analysis_id)
         if row is None or not isinstance(row.snapshot, dict):
             raise DependencyUnavailable(IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE)
-        return _tax_input_from(row.snapshot), row.snapshot_hash
+        # One codec, shared with the writer and with TX-1. A second
+        # reconstruction here would be a second chance to disagree.
+        try:
+            return reconstruct_tax_input(row.snapshot), row.snapshot_hash
+        except FrozenSnapshotError as exc:
+            raise DependencyUnavailable(
+                IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE) from exc
 
     async def rule_snapshot(
         self, *, run_id: uuid.UUID | None = None, scenario_id: uuid.UUID | None = None,
@@ -280,39 +289,6 @@ class ReplayDependencyResolver:
             baseline_tax=scenario.baseline_tax,
             checked_versions=checked,
         )
-
-
-def _tax_input_from(snapshot: dict) -> TaxInput:
-    """Rebuild `TaxInput` from the frozen snapshot's stringified fields.
-
-    The snapshot is written as `{name: str(value)}`, so every value comes back
-    as text and is coerced by the dataclass's declared type. A field the
-    snapshot does not carry makes the baseline unreconstructible — reconstructing
-    it from a default would silently invent an input.
-    """
-    values: dict[str, Any] = {}
-    for f in dataclasses.fields(TaxInput):
-        if f.name not in snapshot:
-            raise DependencyUnavailable(
-                IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE)
-        raw = snapshot[f.name]
-        try:
-            values[f.name] = _coerce(raw, f.type)
-        except (InvalidOperation, TypeError, ValueError) as exc:
-            raise DependencyUnavailable(
-                IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE) from exc
-    return TaxInput(**values)
-
-
-def _coerce(raw: Any, declared: Any) -> Any:
-    text = str(declared)
-    if raw is None or (isinstance(raw, str) and raw == "None"):
-        return None
-    if "Decimal" in text:
-        return Decimal(str(raw))
-    if "int" in text:
-        return int(str(raw))
-    return str(raw)
 
 
 __all__ = [

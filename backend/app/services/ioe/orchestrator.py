@@ -34,7 +34,6 @@ from app.core.exceptions import Conflict, DomainError, NotFound
 from app.database.base import uuid7
 from app.database.bulk import bulk_insert
 from app.database.models import (
-    AnalysisInputSnapshot,
     AnalysisRun,
     OptimizationRun,
     OptimizationRunEvent,
@@ -78,6 +77,12 @@ from app.services.ioe.domain.enums import (
     WorkflowStatus,
 )
 from app.services.ioe.domain.workflow import WorkflowStateMachine
+from app.services.ioe.frozen import (
+    INPUT_EXECUTION_POLICY_VERSION,
+    FrozenAnalysisInputService,
+    FrozenSnapshotError,
+)
+from app.services.ioe.frozen.models import PINNED_SNAPSHOT_UNAVAILABLE
 from app.services.ioe.normalization.service import (
     NORMALIZATION_VERSION,
     OpportunityNormalizationService,
@@ -137,6 +142,11 @@ class PinnedSpec:
     manifest_hash: str
     user_constraints: dict
     assumption_set: list[dict]
+    # The reconstructed frozen baseline. Held in memory for the run only and
+    # never persisted: it is the user's financial data, it already lives in the
+    # analysis snapshot, and copying it into IOE evidence would duplicate raw
+    # financial inputs into result tables.
+    frozen: object | None = None
     spec_hash: str = ""
 
 
@@ -181,8 +191,15 @@ class OptimizationOrchestrator:
         if analysis.status != "completed":
             raise Conflict("analysis_not_ready: run an analysis before optimizing")
 
-        snapshot_row = await session.get(AnalysisInputSnapshot, analysis_id)
-        baseline_hash = snapshot_row.snapshot_hash if snapshot_row else ""
+        # The frozen baseline is resolved FIRST and verified before anything
+        # else is pinned. Everything downstream — the spec hash, the rule
+        # snapshot, idempotency — describes THIS input or it describes nothing.
+        # A missing, corrupt, incomplete or unsupported snapshot fails closed
+        # here, before a single engine run.
+        frozen = await FrozenAnalysisInputService(session, self.user_id).resolve(
+            analysis_id
+        )
+        baseline_hash = frozen.snapshot_hash
 
         # immutable rule snapshot — pinned here, and it CONSTRAINS evaluation
         pinned = await RuleSnapshotService(session).capture(analysis.tax_year)
@@ -210,6 +227,11 @@ class OptimizationOrchestrator:
             "portfolio_objective_code": savings_domain.PORTFOLIO_OBJECTIVE_CODE.value,
             "portfolio_objective_version": savings_domain.PORTFOLIO_OBJECTIVE_VERSION,
             "assumption_registry_version": assumption_registry.ASSUMPTION_REGISTRY_VERSION,
+            # How the inputs were obtained. A reader can tell a corrected run
+            # from a legacy one without inferring it from a timestamp.
+            "input_execution_policy_version": INPUT_EXECUTION_POLICY_VERSION.value,
+            "snapshot_schema_version": frozen.snapshot_schema_version,
+            "baseline_result_hash": frozen.baseline_result_hash,
             "projection_methodology_version": PROJECTION_METHODOLOGY_VERSION,
             "rule_snapshot_hash": pinned.snapshot_hash,
             "weight_config_version": weight_config.version if weight_config else "default",
@@ -233,6 +255,7 @@ class OptimizationOrchestrator:
             manifest_hash=manifest_hash,
             user_constraints=constraints,
             assumption_set=assumption_set,
+            frozen=frozen,
         )
         # every material input is now resolved — only now is identity computed
         spec.spec_hash = c.optimization_spec_hash(
@@ -312,6 +335,7 @@ class OptimizationOrchestrator:
                 # hash independently recomputable during replay verification.
                 user_constraints=spec.user_constraints,
                 assumption_set=spec.assumption_set,
+                input_execution_policy_version=INPUT_EXECUTION_POLICY_VERSION.value,
                 idempotency_key=idempotency_key,
                 started_at=datetime.now(tz=UTC),
             )
@@ -364,20 +388,23 @@ class OptimizationOrchestrator:
         )
 
     async def _compute(self, spec: PinnedSpec, *, baseline_input=None) -> dict:
-        """Read-only reads plus pure domain maths. Holds no transaction.
+        """Pure domain maths over the FROZEN baseline. Holds no transaction.
 
-        `baseline_input` lets a REPLAY supply the frozen baseline the run pinned
-        instead of rebuilding one from live financial tables. Production passes
-        nothing and behaves exactly as before; a replay that read live data
-        would report a mismatch every time a user edited last year's income,
-        which says nothing about whether the sealed result was reproducible.
+        The input comes from the snapshot pinned in TX-1 and from nowhere else.
+        There is no live builder call here and no fallback to one: a run whose
+        snapshot could not be resolved never reaches this method, because TX-1
+        failed closed before creating the header.
+
+        `baseline_input` is how a REPLAY supplies the same frozen baseline when
+        re-deriving a sealed identity. It is the same object TX-1 resolved, not
+        an alternative source.
         """
+        inp = baseline_input if baseline_input is not None else spec.frozen.tax_input
+        if inp is None:                       # defensive: never reachable
+            raise FrozenSnapshotError(PINNED_SNAPSHOT_UNAVAILABLE)
+
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             engine = TaxEngineService(session)
-            inp = (
-                baseline_input if baseline_input is not None
-                else await engine.build_input(self.user_id, spec.tax_year)
-            )
             result = engine.run(inp)
             facts = engine.facts(inp, result)
 
@@ -711,6 +738,12 @@ class OptimizationOrchestrator:
 
 def _classify(exc: Exception) -> str:
     """Map an exception to an enumerated code; the message never escapes."""
+    # A snapshot failure already carries a closed reason code. It is used
+    # verbatim so an operator sees WHICH pinned dependency failed, and the
+    # exception's own text — which has been near financial values — never
+    # reaches storage.
+    if isinstance(exc, FrozenSnapshotError):
+        return exc.reason
     name = type(exc).__name__
     # A portfolio that cannot reconcile, or a ledger that lost conservation, is
     # never shown — the run fails rather than reporting an unverifiable total.

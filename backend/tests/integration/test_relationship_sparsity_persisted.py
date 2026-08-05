@@ -32,6 +32,7 @@ from app.database.session import unit_of_work
 from app.services.ioe.domain import relationships as rel
 from app.services.ioe.domain.enums import DerivationSource
 from app.services.ioe.orchestrator import OptimizationOrchestrator
+from tests.conftest import frozen_snapshot
 
 VALID_SOURCES = {s.value for s in DerivationSource}
 
@@ -71,9 +72,10 @@ async def _user_with_income() -> tuple[uuid.UUID, uuid.UUID]:
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal("140000"))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"},
-            snapshot_hash=f"snap-{uuid.uuid4().hex[:8]}",
+            analysis_id=run.id, snapshot=_snap[0],
+            snapshot_hash=_snap[1],
         ))
         await s.flush()
         return uid, run.id

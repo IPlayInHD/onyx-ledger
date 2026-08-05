@@ -45,3 +45,34 @@ def owner_dsn() -> str:
     parsed = urlparse(url)
     database = (parsed.path or "/onyx_test").lstrip("/").split("?")[0]
     return f"postgresql://onyx_migrator@localhost:5432/{database}"
+
+
+def frozen_snapshot(
+    *, tax_year: int = 2025, jurisdiction: str = "ON", **fields
+) -> tuple[dict, str]:
+    """A COMPLETE frozen analysis snapshot plus its content hash.
+
+    Optimizations are now calculated exclusively from the pinned snapshot and
+    fail closed on an incomplete one, so a fixture that writes a stub cannot
+    produce a run. This uses the production codec, so a fixture snapshot is
+    reconstructible by the same code that reads a real one — a test cannot
+    accidentally prove something about a payload shape production never writes.
+    """
+    from decimal import Decimal
+
+    from app.services.ioe.frozen.models import canonical_snapshot, snapshot_hash
+    from app.services.tax_engine.core.engine import TaxInput
+
+    values = {
+        k: (Decimal(str(v)) if not isinstance(v, (str, int)) or k not in
+            ("province", "marital_status", "year", "age") else v)
+        for k, v in fields.items()
+    }
+    tax_input = TaxInput(
+        province=jurisdiction, year=tax_year,
+        marital_status=values.pop("marital_status", "single"),
+        **values,
+    )
+    payload = canonical_snapshot(
+        tax_input, tax_year=tax_year, jurisdiction=jurisdiction)
+    return payload, snapshot_hash(payload)

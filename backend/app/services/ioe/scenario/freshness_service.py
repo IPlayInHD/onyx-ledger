@@ -84,7 +84,8 @@ class ScenarioFreshnessService:
             owner = scenario.user_id
             engine = TaxEngineService(self.s)
             try:
-                current_input = await engine.build_input(owner, scenario.tax_year)
+                current_input = await engine.build_input_from_live_sources(
+                    owner, scenario.tax_year)
                 current_tax = engine.run(current_input).total_payable
                 baseline_result_hash = c.canonical_hash({
                     "baseline_tax": c.money(current_tax),

@@ -11,7 +11,6 @@ different hash, or a dependency the resolver cannot load — so the sealed rows
 stay exactly as the system wrote them.
 """
 import asyncio
-import hashlib
 import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -59,7 +58,7 @@ from app.services.ioe.replay.verification import (
     VerificationAlreadyRunning,
 )
 from app.services.ioe.scenario.service import ScenarioService
-from app.services.tax_engine.core.engine import TaxInput
+from tests.conftest import frozen_snapshot
 
 # Synthetic values that must never leave the database. Chosen to be searchable.
 SYNTHETIC_SIN = "046454286"
@@ -107,14 +106,9 @@ async def _user_with_frozen_baseline(employment: str = SYNTHETIC_INCOME):
         )
         s.add(run)
         await s.flush()
-        inp = TaxInput(province="ON", year=2025, marital_status="single",
-                       employment_income=Decimal(employment))
-        snapshot = {k: str(v) for k, v in vars(inp).items()}
+        payload, digest = frozen_snapshot(employment_income=Decimal(employment))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot=snapshot,
-            snapshot_hash=hashlib.sha256(
-                json.dumps(snapshot, sort_keys=True).encode()).hexdigest(),
-        ))
+            analysis_id=run.id, snapshot=payload, snapshot_hash=digest))
         await s.flush()
         return uid, run.id
 
@@ -142,9 +136,10 @@ async def _user_with_stub_baseline():
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal("95000"))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"},
-            snapshot_hash=f"stub-{uuid.uuid4().hex[:8]}",
+            analysis_id=run.id, snapshot=_snap[0],
+            snapshot_hash=_snap[1],
         ))
         await s.flush()
         return uid, run.id
@@ -414,14 +409,21 @@ async def test_a_prior_verification_survives_a_later_mismatch(monkeypatch):
 
 # ---- unavailable ------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_a_missing_baseline_snapshot_is_unavailable_not_mismatch():
-    tag = _suffix()
-    await _publish(f"STUB{tag}", "INCREASE_RRSP_DEDUCTION", "3000", "RRSP_ROOM")
-    uid, analysis_id = await _user_with_stub_baseline()
-    outcome = await OptimizationOrchestrator(uid).generate(analysis_id)
+async def test_a_baseline_snapshot_removed_after_sealing_is_unavailable():
+    """A run is sealed normally, then its pinned snapshot goes away.
 
-    result = await IntegrityVerificationService(uid).verify(
-        "optimization", outcome.run_id)
+    Since item 3A a run cannot be CREATED without a reconstructible snapshot —
+    TX-1 fails closed — so the unavailable path is reached the way it would be
+    in production: the pinned dependency disappears after the fact.
+    """
+    uid, _, run_id = await _sealed_optimization()
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        run = await s.get(OptimizationRun, run_id)
+        await s.execute(
+            text("DELETE FROM analysis.analysis_input_snapshot "
+                 "WHERE analysis_id = :a"), {"a": run.analysis_id})
+
+    result = await IntegrityVerificationService(uid).verify("optimization", run_id)
     assert result.status is IntegrityStatus.UNAVAILABLE
     assert result.reason_code is IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE
     assert "could not currently be replay-verified" in result.integrity_warning
@@ -472,15 +474,15 @@ async def test_a_missing_rule_snapshot_pin_is_unavailable():
 
 @pytest.mark.asyncio
 async def test_an_unavailable_outcome_preserves_the_sealed_result():
-    tag = _suffix()
-    await _publish(f"PRES{tag}", "INCREASE_RRSP_DEDUCTION", "3000", "RRSP_ROOM")
-    uid, analysis_id = await _user_with_stub_baseline()
-    outcome = await OptimizationOrchestrator(uid).generate(analysis_id)
-
+    uid, _, run_id = await _sealed_optimization()
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        run = await s.get(OptimizationRun, outcome.run_id)
+        run = await s.get(OptimizationRun, run_id)
         sealed = run.optimization_result_hash
+        await s.execute(
+            text("DELETE FROM analysis.analysis_input_snapshot "
+                 "WHERE analysis_id = :a"), {"a": run.analysis_id})
 
+    outcome = type("O", (), {"run_id": run_id})()
     await IntegrityVerificationService(uid).verify("optimization", outcome.run_id)
 
     async with unit_of_work(user_id=uid, actor_type="user") as s:

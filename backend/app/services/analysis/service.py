@@ -6,8 +6,6 @@ checks + recommendations (each citing its rule version).
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -22,6 +20,7 @@ from app.database.models import (
     ReconciliationCheck,
 )
 from app.services.ioe.freshness_events import FreshnessEvent, emit
+from app.services.ioe.frozen.models import canonical_snapshot, snapshot_hash
 from app.services.optimization.service import rank
 from app.services.tax_engine.rules_service import RulesEvaluatorService
 from app.services.tax_engine.service import ENGINE_VERSION, TaxEngineService
@@ -34,7 +33,7 @@ class AnalysisService:
         self.rules = RulesEvaluatorService(session)
 
     async def run(self, user_id: uuid.UUID, tax_year: int) -> AnalysisRun:
-        inp = await self.engine.build_input(user_id, tax_year)
+        inp = await self.engine.build_input_from_live_sources(user_id, tax_year)
         result = self.engine.run(inp)
         facts = self.engine.facts(inp, result)
 
@@ -46,10 +45,14 @@ class AnalysisService:
         self.s.add(run)
         await self.s.flush()
 
-        snapshot = {k: str(v) for k, v in vars(inp).items()}
+        # The frozen baseline every later optimization is calculated from. One
+        # codec writes it and reads it back, so a snapshot is reconstructible by
+        # construction rather than by agreement between two pieces of code.
+        snapshot = canonical_snapshot(
+            inp, tax_year=tax_year, jurisdiction=inp.province)
         self.s.add(AnalysisInputSnapshot(
             analysis_id=run.id, snapshot=snapshot,
-            snapshot_hash=hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest(),
+            snapshot_hash=snapshot_hash(snapshot),
         ))
 
         for i, li in enumerate(result.line_items):

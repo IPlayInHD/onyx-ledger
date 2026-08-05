@@ -143,6 +143,11 @@ class OptimizationRun(Base):
         comment="The assumption set that entered optimization_spec_hash. Stored for the same reason as user_constraints.",
     )
 
+    input_execution_policy_version: Mapped[str] = mapped_column(
+        Text, nullable=False, default="live_source_legacy",
+        comment="Which input-execution rule this run was computed under. live_source_legacy runs predate item 3A and may have been calculated from data that differs from the snapshot their spec hash names; frozen_snapshot_v1 runs were calculated exclusively from the pinned snapshot.",
+    )
+
     # ---- current replay-integrity metadata (history lives in integrity_check) ----
     integrity_status: Mapped[str] = mapped_column(
         Text, nullable=False, default="not_checked",

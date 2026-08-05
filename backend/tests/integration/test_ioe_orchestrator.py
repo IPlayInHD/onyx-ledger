@@ -36,6 +36,7 @@ from app.services.ioe.orchestrator import (
     IdempotencyKeyReused,
     OptimizationOrchestrator,
 )
+from tests.conftest import frozen_snapshot
 
 
 @pytest.fixture(autouse=True)
@@ -61,8 +62,9 @@ async def _user_with_analysis() -> tuple[uuid.UUID, uuid.UUID]:
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal("95000"))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"}, snapshot_hash="snap-fixed",
+            analysis_id=run.id, snapshot=_snap[0], snapshot_hash=_snap[1],
         ))
         await s.flush()
         return uid, run.id

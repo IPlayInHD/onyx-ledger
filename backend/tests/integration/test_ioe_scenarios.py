@@ -44,6 +44,7 @@ from app.services.ioe.scenario.service import (
     ScenarioIdempotencyKeyReused,
     ScenarioService,
 )
+from tests.conftest import frozen_snapshot
 
 RRSP = "INCREASE_RRSP_DEDUCTION"
 FHSA = "INCREASE_FHSA_DEDUCTION"
@@ -89,9 +90,10 @@ async def _user_with_analysis(
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal("95000"))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"},
-            snapshot_hash=f"snap-{uuid.uuid4().hex[:8]}",
+            analysis_id=run.id, snapshot=_snap[0],
+            snapshot_hash=_snap[1],
         ))
         await s.flush()
         return uid, run.id
@@ -422,9 +424,10 @@ async def test_comparison_across_different_baselines_is_refused():
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal("95000"))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"},
-            snapshot_hash=f"snap-{uuid.uuid4().hex[:8]}",
+            analysis_id=run.id, snapshot=_snap[0],
+            snapshot_hash=_snap[1],
         ))
         await s.flush()
         analysis_second = run.id

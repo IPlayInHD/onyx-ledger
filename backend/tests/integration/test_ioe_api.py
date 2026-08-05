@@ -27,6 +27,7 @@ from app.database.session import unit_of_work
 from app.services.ioe.domain.scenario import ScenarioSpec, StaleReason
 from app.services.ioe.scenario.freshness_service import ScenarioFreshnessService
 from app.services.ioe.scenario.service import ScenarioService
+from tests.conftest import frozen_snapshot
 
 RRSP = "INCREASE_RRSP_DEDUCTION"
 API = "/api/v1/ioe"
@@ -72,9 +73,10 @@ async def _user_with_analysis(employment: str = "95000") -> tuple[uuid.UUID, uui
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal(employment))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"},
-            snapshot_hash=f"snap-{uuid.uuid4().hex[:8]}",
+            analysis_id=run.id, snapshot=_snap[0],
+            snapshot_hash=_snap[1],
         ))
         await s.flush()
         return uid, run.id
@@ -452,9 +454,10 @@ async def test_comparison_refuses_incompatible_baselines(client):
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal("95000"))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"},
-            snapshot_hash=f"snap-{uuid.uuid4().hex[:8]}",
+            analysis_id=run.id, snapshot=_snap[0],
+            snapshot_hash=_snap[1],
         ))
         await s.flush()
         analysis_two = run.id

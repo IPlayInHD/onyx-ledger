@@ -32,6 +32,7 @@ from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain.scenario import ScenarioSpec
 from app.services.ioe.orchestrator import OptimizationOrchestrator
 from app.services.ioe.scenario.service import ScenarioService
+from tests.conftest import frozen_snapshot
 
 RRSP = "INCREASE_RRSP_DEDUCTION"
 
@@ -65,9 +66,10 @@ async def _user_with_analysis() -> tuple[uuid.UUID, uuid.UUID]:
         )
         s.add(run)
         await s.flush()
+        _snap = frozen_snapshot(employment_income=Decimal("95000"))
         s.add(AnalysisInputSnapshot(
-            analysis_id=run.id, snapshot={"province": "ON"},
-            snapshot_hash=f"snap-{uuid.uuid4().hex[:8]}",
+            analysis_id=run.id, snapshot=_snap[0],
+            snapshot_hash=_snap[1],
         ))
         await s.flush()
         return uid, run.id

@@ -44,7 +44,31 @@ class TaxEngineService:
     def __init__(self, session: AsyncSession):
         self.s = session
 
-    async def build_input(self, user_id: uuid.UUID, tax_year: int) -> TaxInput:
+    @staticmethod
+    def build_input_from_snapshot(snapshot: dict) -> TaxInput:
+        """Reconstruct the engine input from a FROZEN snapshot payload.
+
+        The only input builder the optimization compute path may call. It takes
+        a payload, not a user id, so there is no parameter through which live
+        state could be reached.
+        """
+        from app.services.ioe.frozen.models import reconstruct_tax_input
+
+        return reconstruct_tax_input(snapshot)
+
+    async def build_input_from_live_sources(
+        self, user_id: uuid.UUID, tax_year: int
+    ) -> TaxInput:
+        """Read the user's CURRENT financial state.
+
+        Legitimate when an analysis is being created — that is the moment the
+        snapshot is taken. Forbidden after TX-1 of an optimization: calling it
+        there is what let a run be sealed under one snapshot's identity while
+        being calculated from different numbers.
+        """
+        return await self._build_input_live(user_id, tax_year)
+
+    async def _build_input_live(self, user_id: uuid.UUID, tax_year: int) -> TaxInput:
         profile = await self.s.scalar(select(TaxProfile).where(TaxProfile.user_id == user_id))
         province = profile.province_code if profile else "ON"
         marital = (profile.marital_status if profile else None) or "single"
