@@ -79,6 +79,7 @@ from app.services.ioe.domain.enums import (
 from app.services.ioe.domain.workflow import WorkflowStateMachine
 from app.services.ioe.frozen import (
     INPUT_EXECUTION_POLICY_VERSION,
+    FrozenAnalysisInput,
     FrozenAnalysisInputService,
     FrozenSnapshotError,
 )
@@ -146,7 +147,7 @@ class PinnedSpec:
     # never persisted: it is the user's financial data, it already lives in the
     # analysis snapshot, and copying it into IOE evidence would duplicate raw
     # financial inputs into result tables.
-    frozen: object | None = None
+    frozen: FrozenAnalysisInput | None = None
     spec_hash: str = ""
 
 
@@ -399,9 +400,11 @@ class OptimizationOrchestrator:
         re-deriving a sealed identity. It is the same object TX-1 resolved, not
         an alternative source.
         """
-        inp = baseline_input if baseline_input is not None else spec.frozen.tax_input
-        if inp is None:                       # defensive: never reachable
-            raise FrozenSnapshotError(PINNED_SNAPSHOT_UNAVAILABLE)
+        inp = baseline_input
+        if inp is None:
+            if spec.frozen is None:           # defensive: never reachable
+                raise FrozenSnapshotError(PINNED_SNAPSHOT_UNAVAILABLE)
+            inp = spec.frozen.tax_input
 
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             engine = TaxEngineService(session)

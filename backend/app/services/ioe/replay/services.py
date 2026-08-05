@@ -37,10 +37,25 @@ from app.services.ioe.domain.integrity import (
     IntegrityReason,
     SealedEvidenceIncomplete,
 )
+from app.services.ioe.frozen import FrozenScenarioInputService, FrozenSnapshotError
+from app.services.ioe.frozen.models import (
+    PINNED_SCENARIO_BASELINE_HASH_MISMATCH,
+    PINNED_SCENARIO_BASELINE_UNAVAILABLE,
+)
 from app.services.ioe.portfolio.service import engine_evaluator
 from app.services.ioe.replay.resolver import ReplayDependencyResolver
 
 MONEY = Decimal("0.01")
+
+# A scenario refusal, expressed in the verifier's vocabulary. Everything that is
+# not specifically about the baseline RESULT is a snapshot-level dependency
+# problem: nothing was compared, so the verdict is `unavailable`, never
+# `mismatch`.
+_SCENARIO_DEPENDENCY_REASON: dict[str, IntegrityReason] = {
+    PINNED_SCENARIO_BASELINE_UNAVAILABLE: IntegrityReason.BASELINE_RESULT_UNAVAILABLE,
+    PINNED_SCENARIO_BASELINE_HASH_MISMATCH: (
+        IntegrityReason.BASELINE_RESULT_UNAVAILABLE),
+}
 
 
 @dataclass
@@ -356,17 +371,44 @@ class ScenarioReplayService:
             spec_hash = scenario.scenario_spec_hash or ""
             spec = await self._sealed_spec(session, scenario_id)
 
+            # The replay is confined to the same frozen input production was
+            # confined to, resolved by the same service. `expected_snapshot_hash`
+            # makes a replaced snapshot an UNAVAILABLE dependency rather than a
+            # mismatch: comparing against a different input proves nothing.
+            #
+            # The baseline RESULT identity is deliberately NOT asserted here.
+            # The baseline is re-derived from the frozen snapshot exactly as it
+            # is in production, so a baseline that no longer reproduces changes
+            # `tax_delta` and surfaces as a result-hash mismatch — which is the
+            # honest verdict, and the one a legacy live-baseline scenario earns.
+            try:
+                frozen = await FrozenScenarioInputService(
+                    session, self.user_id
+                ).resolve(
+                    scenario.base_analysis_id,
+                    objective_code=deps.objective_code,
+                    objective_version=deps.objective_version,
+                    lever_registry_version=str(
+                        deps.version_manifest.get("lever_registry_version", "")),
+                    assumption_registry_version=str(
+                        deps.version_manifest.get("assumption_registry_version", "")),
+                    support_score_version=str(
+                        deps.version_manifest.get("confidence_algorithm_version", "")),
+                    scenario_id=scenario_id,
+                    scenario_spec_hash=spec_hash,
+                    expected_snapshot_hash=scenario.baseline_input_snapshot_hash,
+                )
+            except FrozenSnapshotError as exc:
+                raise DependencyUnavailable(
+                    _SCENARIO_DEPENDENCY_REASON.get(
+                        exc.reason, IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE)
+                ) from exc
+
         pinned = PinnedScenarioSpec(
             analysis_id=scenario.base_analysis_id,
             tax_year=deps.tax_year,
             jurisdiction=deps.jurisdiction,
-            baseline_input_snapshot_hash=deps.baseline_input_snapshot_hash,
-            baseline_result_hash=deps.baseline_result_hash or "",
-            baseline_tax=deps.baseline_tax or Decimal(0),
-            baseline_inputs={
-                f: getattr(deps.baseline_inputs, f)
-                for f in deps.baseline_inputs.__dataclass_fields__
-            },
+            frozen=frozen,
             rule_snapshot_id=deps.rule_snapshot_id,
             rule_snapshot_hash=deps.rule_snapshot_hash,
             pinned_rule_version_ids=[],

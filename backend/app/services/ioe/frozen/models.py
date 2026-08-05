@@ -51,6 +51,21 @@ class InputExecutionPolicy(StrEnum):
 INPUT_EXECUTION_POLICY_VERSION = InputExecutionPolicy.FROZEN_SNAPSHOT_V1
 
 
+class ScenarioExecutionPolicy(StrEnum):
+    """How a scenario's BASELINE was obtained (item 3B).
+
+    Deliberately a separate enum from `InputExecutionPolicy`: an optimization
+    and a scenario were corrected at different commits, and one value covering
+    both would let a scenario inherit a guarantee it never had.
+    """
+
+    LIVE_BASELINE_LEGACY = "live_baseline_legacy"
+    FROZEN_SNAPSHOT_V1 = "frozen_snapshot_v1"
+
+
+SCENARIO_EXECUTION_POLICY_VERSION = ScenarioExecutionPolicy.FROZEN_SNAPSHOT_V1
+
+
 class FrozenSnapshotError(Exception):
     """A structured, sanitized snapshot failure.
 
@@ -218,22 +233,174 @@ class FrozenAnalysisInput:
         )
 
 
+# ---------------------------------------------------------------------------
+# Scenario execution (item 3B)
+# ---------------------------------------------------------------------------
+# Scenario-specific failure codes. Distinct from the optimization ones so an
+# operator reading an alert knows which workflow refused, and so a client can
+# offer the right remedy — "re-run the analysis" for an unsupported legacy
+# format is a different action from "the snapshot was tampered with".
+PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE = "PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE"
+PINNED_SCENARIO_SNAPSHOT_HASH_MISMATCH = "PINNED_SCENARIO_SNAPSHOT_HASH_MISMATCH"
+PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED = (
+    "PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED")
+PINNED_SCENARIO_BASELINE_UNAVAILABLE = "PINNED_SCENARIO_BASELINE_UNAVAILABLE"
+PINNED_SCENARIO_BASELINE_HASH_MISMATCH = "PINNED_SCENARIO_BASELINE_HASH_MISMATCH"
+PINNED_SCENARIO_BASELINE_REPRODUCTION_FAILED = (
+    "PINNED_SCENARIO_BASELINE_REPRODUCTION_FAILED")
+SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED = (
+    "SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED")
+
+# The optimization reason a scenario failure maps FROM. One reconstruction
+# service raises the analysis-level codes; the scenario layer translates them so
+# the workflow that failed is identifiable from the code alone.
+SCENARIO_REASON_FOR: dict[str, str] = {
+    PINNED_SNAPSHOT_UNAVAILABLE: PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE,
+    PINNED_SNAPSHOT_HASH_MISMATCH: PINNED_SCENARIO_SNAPSHOT_HASH_MISMATCH,
+    PINNED_SNAPSHOT_SCHEMA_UNSUPPORTED: PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED,
+    PINNED_SNAPSHOT_INCOMPLETE: PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE,
+    PINNED_BASELINE_RESULT_UNAVAILABLE: PINNED_SCENARIO_BASELINE_UNAVAILABLE,
+    PINNED_BASELINE_RESULT_HASH_MISMATCH: PINNED_SCENARIO_BASELINE_HASH_MISMATCH,
+    FROZEN_INPUT_RECONSTRUCTION_FAILED: SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED,
+}
+
+SCENARIO_SNAPSHOT_REASONS = frozenset(SCENARIO_REASON_FOR.values())
+
+
+class ScenarioFrozenInputError(FrozenSnapshotError):
+    """A scenario-scoped snapshot or baseline failure."""
+
+
+def scenario_execution_policy(manifest: dict[str, Any] | None) -> str:
+    """How a stored scenario's baseline was obtained.
+
+    Absence means legacy. A manifest written before this correction cannot
+    carry the key, and reading its silence as `frozen_snapshot_v1` would hand a
+    historical scenario a guarantee it never had — the one failure mode worse
+    than the original defect, because it is undetectable afterwards.
+    """
+    value = (manifest or {}).get("scenario_execution_policy_version")
+    if value in tuple(ScenarioExecutionPolicy):
+        return str(value)
+    return ScenarioExecutionPolicy.LIVE_BASELINE_LEGACY.value
+
+
+def as_scenario_failure(error: FrozenSnapshotError) -> ScenarioFrozenInputError:
+    """Translate an analysis-level reason into its scenario equivalent.
+
+    The underlying check is identical — one reconstruction service, one codec —
+    but the code a client receives names the workflow that refused.
+    """
+    return ScenarioFrozenInputError(
+        SCENARIO_REASON_FOR.get(
+            error.reason, SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED)
+    )
+
+
+@dataclass(frozen=True)
+class FrozenScenarioExecutionInput:
+    """Everything a scenario computation is permitted to know.
+
+    A thin immutable wrapper around item 3A's `FrozenAnalysisInput` rather than
+    a parallel implementation: the snapshot, its hash, the ownership rule and
+    the reconstruction are shared, and only the scenario-specific pins are added
+    here. Two reconstruction systems would be two chances to disagree about what
+    a baseline is.
+
+    Like its parent it holds no session, no repository and no loader, so the
+    scenario compute pipeline has no route back to mutable state.
+    """
+
+    frozen_analysis_input: FrozenAnalysisInput
+    scenario_id: uuid.UUID | None
+    scenario_spec_hash: str
+    objective_code: str
+    objective_version: str
+    lever_registry_version: str
+    assumption_registry_version: str
+    support_score_version: str
+    scenario_execution_policy_version: str = (
+        SCENARIO_EXECUTION_POLICY_VERSION.value)
+
+    @property
+    def baseline_tax_input(self) -> TaxInput:
+        return self.frozen_analysis_input.tax_input
+
+    @property
+    def baseline_tax(self) -> Decimal:
+        return self.frozen_analysis_input.baseline_tax
+
+    @property
+    def baseline_result_hash(self) -> str:
+        return self.frozen_analysis_input.baseline_result_hash
+
+    @property
+    def snapshot_hash(self) -> str:
+        return self.frozen_analysis_input.snapshot_hash
+
+    def baseline_clone(self) -> dict[str, Any]:
+        """A fresh mutable clone for a hypothetical.
+
+        Every lever application starts here. The frozen baseline itself is never
+        the thing a lever mutates, so a half-applied composite lever cannot
+        corrupt the baseline the next candidate is measured against.
+        """
+        return self.frozen_analysis_input.inputs_as_dict()
+
+    def bind(
+        self,
+        *,
+        scenario_id: uuid.UUID | None = None,
+        scenario_spec_hash: str | None = None,
+    ) -> FrozenScenarioExecutionInput:
+        """A new object carrying the scenario identity. Replaces, never mutates.
+
+        The spec hash is taken OVER the pinned baseline, so it cannot exist when
+        the baseline is resolved. Binding it afterwards keeps the ordering
+        honest — identity is computed from the pins, then attached to them —
+        without making the execution input mutable.
+        """
+        return dataclasses.replace(
+            self,
+            scenario_id=self.scenario_id if scenario_id is None else scenario_id,
+            scenario_spec_hash=(
+                self.scenario_spec_hash if scenario_spec_hash is None
+                else scenario_spec_hash
+            ),
+        )
+
+
 __all__ = [
     "FROZEN_INPUT_RECONSTRUCTION_FAILED",
     "INPUT_EXECUTION_POLICY_VERSION",
     "PINNED_BASELINE_RESULT_HASH_MISMATCH",
     "PINNED_BASELINE_RESULT_UNAVAILABLE",
+    "PINNED_SCENARIO_BASELINE_HASH_MISMATCH",
+    "PINNED_SCENARIO_BASELINE_REPRODUCTION_FAILED",
+    "PINNED_SCENARIO_BASELINE_UNAVAILABLE",
+    "PINNED_SCENARIO_SNAPSHOT_HASH_MISMATCH",
+    "PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED",
+    "PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE",
     "PINNED_SNAPSHOT_HASH_MISMATCH",
     "PINNED_SNAPSHOT_INCOMPLETE",
     "PINNED_SNAPSHOT_SCHEMA_UNSUPPORTED",
     "PINNED_SNAPSHOT_UNAVAILABLE",
+    "SCENARIO_EXECUTION_POLICY_VERSION",
+    "SCENARIO_FROZEN_INPUT_RECONSTRUCTION_FAILED",
+    "SCENARIO_REASON_FOR",
+    "SCENARIO_SNAPSHOT_REASONS",
     "SNAPSHOT_REASONS",
     "SNAPSHOT_SCHEMA_VERSION",
     "SUPPORTED_SNAPSHOT_SCHEMA_VERSIONS",
     "FrozenAnalysisInput",
+    "FrozenScenarioExecutionInput",
     "FrozenSnapshotError",
     "InputExecutionPolicy",
+    "ScenarioExecutionPolicy",
+    "ScenarioFrozenInputError",
+    "as_scenario_failure",
     "canonical_snapshot",
+    "scenario_execution_policy",
     "reconstruct_tax_input",
     "snapshot_hash",
 ]

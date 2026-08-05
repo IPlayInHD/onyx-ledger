@@ -267,6 +267,15 @@ class ReplayDependencyResolver:
 
         baseline_inputs, snapshot_hash = await self.baseline_input(
             scenario.base_analysis_id)
+        if (
+            scenario.baseline_input_snapshot_hash
+            and scenario.baseline_input_snapshot_hash != snapshot_hash
+        ):
+            # The snapshot the scenario pinned is not the snapshot now stored
+            # under that analysis. Replaying against a different input would
+            # produce a mismatch that says nothing about the sealed result, so
+            # this is an unavailable dependency instead.
+            raise DependencyUnavailable(IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE)
         snapshot_id, snapshot_hash_stored = await self.rule_snapshot(
             scenario_id=scenario.id, expected_hash=manifest.get("rule_snapshot_hash"),
         )

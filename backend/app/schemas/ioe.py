@@ -95,6 +95,16 @@ class IntegrityOut(BaseModel):
             "whether the figure is correct, accepted by the CRA, or legally sound."
         )
     )
+    execution_policy: str | None = Field(
+        default=None,
+        description=(
+            "How this result's inputs were obtained. `frozen_snapshot_v1` means "
+            "it was calculated exclusively from the pinned analysis snapshot. A "
+            "`*_legacy` value means it predates that guarantee and may not "
+            "reproduce; legacy rows are never relabelled. Null on an entity "
+            "that records no policy of its own — a portfolio's is its run's."
+        ),
+    )
 
 
 class IntegrityCheckOut(BaseModel):

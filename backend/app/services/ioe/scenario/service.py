@@ -36,7 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import Conflict, DomainError, NotFound
 from app.database.bulk import bulk_insert
 from app.database.models import (
-    AnalysisInputSnapshot,
     AnalysisRun,
     RunRuleSnapshot,
     Scenario,
@@ -74,12 +73,20 @@ from app.services.ioe.domain.scenario import (
     StaleReason,
 )
 from app.services.ioe.domain.workflow import WorkflowStateMachine
-from app.services.ioe.portfolio.service import inputs_from, to_tax_input
+from app.services.ioe.frozen import (
+    FrozenScenarioExecutionInput,
+    FrozenScenarioInputService,
+)
+from app.services.ioe.frozen.models import (
+    SCENARIO_EXECUTION_POLICY_VERSION,
+    ScenarioFrozenInputError,
+)
+from app.services.ioe.portfolio.service import to_tax_input
 from app.services.ioe.snapshot.service import RuleSnapshotService
 from app.services.tax_engine.contracts import CONTRACT_VERSION
 from app.services.tax_engine.core import data as engine_data
 from app.services.tax_engine.core.engine import compute
-from app.services.tax_engine.service import ENGINE_VERSION, TaxEngineService
+from app.services.tax_engine.service import ENGINE_VERSION
 
 SCENARIO_SERVICE_VERSION = "1.0.0"
 
@@ -101,17 +108,38 @@ class ScenarioIdempotencyKeyReused(DomainError):
     title = "Idempotency Key Reused"
 
 
+class ScenarioBaselineUnavailable(DomainError):
+    """The pinned analysis snapshot cannot serve as a scenario baseline.
+
+    A refusal, never a fallback. `detail` is the enumerated reason code and
+    nothing else — the payload that failed is the user's financial data and does
+    not travel with the error.
+
+    409 rather than 5xx because the condition is about the state of the pinned
+    analysis, not about the service: re-running the analysis is the remedy, and
+    retrying the same request will fail identically until then.
+    """
+
+    status_code = 409
+    error_type = "https://onyx.ledger/errors/scenario-baseline-unavailable"
+    title = "Scenario Baseline Unavailable"
+
+
 @dataclass
 class PinnedScenarioSpec:
-    """Everything material to the calculation, resolved BEFORE the hash."""
+    """Everything material to the calculation, resolved BEFORE the hash.
+
+    Note what is NOT here: a dict of the user's financial figures. The baseline
+    reaches the compute phase only inside `frozen`, and the three baseline
+    identities below are read THROUGH it. There is therefore no second copy of
+    the inputs that could drift from the snapshot the spec hash names, and no
+    field a future edit could quietly populate from a live query.
+    """
 
     analysis_id: uuid.UUID
     tax_year: int
     jurisdiction: str
-    baseline_input_snapshot_hash: str
-    baseline_result_hash: str
-    baseline_tax: Decimal
-    baseline_inputs: dict
+    frozen: FrozenScenarioExecutionInput
     rule_snapshot_id: uuid.UUID
     rule_snapshot_hash: str
     pinned_rule_version_ids: list[uuid.UUID]
@@ -121,6 +149,18 @@ class PinnedScenarioSpec:
     manifest_hash: str
     spec: ScenarioSpec
     spec_hash: str = ""
+
+    @property
+    def baseline_input_snapshot_hash(self) -> str:
+        return self.frozen.snapshot_hash
+
+    @property
+    def baseline_result_hash(self) -> str:
+        return self.frozen.baseline_result_hash
+
+    @property
+    def baseline_tax(self) -> Decimal:
+        return self.frozen.baseline_tax
 
 
 @dataclass
@@ -163,20 +203,26 @@ class ScenarioService:
         if analysis.status != "completed":
             raise Conflict("analysis_not_ready: run an analysis before simulating")
 
-        snapshot_row = await session.get(AnalysisInputSnapshot, analysis_id)
-        baseline_input_hash = snapshot_row.snapshot_hash if snapshot_row else ""
-
-        # The frozen baseline. Read once, then cloned for every hypothetical.
-        engine = TaxEngineService(session)
-        baseline_input = await engine.build_input_from_live_sources(self.user_id, analysis.tax_year)
-        baseline_result = engine.run(baseline_input)
-        baseline_inputs = inputs_from(baseline_input)
-        baseline_tax = baseline_result.total_payable.quantize(MONEY, ROUND_HALF_UP)
-        baseline_result_hash = c.canonical_hash({
-            "baseline_tax": c.money(baseline_tax),
-            "engine_version": ENGINE_VERSION,
-            "reference_data_version": engine_data.REFERENCE_DATA_VERSION,
-        })
+        # The frozen baseline, reconstructed from the snapshot this scenario
+        # pins — NOT rebuilt from the user's current financial tables.
+        #
+        # This is the item 3B correction. Reading live sources here while
+        # pinning `baseline_input_snapshot_hash` admitted the same defect item
+        # 3A removed from the optimizer: pin snapshot A, live data becomes B,
+        # apply levers to B, seal under A. The stored delta then described a
+        # baseline that nothing recorded.
+        #
+        # Item 3A's reconstruction service is reused rather than reimplemented:
+        # one codec, one set of hashes, one ownership rule. A second
+        # implementation would be a second chance to disagree.
+        frozen = await FrozenScenarioInputService(session, self.user_id).resolve(
+            analysis_id,
+            objective_code=savings_domain.PORTFOLIO_OBJECTIVE_CODE.value,
+            objective_version=savings_domain.PORTFOLIO_OBJECTIVE_VERSION,
+            lever_registry_version=lever_registry.LEVER_REGISTRY_VERSION,
+            assumption_registry_version=assumption_registry.registry_version(),
+            support_score_version=support.CONFIDENCE_ALGORITHM_VERSION,
+        )
 
         pinned = await RuleSnapshotService(session).capture(analysis.tax_year)
 
@@ -197,6 +243,13 @@ class ScenarioService:
             "freshness_policy_version": FRESHNESS_POLICY_VERSION,
             "comparison_policy_version": COMPARISON_POLICY_VERSION,
             "rule_snapshot_hash": pinned.snapshot_hash,
+            # How the baseline was obtained. A reader can tell a corrected
+            # scenario from a legacy one without inferring it from a date.
+            "scenario_execution_policy_version": (
+                SCENARIO_EXECUTION_POLICY_VERSION.value),
+            "snapshot_schema_version": (
+                frozen.frozen_analysis_input.snapshot_schema_version),
+            "baseline_result_hash": frozen.baseline_result_hash,
         }
         manifest_hash = c.version_manifest_hash(manifest)
 
@@ -204,10 +257,7 @@ class ScenarioService:
             analysis_id=analysis_id,
             tax_year=analysis.tax_year,
             jurisdiction=analysis.province_code or "FED",
-            baseline_input_snapshot_hash=baseline_input_hash,
-            baseline_result_hash=baseline_result_hash,
-            baseline_tax=baseline_tax,
-            baseline_inputs=baseline_inputs,
+            frozen=frozen,
             rule_snapshot_id=pinned.snapshot_id,
             rule_snapshot_hash=pinned.snapshot_hash,
             pinned_rule_version_ids=pinned.version_ids(),
@@ -217,8 +267,10 @@ class ScenarioService:
             manifest_hash=manifest_hash,
             spec=spec,
         )
-        # Every material input is now resolved — only now is identity computed.
+        # Every material input is now resolved — only now is identity computed,
+        # and only then is it bound back onto the frozen input it describes.
         pinned_spec.spec_hash = self.compute_spec_hash(pinned_spec)
+        pinned_spec.frozen = frozen.bind(scenario_spec_hash=pinned_spec.spec_hash)
         return pinned_spec
 
     @staticmethod
@@ -295,7 +347,13 @@ class ScenarioService:
     ) -> ScenarioOutcome:
         # ---- TX-1: pin, resolve idempotency, create the header ----
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
-            pinned = await self._pin_specification(session, analysis_id, spec)
+            try:
+                pinned = await self._pin_specification(session, analysis_id, spec)
+            except ScenarioFrozenInputError as exc:
+                # Fail closed BEFORE the header exists: an unresolvable baseline
+                # produces no scenario row, no levers, no assumptions and no
+                # sealed children — nothing that would later look like a result.
+                raise ScenarioBaselineUnavailable(exc.reason) from None
             existing = await self._resolve_idempotency(session, pinned, idempotency_key)
             if existing is not None:
                 return ScenarioOutcome(
@@ -404,10 +462,17 @@ class ScenarioService:
     def _compute(self, pinned: PinnedScenarioSpec) -> dict:
         """Apply the levers to a CLONE of the frozen baseline and run the engine.
 
+        Every number below descends from `pinned.frozen` and from nothing else.
+        The hypothetical starts as a clone of the pinned snapshot, the baseline
+        it is compared against is the one that snapshot produced, and the
+        objective is measured over both. There is no session in scope here, so
+        the compute phase has no route to live data even by mistake.
+
         `apply_all` is atomic: a failure part-way leaves the clone untouched and
         raises, so a half-applied composite lever can never reach the engine.
         """
-        clone = dict(pinned.baseline_inputs)          # the frozen input, cloned
+        frozen = pinned.frozen
+        clone = frozen.baseline_clone()               # the frozen input, cloned
         applications = [
             (lever.lever_code, dict(lever.parameters)) for lever in pinned.spec.levers
         ]
@@ -415,8 +480,9 @@ class ScenarioService:
             clone, applications,
             jurisdiction=pinned.jurisdiction, tax_year=pinned.tax_year,
         )
-        # the baseline dict must be unchanged — the clone is what was mutated
-        assert clone == pinned.baseline_inputs, "baseline input was mutated in place"
+        # The frozen baseline must be untouched: a second clone taken AFTER the
+        # levers ran still has to equal the one taken before them.
+        assert clone == frozen.baseline_clone(), "baseline input was mutated in place"
 
         scenario_result = compute(to_tax_input(applied.inputs))
         scenario_tax = scenario_result.total_payable.quantize(MONEY, ROUND_HALF_UP)
@@ -723,6 +789,7 @@ def _classify(exc: Exception) -> str:
 __all__ = [
     "SCENARIO_SERVICE_VERSION",
     "PinnedScenarioSpec",
+    "ScenarioBaselineUnavailable",
     "ScenarioIdempotencyKeyReused",
     "ScenarioOutcome",
     "ScenarioService",
