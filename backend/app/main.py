@@ -39,6 +39,40 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.on_event("startup")
+    async def _activate_calculation_versions() -> None:
+        """Reconcile the ACTIVE calculation versions with what is running.
+
+        Startup is the trigger, not the authority. Each component is activated
+        through `VersionActivationService`, which compare-and-swaps a database
+        row under `FOR UPDATE` and emits at most one event per real transition,
+        in the same transaction. So:
+
+          * ten replicas starting together produce one activation, not ten;
+          * a restart with nothing changed produces no update and no event;
+          * a failed event insert rolls the activation back.
+
+        A startup that cannot reach the database must not stop the API serving —
+        the hourly sweep and read-time evaluation remain the safety nets — so
+        this is logged and swallowed rather than fatal.
+        """
+        from app.database.session import unit_of_work
+        from app.services.ioe.freshness_producers import RUNNING_VERSIONS
+        from app.services.ioe.version_activation import VersionActivationService
+
+        try:
+            activated = []
+            async with unit_of_work(actor_type="system") as session:
+                service = VersionActivationService(session)
+                for event, resolve in RUNNING_VERSIONS.items():
+                    outcome = await service.activate(event, resolve())
+                    if outcome.activated:
+                        activated.append(outcome.version_type)
+            if activated:
+                log.info("freshness_versions_activated", components=activated)
+        except Exception:  # noqa: BLE001 - never block startup on this
+            log.warning("freshness_version_activation_skipped")
+
     app.include_router(api_router, prefix=settings.api_v1_prefix)
 
     @app.get("/healthz", tags=["platform"])

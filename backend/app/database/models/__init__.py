@@ -60,6 +60,7 @@ from app.database.models.identity import (  # noqa: F401
     UserCredential,
 )
 from app.database.models.ioe import (  # noqa: F401
+    ActiveCalculationVersion,
     Assumption,
     AssumptionSet,
     CandidateCost,

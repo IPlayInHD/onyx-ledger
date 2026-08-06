@@ -26,6 +26,10 @@ from app.database.models import (
 )
 from app.integrations.storage import get_object_storage
 from app.services.document_processing.ocr import FIELD_FACT, FIELD_TARGET, extract_fields
+from app.services.ioe.freshness_producers import (
+    on_document_status_changed,
+    on_financial_data_changed,
+)
 
 LOW_CONFIDENCE = 0.75
 
@@ -132,6 +136,25 @@ class DocumentService:
                 ))
                 created["expense"] += 1
 
+        # `confirmed` is NOT in the document_status CHECK constraint — the
+        # stored status stays `processed`. Confirmation is an event about the
+        # evidence, not a new storage state, and inventing a status value here
+        # would need a migration for no gain.
         doc.status = "processed"
         await self.s.flush()
+
+        # Confirming an extraction is where a document becomes a CALCULATION
+        # INPUT: the rows created above are income and expense the engine will
+        # read on the next analysis. That is a financial-data change, not merely
+        # a document-status change, so it carries the financial reason.
+        #
+        # Emitted only when something was actually created. A confirm that
+        # produced no rows changed no input and must not invalidate anything.
+        if created["income"] or created["expense"]:
+            await on_financial_data_changed(
+                self.s, user_id, tax_year,
+                change_token=f"document_confirm:{document_id}")
+        # The evidence behind an eligibility determination also moved, which is
+        # a different fact with its own reason.
+        await on_document_status_changed(self.s, user_id, document_id, "confirmed")
         return created

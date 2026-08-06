@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationError
 from app.database.models import ExpenseCategory, ExpenseRecord, IncomeSource, IncomeType
+from app.services.ioe.freshness_producers import on_financial_data_changed
 
 
 class FinancialService:
@@ -28,6 +29,12 @@ class FinancialService:
         )
         self.s.add(row)
         await self.s.flush()
+        # Emitted INSIDE the caller's transaction, so the event and the income
+        # row share one fate: a rollback leaves neither. The row id is the
+        # change token, so a retry of this same insert collides on the dedupe
+        # key while a genuinely new row invalidates again.
+        await on_financial_data_changed(
+            self.s, user_id, tax_year, change_token=f"income:{row.id}")
         return row
 
     async def list_income(self, user_id: uuid.UUID, tax_year: int) -> list[IncomeSource]:
@@ -55,6 +62,8 @@ class FinancialService:
         )
         self.s.add(row)
         await self.s.flush()
+        await on_financial_data_changed(
+            self.s, user_id, tax_year, change_token=f"expense:{row.id}")
         return row
 
     async def list_expenses(self, user_id: uuid.UUID, tax_year: int) -> list[ExpenseRecord]:

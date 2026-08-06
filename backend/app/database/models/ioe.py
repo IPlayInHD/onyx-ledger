@@ -922,3 +922,23 @@ class IntegrityCheck(Base):
     started_at: Mapped[datetime] = created_at_col()
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at_col()
+
+
+class ActiveCalculationVersion(Base):
+    """Authoritative active version of one calculation component (Entry 9).
+
+    Deployment state, not user data: no `user_id`, no RLS. Written only by
+    `VersionActivationService`, which compare-and-swaps it under `FOR UPDATE`
+    and emits the freshness event in the same transaction.
+    """
+
+    __tablename__ = "active_calculation_version"
+    __table_args__ = {"schema": "ioe"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    version_type: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    active_version: Mapped[str] = mapped_column(Text, nullable=False)
+    activation_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    activated_at: Mapped[datetime] = created_at_col()
+    created_at: Mapped[datetime] = created_at_col()
+    updated_at: Mapped[datetime] = updated_at_col()

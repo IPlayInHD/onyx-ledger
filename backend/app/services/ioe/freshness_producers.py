@@ -15,6 +15,7 @@ being noticed weeks later by a sweep.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,7 +96,7 @@ async def on_reference_data_changed(
 # ---------------------------------------------------------------------------
 #: The versions whose movement invalidates stored results, and the event each
 #: implies. Adding a versioned component here is what makes its changes visible.
-VERSIONED_COMPONENTS: dict[FreshnessEvent, callable] = {
+RUNNING_VERSIONS: dict[FreshnessEvent, Callable[[], str]] = {
     FreshnessEvent.ENGINE_VERSION_CHANGED: lambda: ENGINE_VERSION,
     FreshnessEvent.REFERENCE_DATA_CHANGED: lambda: engine_data.REFERENCE_DATA_VERSION,
     FreshnessEvent.OBJECTIVE_POLICY_CHANGED: lambda: (
@@ -115,7 +116,7 @@ async def emit_version_changes(session: AsyncSession) -> list[FreshnessEvent]:
     however many times the process restarts.
     """
     emitted: list[FreshnessEvent] = []
-    for event, resolve in VERSIONED_COMPONENTS.items():
+    for event, resolve in RUNNING_VERSIONS.items():
         version = resolve()
         key = f"version:{event.value}:{version}"
         already = await session.scalar(
@@ -146,7 +147,7 @@ async def emit_version_changes(session: AsyncSession) -> list[FreshnessEvent]:
 
 
 __all__ = [
-    "VERSIONED_COMPONENTS",
+    "RUNNING_VERSIONS",
     "emit_version_changes",
     "on_document_status_changed",
     "on_financial_data_changed",

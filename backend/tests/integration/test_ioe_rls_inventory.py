@@ -29,6 +29,10 @@ SHARED_REFERENCE_TABLES = frozenset({
     # Queue bookkeeping: transitions, worker ids and enumerated codes. Carries
     # no user data and is written only by the privileged outbox functions.
     "freshness_outbox_audit",
+    # Deployment state (Entry 9): which version of each calculation component is
+    # active. One row per component, no user_id, no per-tenant meaning — the
+    # same class as `weight_config`.
+    "active_calculation_version",
 })
 
 # How each user-derived table resolves to a user_id.

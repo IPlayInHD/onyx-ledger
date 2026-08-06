@@ -9,6 +9,7 @@ from app.api.deps import current_user_id, db_authed
 from app.core.exceptions import NotFound
 from app.database.models import TaxProfile, UserAccount
 from app.schemas import TaxProfileIn, TaxProfileOut
+from app.services.users.profile_service import ProfileService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -39,11 +40,9 @@ async def upsert_tax_profile(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> TaxProfileOut:
-    prof = await session.get(TaxProfile, user_id)
-    if prof is None:
-        prof = TaxProfile(user_id=user_id)
-        session.add(prof)
-    for field, value in body.model_dump().items():
-        setattr(prof, field, value)
-    await session.flush()
+    # The route delegates: the mutation and its freshness event belong in the
+    # service, so an import or an administrative write cannot skip invalidation
+    # by not going through HTTP.
+    prof, _ = await ProfileService(session).upsert_tax_profile(
+        user_id, body.model_dump())
     return TaxProfileOut.model_validate(prof)
