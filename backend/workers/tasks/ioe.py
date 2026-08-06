@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.database.session import unit_of_work
 from app.services.ioe.domain.scenario import StaleReason
@@ -217,10 +218,75 @@ def sweep_scenario_freshness(self, limit: int = SWEEP_BATCH_SIZE) -> int:
         raise self.retry(exc=exc, countdown=_backoff(self.request.retries)) from exc
 
 
+@celery_app.task(
+    name="workers.tasks.ioe.verify_sealed_integrity",
+    bind=True,
+    max_retries=2,
+    acks_late=True,
+)
+def verify_sealed_integrity(self, batch_size: int | None = None) -> dict:
+    """SCHEDULED replay-integrity verification (closure entry 8C).
+
+    Detection already existed; nothing invoked it. This is the invocation, and
+    it deliberately adds no logic of its own — it calls `IntegrityScheduler`,
+    which claims through `ioe.claim_integrity_targets` and verifies through
+    `IntegrityVerificationService`. There is no second claim protocol and no
+    second verifier, so the scheduled path cannot drift from the API path.
+
+    Bounded twice over: `batch_size` is the budget for the WHOLE execution
+    across every target type, the scheduler clamps it to `MAX_BATCH_SIZE`, and
+    the SQL clamps it again. One execution claims once per type and returns —
+    there is no loop-until-empty, so a backlog is drained by the beat schedule
+    rather than by one long-running task.
+
+    Safe to overlap. Two workers may select the same record, but only one can
+    insert the active check; the loser records `skipped_active` and moves on. A
+    record abandoned by a crashed worker is released by
+    `recover_stale_integrity_checks`, which runs at the start of every cycle.
+
+    The return value is counts only — it is a Celery result stored in Redis, so
+    nothing identifying may travel in it.
+    """
+    from app.services.ioe.replay.scheduler import IntegrityScheduler
+
+    settings = get_settings()
+    if not settings.ioe_integrity_verification_enabled:
+        log.info("ioe_integrity_verification_disabled")
+        return {"enabled": False}
+
+    size = settings.ioe_integrity_batch_size if batch_size is None else int(batch_size)
+
+    async def _run() -> dict:
+        report = await IntegrityScheduler().run_cycle(
+            batch_size=size,
+            timeout_seconds=settings.ioe_integrity_timeout_seconds,
+        )
+        metrics = report.as_metrics()
+        # Counts and enumerated reason codes. No entity id, no tenant, no hash.
+        log.info(
+            "ioe_integrity_verification_batch",
+            **metrics,
+            reason_codes=sorted(set(report.reason_codes)),
+        )
+        return metrics
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:  # noqa: BLE001
+        if self.request.retries >= 2:
+            log.error(
+                "ioe_integrity_verification_failed",
+                error_code=ERROR_RETRIES_EXHAUSTED,
+            )
+            raise
+        raise self.retry(exc=exc, countdown=_backoff(self.request.retries)) from exc
+
+
 __all__ = [
     "ERROR_INVALID_PAYLOAD",
     "ERROR_RETRIES_EXHAUSTED",
     "MAX_RETRIES",
+    "verify_sealed_integrity",
     "invalidate_scenarios_for_analysis",
     "relay_freshness_outbox",
     "invalidate_scenarios_for_tax_year",

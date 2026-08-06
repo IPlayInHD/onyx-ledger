@@ -5,6 +5,8 @@ off the API event loop, on independently-scalable queues.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -43,6 +45,9 @@ celery_app.conf.task_routes = {
     "workers.tasks.ioe.invalidate_scenarios_for_tax_year": {"queue": "ioe_freshness"},
     "workers.tasks.ioe.sweep_scenario_freshness": {"queue": "ioe_freshness"},
     "workers.tasks.ioe.relay_freshness_outbox": {"queue": "ioe_freshness"},
+    # Verification replays sealed calculations, so it runs real engine work.
+    # Its own queue keeps that off the freshness lanes and off optimization.
+    "workers.tasks.ioe.verify_sealed_integrity": {"queue": "ioe_integrity"},
 }
 
 celery_app.conf.beat_schedule = {
@@ -66,6 +71,16 @@ celery_app.conf.beat_schedule = {
     "ioe-scenario-freshness-sweep": {
         "task": "workers.tasks.ioe.sweep_scenario_freshness",
         "schedule": crontab(minute="20"),
+    },
+    # Scheduled replay-integrity verification (closure entry 8C). The interval
+    # is configuration-driven so it can be widened during an incident without a
+    # deploy; `timedelta` rather than `crontab` because the value is an
+    # arbitrary number of minutes and crontab cannot express one above 59.
+    # Default 15 minutes at a default batch of 10 records — comfortably longer
+    # than a bounded batch takes, so executions do not stack up.
+    "ioe-integrity-verification": {
+        "task": "workers.tasks.ioe.verify_sealed_integrity",
+        "schedule": timedelta(minutes=settings.ioe_integrity_interval_minutes),
     },
     "yearly-legislation-import": {
         "task": "workers.tasks.maintenance.import_new_legislation",

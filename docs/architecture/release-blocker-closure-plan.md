@@ -324,9 +324,10 @@ Measured against the stated evidence, not against "related infrastructure exists
 | The verifier itself | **DONE** | `app/services/ioe/replay/{resolver,services,verification}.py`. TX-1 claim → replay outside any transaction → TX-2 append outcome + move current metadata. Replays optimizations, portfolios and scenarios against **pinned** versions, refusing when a pinned executable version is not the running one |
 | Sealed evidence never altered | **DONE** | `ioe.reject_result_mutation()` compares stripped row images; only the four integrity columns may move on `strategy_portfolio`. `test_integrity_verification.py` asserts the original hash and every child row survive |
 | A mismatch emits a metric | **DONE** | `IntegrityMetrics` / `REASON_COUNTS` in `replay/events.py`; `ALERTING_OUTCOMES = {MISMATCH}` |
-| **A *scheduled* verifier samples completed records** | **NOT DONE** | `IntegrityScheduler` (`replay/scheduler.py`) exists, is bounded, and uses the `ioe.claim_integrity_targets` keyhole — but it has **no Celery task and no `beat_schedule` entry**. `workers/celery_app.py` schedules the freshness relay and sweep and nothing for integrity. Verification therefore runs only when the API is called |
-| **A high-severity alert rule** | **NOT DONE** | `log.error("alert.integrity_mismatch", …)` emits the signal; no alerting backend consumes it. Depends on §4 |
-| **A runbook** | **NOT DONE** | Depends on §4. No operations function exists |
+| **A *scheduled* verifier samples completed records** | **DONE** (entry 8C) | Celery task `workers.tasks.ioe.verify_sealed_integrity` on its own `ioe_integrity` queue, registered as beat entry `ioe-integrity-verification` at a configuration-driven interval (`ONYX_IOE_INTEGRITY_INTERVAL_MINUTES`, default 15 min; batch `ONYX_IOE_INTEGRITY_BATCH_SIZE`, default 10, hard-capped at 50 by the scheduler and again by the SQL). It adds no logic: it calls `IntegrityScheduler.run_cycle`, which claims through `ioe.claim_integrity_targets` and verifies through `IntegrityVerificationService`. Evidence: `tests/integration/test_integrity_scheduler_task.py` (28 tests) |
+| **A high-severity alert rule** | **NOT DONE** | `log.error("alert.integrity_mismatch", …)` emits the signal; **no alerting backend exists in this repository to consume it**, and a log line is not an alert. Acceptance criteria are now written down in the runbook §13 and repeated below. Depends on §4 |
+| **A runbook** | **DONE** (entry 8C) | `docs/operations/ioe-integrity-verification-runbook.md` — task name, queue, beat entry, all four config keys, worker role and privileges, manual bounded invocation, the five outcome states, first response to a mismatch, legacy-vs-regression queries, stuck-claim inspection and recovery, safe retry, pause and batch-reduction procedures, privacy restrictions, and the escalation gap. It states explicitly that no alert is configured |
+| **A manual operational invocation path** | **DONE** (entry 8C) | `backend/scripts/verify_integrity.py` — bounded, goes through the same scheduler and privileged claim interface, exits `2` on mismatch. No HTTP endpoint was added |
 | Drill: tamper via an owner connection, verify, assert `non_reproducible` | **DONE** | `test_scenario_integrity_closeout.py::test_a_frozen_scenario_whose_result_was_altered_is_a_genuine_mismatch` — tampers with the sealed `scenario_result_hash` over a superuser connection (the application cannot: the column is sealed) and asserts `mismatch` / `non_reproducible` |
 | Drill: `non_reproducible` distinct from `stale`, and a record can be both | **DONE** | `test_scenario_integrity_closeout.py::test_freshness_may_label_stale_without_moving_any_pin_or_result` — the world changes, freshness may relabel, no pin or stored number moves, and the replay still verifies |
 
@@ -339,8 +340,23 @@ so readiness reporting does not count age as failure. Evidence:
 `test_scenario_integrity_closeout.py` (30 tests) and
 `docs/architecture/ioe-frozen-scenario-baseline-integrity.md` §6b.
 
-**To close entry 8:** a Celery task wrapping `IntegrityScheduler` plus a `beat_schedule` entry
-(engineering, small), then the alert rule and runbook (blocked on §4).
+**Entry 8C (scheduled verification + runbook) closed** at the commit adding
+`workers.tasks.ioe.verify_sealed_integrity`. Verification now runs on a schedule instead of
+only when the API is called, and an operator has a documented bounded manual path.
+
+**To close entry 8 completely — one requirement remains, the high-severity alert.** It is
+blocked on §4 (monitoring), which is staffing-blocked. Acceptance criteria, so the next person
+does not have to re-derive them:
+
+1. A log or metric pipeline ingesting `alert.integrity_mismatch`
+   (`app/services/ioe/replay/events.py`).
+2. A high-severity page on `integrity_verification_mismatch > 0` that **excludes**
+   `LEGACY_EXECUTION_POLICY_UNVERIFIABLE` and `integrity_batch_unavailable_dependency` —
+   age and transient dependency gaps must not page.
+3. A named on-call rotation to receive it.
+4. A test or configuration check proving the rule fires on a synthetic mismatch.
+
+Until all four exist, detection depends on a human running the queries in runbook §7.
 
 ### 9. Real freshness producer wiring
 
@@ -424,7 +440,7 @@ last time it was edited.
 | 5 | Log redaction and scanning | **OPEN** | — | not started |
 | 6 | Reproducible dependency locking | **OPEN** | — | not started; closure-phase item 6 |
 | 7 | Blocking type checking | **OPEN** | 3B closeout | `mypy` over the protected scope → **59 errors in 20 files**; no `.github/` in the repository, so there is no CI to gate |
-| 8 | Replay verification + `non_reproducible` | **PARTIALLY CLOSED** | 3B closeout | evidence table above: schema, verifier, immutability, metrics and both drills **done**; **beat scheduling, alert rule and runbook not done** |
+| 8 | Replay verification + `non_reproducible` | **PARTIALLY CLOSED** | entry 8C | evidence table above: schema, verifier, immutability, metrics, both drills, **scheduled task + beat registration + runbook + manual invocation** all done; **the high-severity alert alone remains**, blocked on §4 |
 | 9 | Real freshness producer wiring | **OPEN** | 3B closeout | producer call-site search → **0 of 6 required categories**; the three existing call sites are not among them |
 | 10 | External sign-offs | **OPEN** | — | staffing-blocked; long lead time |
 

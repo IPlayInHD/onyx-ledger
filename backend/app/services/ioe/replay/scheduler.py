@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from sqlalchemy import text
@@ -34,7 +35,9 @@ from app.database.session import unit_of_work
 from app.services.ioe.domain.integrity import (
     INTEGRITY_CHECK_POLICY_VERSION,
     EntityType,
+    IntegrityReason,
     IntegrityStatus,
+    is_legacy_unverifiable,
 )
 from app.services.ioe.replay.events import IntegrityEventService
 from app.services.ioe.replay.verification import (
@@ -48,6 +51,14 @@ DEFAULT_BATCH_SIZE = 10
 MAX_BATCH_SIZE = 50
 DEFAULT_TIMEOUT_SECONDS = 60.0
 MAX_RETRIES = 2
+
+# The entity types `ioe.claim_integrity_targets` accepts. Portfolios are
+# deliberately absent: the SQL rejects them, and a portfolio has no independent
+# scheduling identity — it is reached through its run, whose
+# `last_integrity_checked_at` is what the selection orders on. This tuple is the
+# single source of truth for the scheduler and its tests, so a type added here
+# without the SQL would fail loudly rather than silently never be sampled.
+SUPPORTED_TARGET_TYPES: tuple[str, ...] = ("optimization", "scenario")
 
 
 def worker_identity() -> str:
@@ -65,14 +76,71 @@ class ScheduledTarget:
 
 @dataclass
 class SchedulerReport:
+    """Aggregate counts for one bounded execution.
+
+    Counts only. No identifier, hash or anything derived from a financial value
+    reaches this object, so the whole report is safe to log verbatim.
+    """
+
     claimed: int = 0
     verified: int = 0
+    # The entity status. `non_reproducible` is the same records under the name
+    # a reader sees; both are reported so an operator does not need the
+    # internal vocabulary to read a metric.
     mismatch: int = 0
+    # `unavailable` counts EVERY unavailable outcome, including the two below.
     unavailable: int = 0
+    # Sealed before the frozen-input correction: never verifiable either way.
+    # Separated because it is the record's age, not a fault.
+    legacy_unverifiable: int = 0
+    # The verifier itself failed. Proves nothing about the record.
+    failed: int = 0
     skipped_active: int = 0
     errors: int = 0
     recovered_claims: int = 0
     reason_codes: list[str] = field(default_factory=list)
+
+    @property
+    def non_reproducible(self) -> int:
+        return self.mismatch
+
+    @property
+    def unavailable_dependency(self) -> int:
+        """`unavailable` minus age and verifier defects — the actionable count."""
+        return self.unavailable - self.legacy_unverifiable - self.failed
+
+    @property
+    def skipped(self) -> int:
+        """Claimed but not verified by this execution, for any reason."""
+        return self.skipped_active + self.errors
+
+    def merge(self, other: SchedulerReport) -> None:
+        self.claimed += other.claimed
+        self.verified += other.verified
+        self.mismatch += other.mismatch
+        self.unavailable += other.unavailable
+        self.legacy_unverifiable += other.legacy_unverifiable
+        self.failed += other.failed
+        self.skipped_active += other.skipped_active
+        self.errors += other.errors
+        self.recovered_claims += other.recovered_claims
+        self.reason_codes.extend(other.reason_codes)
+
+    def as_metrics(self) -> dict[str, int]:
+        """The aggregate signal one scheduled execution emits."""
+        return {
+            "integrity_batch_claimed": self.claimed,
+            "integrity_batch_verified": self.verified,
+            "integrity_batch_mismatch": self.mismatch,
+            "integrity_batch_non_reproducible": self.non_reproducible,
+            "integrity_batch_unavailable": self.unavailable,
+            "integrity_batch_unavailable_dependency": self.unavailable_dependency,
+            "integrity_batch_legacy_unverifiable": self.legacy_unverifiable,
+            "integrity_batch_failed": self.failed,
+            "integrity_batch_skipped": self.skipped,
+            "integrity_batch_skipped_active": self.skipped_active,
+            "integrity_batch_recovered_claims": self.recovered_claims,
+        }
 
 
 class IntegrityScheduler:
@@ -152,8 +220,52 @@ class IntegrityScheduler:
             elif result.status is IntegrityStatus.MISMATCH:
                 report.mismatch += 1
             else:
+                # Everything else is `unavailable` on the entity. The REASON is
+                # what separates a broken pin from the record's age from a
+                # verifier defect, and the scheduled path must draw the same
+                # distinction the API path does — a legacy record must never
+                # arrive here as a generic failure.
                 report.unavailable += 1
+                if is_legacy_unverifiable(result.reason_code):
+                    report.legacy_unverifiable += 1
+                elif result.reason_code is IntegrityReason.REPLAY_EXECUTION_FAILED:
+                    report.failed += 1
         return report
+
+    async def run_cycle(
+        self, *,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        entity_types: Sequence[str] = SUPPORTED_TARGET_TYPES,
+    ) -> SchedulerReport:
+        """One bounded execution across every supported target type.
+
+        `batch_size` is the budget for the WHOLE cycle, split across the types,
+        so a caller asking for 10 records gets at most 10 verifications however
+        many kinds exist. There is no loop-until-empty: a cycle claims once per
+        type and returns, and the beat schedule — not a `while` — decides when
+        the next batch runs. That is what bounds a single execution in time as
+        well as in count.
+        """
+        types = [t for t in entity_types if t in SUPPORTED_TARGET_TYPES]
+        total = SchedulerReport()
+        if not types:
+            return total
+
+        bounded = min(max(batch_size, 1), MAX_BATCH_SIZE)
+        # Integer split with the remainder to the earlier types, so a budget of
+        # 1 still makes progress rather than rounding every share to zero.
+        share, remainder = divmod(bounded, len(types))
+        for index, entity_type in enumerate(types):
+            allowance = share + (1 if index < remainder else 0)
+            if allowance <= 0:
+                continue
+            total.merge(await self.run_once(
+                entity_type=entity_type,
+                batch_size=allowance,
+                timeout_seconds=timeout_seconds,
+            ))
+        return total
 
     async def _verify(self, target: ScheduledTarget):
         """Step 3–5 of the keyhole flow: tenant context, ordinary service, commit.
@@ -171,8 +283,10 @@ class IntegrityScheduler:
 
 __all__ = [
     "DEFAULT_BATCH_SIZE",
+    "DEFAULT_TIMEOUT_SECONDS",
     "MAX_BATCH_SIZE",
     "MAX_RETRIES",
+    "SUPPORTED_TARGET_TYPES",
     "IntegrityScheduler",
     "ScheduledTarget",
     "SchedulerReport",
