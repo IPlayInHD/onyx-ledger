@@ -113,9 +113,13 @@ celery -A workers.celery_app call workers.tasks.ioe.verify_sealed_integrity --ar
   or engine run — but it does consume one claim slot per rotation. If the legacy
   population is large enough to crowd out useful work, that is the signal to
   re-run those records rather than to widen the batch.
-- **Tenants:** selection is global and ordered by check age, not by tenant, so a
-  large tenant cannot starve a small one; and the replay for each record runs in
-  that record owner's RLS context.
+- **Tenants:** selection is global and ordered by check age, **not** by tenant.
+  That is age fairness, not per-tenant fairness: a tenant with far more records
+  will occupy proportionally more of each batch, and a tenant whose records were
+  all checked recently will be absent from several cycles. Every record is still
+  reached within `ceil(N / batch)` cycles, so nothing is starved indefinitely,
+  but do not read this as a per-tenant service guarantee. The replay for each
+  record runs in that record owner's RLS context.
 
 ## 6. Outcome states
 
@@ -221,7 +225,13 @@ Stopping the `ioe_integrity` worker has the same effect and needs no config
 change; messages accumulate on that queue only, and the task is idempotent, so
 draining them later is harmless.
 
-## 11. Safe retry
+## 11. Safe retry and overlap
+
+Cycles **can** overlap — a slow database, a widened batch, a manual invocation
+alongside the schedule, or a queue backlog can all put two in flight. Healthy
+timing makes that unlikely; it does not make it impossible, and nothing in the
+design relies on it being impossible. Correctness under overlap comes from
+record-level arbitration:
 
 The task is safe to re-run at any time:
 

@@ -1,5 +1,13 @@
 # Onyx Ledger — Frozen Scenario Baseline Integrity (item 3B)
 
+## 0. Provenance
+
+| Commit | Contribution |
+|---|---|
+| `d97f86a` | **Original item 3B implementation.** Removed the live baseline from `ScenarioService`, added `FrozenScenarioInputService` / `FrozenScenarioExecutionInput`, deleted `PinnedScenarioSpec.baseline_inputs`, added `ScenarioBaselineUnavailable`, pinned the execution policy, and wired the replay path to the frozen input. |
+| `ec51f25` | **Item 3B closeout.** Corrected integrity-state semantics (legacy ≠ mismatch, migration `0040`), made policy parsing strict and fail-closed, added the seal-time policy guard, and added sanitized internal diagnostics. |
+| *this commit* | **Conformance audit and gap closure.** Not a reimplementation: a distinct `PINNED_SCENARIO_SNAPSHOT_INCOMPLETE` classification, a bounded legacy-refusal metric, profile-race coverage, corrected scheduler wording, and the documentation sections below. |
+
 ## 1. The defect
 
 Item 3A corrected the optimizer. The identical defect survived one module over.
@@ -109,7 +117,7 @@ The underlying checks are 3A's, so the reasons are translated rather than re-inv
 | Analysis reason (3A) | Scenario reason (3B) |
 |---|---|
 | `PINNED_SNAPSHOT_UNAVAILABLE` | `PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE` |
-| `PINNED_SNAPSHOT_INCOMPLETE` | `PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE` |
+| `PINNED_SNAPSHOT_INCOMPLETE` | `PINNED_SCENARIO_SNAPSHOT_INCOMPLETE` |
 | `PINNED_SNAPSHOT_HASH_MISMATCH` | `PINNED_SCENARIO_SNAPSHOT_HASH_MISMATCH` |
 | `PINNED_SNAPSHOT_SCHEMA_UNSUPPORTED` | `PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED` |
 | `PINNED_BASELINE_RESULT_UNAVAILABLE` | `PINNED_SCENARIO_BASELINE_UNAVAILABLE` |
@@ -333,6 +341,79 @@ That is `test_a_live_financial_change_after_pinning_cannot_affect_a_scenario`,
 `test_a_scenario_computed_against_a_changed_live_state_verifies`. Before this correction the
 first two computed 310,000's numbers and the third reported `mismatch`.
 
+## 12b. Lever validation
+
+Every hypothetical mutation goes through the pinned lever registry; there is no
+path from a request to an engine field name.
+
+| Rejected | Where |
+|---|---|
+| Unknown lever code | `ScenarioSpec.parse` — refused before the service sees it |
+| Unknown or missing parameter | `lever_registry.apply` |
+| Out-of-bounds parameter | registry bounds per lever |
+| Non-numeric / float monetary value | parameters are `Decimal`; a float is rejected |
+| Mutation outside the lever's declared field set | each lever declares a closed writable allow-list |
+| Arbitrary patches, JSONPath, formulas, expressions, callables, SQL | no such channel exists — parameters are typed scalars |
+| Unknown engine field | `to_tax_input` refuses any key the engine does not define, so a lever that produced one cannot be silently dropped |
+
+`apply_all` is atomic: a failure part-way raises and leaves the clone untouched,
+so a half-applied composite lever never reaches the engine. The frozen baseline
+is never the thing a lever mutates — `_compute` takes a second clone afterwards
+and asserts it equals the first.
+
+The **pinned** `lever_registry_version` enters `scenario_spec_hash`, so a
+scenario sealed under one registry cannot be replayed under another without the
+identity changing. Unit coverage:
+`tests/unit/ioe/test_levers_and_assumptions.py` (14 lever tests).
+
+## 12c. Assumption validation
+
+Assumptions reach the support score only through
+`assumption_registry.build(...)`, which resolves materiality, certainty and
+eligibility impact from the registry rather than from whatever the caller
+asserted. Unregistered codes, wrong types and out-of-bounds values are refused.
+`display_note` is excluded from the canonical form, so rewording a note cannot
+change identity. `assumption_registry_version` is pinned into the manifest and
+therefore into `scenario_spec_hash`.
+
+The four categories stay distinct and are never merged: an **authoritative
+frozen fact** (in the snapshot), a **user-declared assumption** (registry-typed,
+in the spec), a **system projection assumption** (governed by
+`projection_methodology_version`), and a **derived output** (the sealed result).
+
+## 12d. Worked examples
+
+**Financial race** — `test_a_live_financial_change_after_pinning_cannot_affect_a_scenario`
+```
+snapshot A pinned → scenario TX-1 completes → live income changes to 310000
+→ baseline still reconstructs from A → registered lever applies to a clone of A
+→ scenario seals → production replay returns verified
+```
+
+**Profile race** — `test_a_live_profile_change_after_pinning_cannot_affect_a_scenario`
+and `test_two_live_profile_states_give_one_scenario_identity`
+```
+snapshot A pinned → scenario TX-1 completes → province ON becomes BC, single becomes married
+→ the scenario still uses A's jurisdiction and figures → the result is deterministic
+   (BC/married and AB/single produce one identity: spec hash, result hash,
+    baseline tax, scenario tax, support score and every support component)
+→ production replay returns verified
+```
+
+**Unsupported legacy snapshot** — `test_an_unsupported_legacy_snapshot_is_counted_for_operators`
+```
+legacy flat snapshot → PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED
+→ refusal metric increments by exactly one → the engine does not run
+→ no live fallback → no partial scenario evidence
+```
+
+**Incomplete current snapshot** — `test_an_incomplete_snapshot_fails_closed`
+```
+supported self-describing schema, required field missing
+→ PINNED_SCENARIO_SNAPSHOT_INCOMPLETE (never SCHEMA_UNSUPPORTED)
+→ the engine does not run → no live fallback → no partial scenario evidence
+```
+
 ## 13. Preserved behaviour
 
 `TaxEngineService` remains the only tax-calculation authority; the change is which builder
@@ -392,6 +473,95 @@ were more.
 These are unix-socket numbers and are not a managed-database claim. What transfers is the
 round-trip count: 25 per simulation, so ~0.05 s of waiting at a 2 ms RTT.
 
+## 16b. Deployment cutoff
+
+The commit introducing `scenario_execution_policy_version` (`d97f86a`). Every
+scenario created after it is `frozen_snapshot_v1`; every scenario created before
+it has no policy key and reads as `live_baseline_legacy`. There is no backfill
+and no date arithmetic — the presence of the key is the cutoff, which is why
+`assert_current_scenario_policy` refuses to seal a scenario without one.
+
+## 16c. Scheduled-verifier interaction
+
+**Overlap.** Healthy measured cycles complete well before the configured
+interval. Concurrent cycles remain possible under slow execution, queue delay,
+deployment interruption, or timeout conditions. Record-level active-check
+arbitration preserves correctness when overlap occurs — timing is never relied
+on.
+
+**Fairness.** Global oldest-first ordering provides deterministic eventual
+rotation, but it is not a strict per-tenant fairness guarantee.
+
+**Retry.** Mismatch, unavailable and legacy-unverifiable records currently
+return to the rotation on the same terms as any other record. Reason-aware
+backoff or quarantine is **future operational work, not implemented behaviour**.
+
+**Portfolio coverage.** Portfolios are not sampled by the scheduler —
+`ioe.claim_integrity_targets` rejects the type. A portfolio is verified when an
+operator or client requests it through the existing verification interface, and
+its sealed evidence is also exercised indirectly by its run's optimization
+replay. A portfolio that is never explicitly requested **can remain
+`not_checked` indefinitely**. That is the limit of the guarantee.
+
+
+Scheduled verification (`workers.tasks.ioe.verify_sealed_integrity`, closure
+entry 8C) samples scenarios. During this correction's rollout the estate holds
+both policies, so:
+
+- **Corrected scenarios** replay and return `verified` immediately.
+- **Legacy scenarios** are refused *before* any dependency resolution or engine
+  run and recorded as `unavailable / LEGACY_EXECUTION_POLICY_UNVERIFIABLE` —
+  never `mismatch`, because nothing was compared on equal terms, and never
+  `verified`, because nothing was reproduced.
+- **Genuine mismatch states are not suppressed.** A corrected scenario that
+  stops reproducing still reports `mismatch` / `non_reproducible`.
+
+**Decision on legacy sampling:** option 1 — legacy scenarios continue to rotate
+under the ordinary age ordering, and are *explicitly classified* rather than
+excluded. Excluding them would need a new predicate inside
+`ioe.claim_integrity_targets` (a migration) to filter on a JSONB manifest key,
+and would hide the size of the legacy population instead of measuring it. The
+cost is one claim slot per legacy record per rotation, and each such check is
+engine-free. `integrity_batch_legacy_unverifiable` measures exactly that, so the
+decision is reversible on evidence rather than on assumption.
+
+## 16d. Snapshot failure classification
+
+Four distinct snapshot conditions, four distinct codes. They are not collapsed
+because they call for different operator action.
+
+| Code | Condition | Operator action |
+|---|---|---|
+| `PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE` | the row does not exist, or is not an object | investigate deletion / restore |
+| `PINNED_SCENARIO_SNAPSHOT_HASH_MISMATCH` | the payload no longer matches its stored canonical hash | treat as tampering or corruption |
+| `PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED` | the payload names a schema this reconstructor does not know, **including old flat pre-self-describing snapshots** | re-run the analysis |
+| `PINNED_SCENARIO_SNAPSHOT_INCOMPLETE` | the schema is recognised and the hash is intact, but a required engine field is absent or structurally invalid | re-run the analysis; investigate the writer |
+
+Incomplete is never reported as unsupported, and unsupported is never reported
+as a generic reconstruction failure. The exception carries the code and nothing
+else — no payload, no exception text, nothing destined for storage.
+
+## 16e. Legacy-snapshot refusal metric
+
+`BASELINE_REFUSAL_COUNTS` (`scenario/service.py`) counts refused scenario
+baselines keyed by enumerated reason, following the same in-process counter
+pattern as `IntegrityMetrics` in `replay/events.py` — not a second metrics
+framework.
+
+The one an operator watches during the legacy transition is
+`PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED`, which counts analyses predating
+the self-describing format. Semantically the counter is:
+
+```
+operation="scenario_create"  reason=<enumerated snapshot reason>  execution_policy="legacy"
+```
+
+Bounded and low-cardinality by construction: the key space is the closed reason
+enumeration. **No** user id, scenario id, analysis id, snapshot id or hash, no
+income or tax amount, no personal information, no exception string. Each refusal
+increments exactly one key; a refusal for a *different* reason increments that
+reason's key, never the legacy one.
+
 ## 17. Remaining limitations
 
 1. Snapshots written before the self-describing format fail closed as
@@ -403,4 +573,18 @@ round-trip count: 25 per simulation, so ~0.05 s of waiting at a 2 ms RTT.
    of scope for this item.
 3. Household and contribution-room resolution still contribute no inputs. If they are added
    later they must enter the analysis snapshot rather than being read live by either
-   workflow.
+   workflow. The SQL-capture boundary across the whole of `simulate()` is what would catch
+   a future implementation introducing one.
+4. **Scenarios do not evaluate rules.** `ScenarioService` pins a rule snapshot and seals the
+   pinned version set, but it never calls `RulesEvaluatorService`; a scenario reports a tax
+   delta and a support score, not an eligibility difference. Baseline/hypothetical
+   `facts_for` + `evaluate` on the frozen inputs would be a **new capability**, not a
+   correction of a live-data leak, and is deliberately out of scope for this item. The pins
+   it would need are already sealed, so adding it later changes no identity contract.
+5. **The economic result is not fully decomposed.** `scenario_result` carries `tax_delta`,
+   `objective_value_baseline/scenario/delta` and `net_benefit`, with the cost taxonomy
+   applied on the optimization side. The wider structured breakdown — refund-or-balance,
+   refundable-benefit, non-refundable-credit, deferral, asset transfer, non-recoverable
+   expenditure, liquidity commitment, contribution room and loss pool consumed, future
+   projected effect — would require new columns and a migration, and is not a frozen-input
+   concern. Recorded here so it is not mistaken for done.

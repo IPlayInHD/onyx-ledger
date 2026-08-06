@@ -76,8 +76,11 @@ celery_app.conf.beat_schedule = {
     # is configuration-driven so it can be widened during an incident without a
     # deploy; `timedelta` rather than `crontab` because the value is an
     # arbitrary number of minutes and crontab cannot express one above 59.
-    # Default 15 minutes at a default batch of 10 records — comfortably longer
-    # than a bounded batch takes, so executions do not stack up.
+    # Default 15 minutes at a default batch of 10 records. Measured batches are
+    # far shorter than that, which makes overlap UNLIKELY — not impossible. A
+    # slow database, a widened batch or a manual invocation can still put two
+    # cycles in flight, so correctness under overlap comes from record-level
+    # arbitration (the partial unique active-check index), never from timing.
     "ioe-integrity-verification": {
         "task": "workers.tasks.ioe.verify_sealed_integrity",
         "schedule": timedelta(minutes=settings.ioe_integrity_interval_minutes),

@@ -32,6 +32,7 @@ from app.database.models import (
     Jurisdiction,
     RuleOutcome,
     Scenario,
+    ScenarioConfidenceComponent,
     ScenarioResult,
     TaxProfile,
     TaxRule,
@@ -43,6 +44,7 @@ from app.services.ioe.domain.integrity import IntegrityStatus
 from app.services.ioe.domain.scenario import ScenarioSpec
 from app.services.ioe.frozen.models import (
     PINNED_SCENARIO_SNAPSHOT_HASH_MISMATCH,
+    PINNED_SCENARIO_SNAPSHOT_INCOMPLETE,
     PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED,
     PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE,
     FrozenScenarioExecutionInput,
@@ -180,6 +182,80 @@ async def test_a_live_financial_change_after_pinning_cannot_affect_a_scenario():
     assert result.tax_delta == (expected_baseline - result.scenario_tax)
     assert scenario.version_manifest["scenario_execution_policy_version"] == (
         ScenarioExecutionPolicy.FROZEN_SNAPSHOT_V1.value)
+
+
+@pytest.mark.asyncio
+async def test_a_live_profile_change_after_pinning_cannot_affect_a_scenario():
+    """The profile race, alongside the financial one.
+
+    Province drives every provincial bracket and credit, so a changed province
+    would move every number if it leaked in. The snapshot pins ON; live becomes
+    BC afterwards.
+    """
+    await _publish(f"SBP{_suffix()}")
+    uid, analysis_id, _ = await _analysis("95000")
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        await s.execute(
+            text("UPDATE profile.tax_profile SET province_code = 'BC', "
+                 "marital_status = 'married' WHERE user_id = :u"), {"u": uid})
+
+    outcome = await ScenarioService(uid).simulate(analysis_id, _spec())
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        scenario = await s.get(Scenario, outcome.scenario_id)
+        snapshot = await s.get(AnalysisInputSnapshot, analysis_id)
+
+    assert scenario.jurisdiction == "ON", "the live province leaked into the pin"
+    assert scenario.baseline_tax == _tax_from(snapshot.snapshot)
+
+    verified = await IntegrityVerificationService(uid).verify(
+        "scenario", outcome.scenario_id)
+    assert verified.status is IntegrityStatus.VERIFIED
+
+
+@pytest.mark.asyncio
+async def test_two_live_profile_states_give_one_scenario_identity():
+    """Determinism across live profile state, not just "it still verifies".
+
+    Province is material — it drives every provincial bracket and credit — so
+    if live profile leaked in, ON and BC would produce different numbers. Same
+    frozen snapshot + same spec must give the same identity under both.
+    """
+    await _publish(f"SBP2{_suffix()}")
+    payload, digest = frozen_snapshot(employment_income=Decimal("120000"))
+
+    identities = set()
+    for province, marital in (("BC", "married"), ("AB", "single")):
+        uid, analysis_id, _ = await _analysis("120000", snapshot=(payload, digest))
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            await s.execute(
+                text("UPDATE profile.tax_profile SET province_code = :p, "
+                     "marital_status = :m WHERE user_id = :u"),
+                {"p": province, "m": marital, "u": uid})
+
+        outcome = await ScenarioService(uid).simulate(analysis_id, _spec())
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            row = await s.get(Scenario, outcome.scenario_id)
+            result = await s.scalar(select(ScenarioResult).where(
+                ScenarioResult.scenario_id == outcome.scenario_id))
+            components = list(await s.scalars(
+                select(ScenarioConfidenceComponent)
+                .where(ScenarioConfidenceComponent.scenario_id
+                       == outcome.scenario_id)
+                .order_by(ScenarioConfidenceComponent.factor_code)))
+        identities.add((
+            row.scenario_spec_hash,
+            row.scenario_result_hash,
+            str(row.baseline_tax),
+            str(result.scenario_tax),
+            str(result.display_support_score),
+            tuple((c.factor_code, str(c.contribution)) for c in components),
+            row.version_manifest["scenario_execution_policy_version"],
+        ))
+
+    assert len(identities) == 1, "live profile state changed the sealed identity"
+    assert next(iter(identities))[-1] == "frozen_snapshot_v1"
 
 
 @pytest.mark.asyncio
@@ -446,7 +522,35 @@ async def test_an_incomplete_snapshot_fails_closed():
 
     with pytest.raises(ScenarioBaselineUnavailable) as excinfo:
         await ScenarioService(uid).simulate(analysis_id, _spec())
-    assert excinfo.value.detail == PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE
+    # An incomplete snapshot is its own code: the row exists and its hash is
+    # intact, which is a different operator action from "it is missing".
+    assert excinfo.value.detail == PINNED_SCENARIO_SNAPSHOT_INCOMPLETE
+    assert excinfo.value.detail != PINNED_SCENARIO_SNAPSHOT_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_an_unsupported_legacy_snapshot_is_counted_for_operators():
+    """§12: a non-sensitive metric for attempted use of a legacy snapshot."""
+    from app.services.ioe.scenario.service import (
+        baseline_refusal_metrics,
+        reset_baseline_refusal_metrics,
+    )
+
+    payload, _ = frozen_snapshot(employment_income=Decimal("95000"))
+    payload["schema_version"] = "0.9.0"
+    await _publish(f"SBQL{_suffix()}")
+    uid, analysis_id, _ = await _analysis(
+        "95000", snapshot=(payload, snapshot_hash(payload)))
+
+    reset_baseline_refusal_metrics()
+    with pytest.raises(ScenarioBaselineUnavailable):
+        await ScenarioService(uid).simulate(analysis_id, _spec())
+
+    metrics = baseline_refusal_metrics()
+    assert metrics.get(PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED) == 1
+    # counts only — nothing identifying may appear in the metric keys
+    assert all(k.isupper() and " " not in k for k in metrics)
+    assert all(isinstance(v, int) for v in metrics.values())
 
 
 @pytest.mark.asyncio

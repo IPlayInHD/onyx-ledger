@@ -25,6 +25,7 @@ Three rules this module exists to hold:
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -97,6 +98,22 @@ SCENARIO_SERVICE_VERSION = "1.0.0"
 MONEY = Decimal("0.01")
 
 log = get_logger("onyx.ioe.scenario")
+
+# Non-sensitive counters for refused scenario baselines, keyed by enumerated
+# reason. Counts only — no identifier, no tenant, no payload — so the whole
+# mapping is safe to scrape or log. `PINNED_SCENARIO_SNAPSHOT_SCHEMA_UNSUPPORTED`
+# is the one an operator watches during the legacy-snapshot transition: it counts
+# analyses that predate the self-describing format and must be re-run.
+BASELINE_REFUSAL_COUNTS: Counter[str] = Counter()
+
+
+def baseline_refusal_metrics() -> dict[str, int]:
+    """Snapshot of the refusal counters. Counts only, safe to publish."""
+    return dict(BASELINE_REFUSAL_COUNTS)
+
+
+def reset_baseline_refusal_metrics() -> None:
+    BASELINE_REFUSAL_COUNTS.clear()
 
 # Sanitized, enumerated failure codes. Never a message, stack trace, or PII.
 ERROR_ANALYSIS_NOT_READY = "ANALYSIS_NOT_READY"
@@ -315,6 +332,7 @@ class ScenarioService:
         except Exception:  # noqa: BLE001 - diagnostics must never mask the refusal
             pass
 
+        BASELINE_REFUSAL_COUNTS[exc.reason] += 1
         log.warning(
             "scenario_baseline_unavailable",
             user_id=str(self.user_id),
@@ -847,7 +865,10 @@ def _classify(exc: Exception) -> str:
 
 
 __all__ = [
+    "BASELINE_REFUSAL_COUNTS",
     "SCENARIO_SERVICE_VERSION",
+    "baseline_refusal_metrics",
+    "reset_baseline_refusal_metrics",
     "PinnedScenarioSpec",
     "ScenarioBaselineUnavailable",
     "ScenarioIdempotencyKeyReused",

@@ -285,10 +285,29 @@ async def test_a_cycle_cannot_exceed_the_maximum_batch_size():
 
 @pytest.mark.asyncio
 async def test_a_budget_of_one_still_makes_progress():
-    """Integer splitting must not round every type's share to zero."""
+    """Integer splitting must not round every type's share to zero.
+
+    Asserted against ONE type, because a budget of 1 across two types gives the
+    single slot to the first — so a cycle over both types legitimately claims
+    nothing when only the second has eligible records. Depending on which types
+    happen to be populated is exactly the order dependency this suite must not
+    have.
+    """
     await _sealed_scenario()
-    report = await IntegrityScheduler("one").run_cycle(batch_size=1)
+    report = await IntegrityScheduler("one").run_cycle(
+        batch_size=1, entity_types=("scenario",))
     assert report.claimed == 1
+
+
+def test_a_budget_of_one_allocates_a_whole_slot_not_a_rounded_zero():
+    """The allocation arithmetic itself, independent of what is in the table."""
+    share, remainder = divmod(1, len(SUPPORTED_TARGET_TYPES))
+    allowances = [
+        share + (1 if i < remainder else 0)
+        for i in range(len(SUPPORTED_TARGET_TYPES))
+    ]
+    assert sum(allowances) == 1, "the budget was not conserved"
+    assert max(allowances) == 1, "every share rounded to zero"
 
 
 @pytest.mark.asyncio
