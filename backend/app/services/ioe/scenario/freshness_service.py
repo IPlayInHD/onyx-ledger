@@ -209,13 +209,24 @@ class ScenarioFreshnessService:
         return result.rowcount or 0
 
     async def invalidate_for_tax_year(
-        self, tax_year: int, reason: StaleReason
+        self, tax_year: int, reason: StaleReason, *,
+        jurisdiction: str | None = None,
     ) -> int:
-        """EVENT path: a rule publication or reference-data change for a year."""
+        """EVENT path: a rule publication or reference-data change for a year.
+
+        `jurisdiction` narrows the year. A rule published for one province must
+        not stale results computed for another — over-staling is not harmless,
+        it trains people to ignore the label. NULL means the change is not
+        jurisdiction-specific (a federal rule, an engine version) and applies
+        across the year, which is also how every historical event behaves.
+        """
+        conditions = [Scenario.tax_year == tax_year]
+        if jurisdiction is not None:
+            conditions.append(Scenario.jurisdiction == jurisdiction)
         result = await self.s.execute(
             update(Scenario)
             .where(
-                Scenario.tax_year == tax_year,
+                *conditions,
                 Scenario.workflow_status == "completed",
                 Scenario.freshness_status == FreshnessStatus.CURRENT.value,
             )

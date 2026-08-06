@@ -43,5 +43,13 @@ CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON ioe.active_calculation_versio
     FOR EACH ROW EXECUTE FUNCTION ref.set_updated_at();
 
 -- The application activates and reads; nothing else needs write access.
+--
+-- `ALTER DEFAULT PRIVILEGES IN SCHEMA ioe` (16_rls_grants.sql) hands
+-- onyx_app_rw arwd on every new table, so DELETE arrives here uninvited.
+-- Activation never deletes a row — a component that stops being governed
+-- keeps its last activation as history — so the blanket grant is narrowed
+-- back to exactly what the service uses. Revoked BEFORE the explicit grant so
+-- the intent reads in one direction.
+REVOKE ALL ON ioe.active_calculation_version FROM onyx_app_rw, onyx_app_ro;
 GRANT SELECT, INSERT, UPDATE ON ioe.active_calculation_version TO onyx_app_rw;
 GRANT SELECT ON ioe.active_calculation_version TO onyx_app_ro;

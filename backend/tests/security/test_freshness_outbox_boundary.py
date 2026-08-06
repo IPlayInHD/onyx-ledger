@@ -506,6 +506,11 @@ async def test_the_claim_payload_carries_no_financial_columns():
     assert columns == {
         "out_event_id", "out_claim_token", "out_stale_reason_code",
         "out_analysis_id", "out_tax_year", "out_user_id",
+        # Entry 9: a bounded province code from `ref.province`, used to narrow
+        # rule fan-out to one jurisdiction. Not a financial value and not
+        # user-identifying — the payload already carries the tenant id and the
+        # tax year, so this widens nothing a compromised worker could learn.
+        "out_jurisdiction",
     }, f"the claim payload shape changed: {columns}"
 
 

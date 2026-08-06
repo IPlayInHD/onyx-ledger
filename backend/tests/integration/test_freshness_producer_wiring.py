@@ -109,14 +109,15 @@ async def _analysis(uid: uuid.UUID, *, tax_year: int = 2025,
         return run.id
 
 
-async def _sealed_pair(uid: uuid.UUID, analysis_id: uuid.UUID):
+async def _sealed_pair(uid: uuid.UUID, analysis_id: uuid.UUID, *,
+                       jurisdiction: str = "ON"):
     """One completed optimization and one completed scenario."""
     from app.services.ioe.domain.scenario import ScenarioSpec
 
     opt = await OptimizationOrchestrator(uid).generate(analysis_id)
     spec = ScenarioSpec.parse(
         [{"lever_code": RRSP, "parameters": {"amount": Decimal("5000")}}],
-        assumptions=[], jurisdiction="ON", tax_year=2025)
+        assumptions=[], jurisdiction=jurisdiction, tax_year=2025)
     scn = await ScenarioService(uid).simulate(analysis_id, spec)
     return opt.run_id, scn.scenario_id
 
@@ -604,3 +605,169 @@ async def test_no_tenant_context_denies_the_read_by_default():
     assert await read_outbox_without_context(uid) == 0
     # and the same rows ARE visible once a context is supplied deliberately
     assert await read_outbox_as(uid, uid) == 1
+
+
+# =============================================================================
+# 9. Analysis supersession — its own reason, scoped to the year
+# =============================================================================
+@pytest.mark.asyncio
+async def test_a_newer_analysis_stales_older_results_with_its_own_reason():
+    """`NEWER_ANALYSIS_AVAILABLE`, not "your inputs changed"."""
+    from app.services.analysis.service import AnalysisService
+
+    await _publish(f"E9A{_suffix()}")
+    uid = await _user()
+    analysis_id = await _analysis(uid)
+    run_id, scenario_id = await _sealed_pair(uid, analysis_id)
+    before = await _sealed_state(uid, run_id, scenario_id)
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        await AnalysisService(s).run(uid, 2025)
+
+    rows = await _outbox(uid)
+    completed = [r for r in rows
+                 if r.event_type == FreshnessEvent.ANALYSIS_COMPLETED.value]
+    assert completed, "completing an analysis emitted nothing"
+    assert completed[0].stale_reason_code == (
+        StaleReason.NEWER_ANALYSIS_AVAILABLE.value)
+
+    await FreshnessRelay().drain(batch_size=50)
+    after = await _sealed_state(uid, run_id, scenario_id)
+    assert after["scn_freshness"] == FreshnessStatus.STALE.value
+    assert after["scn_reason"] == StaleReason.NEWER_ANALYSIS_AVAILABLE.value
+    # sealed evidence and integrity untouched
+    assert after["scn_result"] == before["scn_result"]
+    assert after["scn_spec"] == before["scn_spec"]
+    assert after["scn_integrity"] == before["scn_integrity"]
+
+
+@pytest.mark.asyncio
+async def test_completing_an_analysis_leaves_another_tax_year_current():
+    from app.services.analysis.service import AnalysisService
+
+    await _publish(f"E9AY{_suffix()}")
+    uid = await _user()
+    analysis_2025 = await _analysis(uid, tax_year=2025)
+    _, scn_2025 = await _sealed_pair(uid, analysis_2025)
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        await AnalysisService(s).run(uid, 2024)
+    await FreshnessRelay().drain(batch_size=50)
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        scn = await s.get(Scenario, scn_2025)
+    assert scn.freshness_status == FreshnessStatus.CURRENT.value, (
+        "a 2024 analysis staled a 2025 result")
+
+
+# =============================================================================
+# 10. Rule publication — scoped by jurisdiction, not just year
+# =============================================================================
+@pytest.mark.asyncio
+async def test_a_provincial_rule_publication_carries_its_jurisdiction():
+    """The event must name the province so fan-out can narrow to it."""
+    async with unit_of_work(actor_type="admin") as s:
+        jur = await s.scalar(select(Jurisdiction).where(Jurisdiction.code == "ON"))
+        assert jur is not None, "ON jurisdiction fixture missing"
+
+    from app.services.ioe.freshness_events import emit
+
+    async with unit_of_work(actor_type="admin") as s:
+        await emit(s, FreshnessEvent.RULE_PUBLISHED, tax_year=2025,
+                   jurisdiction="ON",
+                   dedupe_key=f"rule_published:probe:{_suffix()}")
+
+    async with unit_of_work(actor_type="admin") as s:
+        row = await s.scalar(
+            select(FreshnessOutbox)
+            .where(FreshnessOutbox.jurisdiction == "ON")
+            .order_by(FreshnessOutbox.created_at.desc()).limit(1))
+    assert row is not None and row.tax_year == 2025
+
+
+@pytest.mark.asyncio
+async def test_a_provincial_rule_stales_only_that_jurisdictions_results():
+    """An Ontario rule must not stale a British Columbia result."""
+    from app.services.ioe.scenario.freshness_service import ScenarioFreshnessService
+
+    await _publish(f"E9J{_suffix()}")
+    # A genuine BC scenario — `scenario.jurisdiction` is sealed by
+    # trg_guard_transition once completed, so it cannot be retro-fitted.
+    uid = await _user(province="BC")
+    bc_analysis = await _analysis(uid, province="BC")
+    _, bc_scn = await _sealed_pair(uid, bc_analysis, jurisdiction="BC")
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        row = await s.get(Scenario, bc_scn)
+        assert row.jurisdiction == "BC"
+
+    # an Ontario rule must not touch it
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        marked = await ScenarioFreshnessService(s, uid).invalidate_for_tax_year(
+            2025, StaleReason.RULE_SNAPSHOT_SUPERSEDED, jurisdiction="ON")
+    assert marked == 0, "an ON-scoped rule staled a BC result"
+
+    # its own jurisdiction does
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        marked = await ScenarioFreshnessService(s, uid).invalidate_for_tax_year(
+            2025, StaleReason.RULE_SNAPSHOT_SUPERSEDED, jurisdiction="BC")
+    assert marked == 1, "a BC-scoped rule failed to stale the BC result"
+
+
+@pytest.mark.asyncio
+async def test_an_unscoped_event_still_fans_out_across_jurisdictions():
+    """NULL jurisdiction preserves the historical breadth — federal rules."""
+    from app.services.ioe.scenario.freshness_service import ScenarioFreshnessService
+
+    await _publish(f"E9N{_suffix()}")
+    uid = await _user()
+    analysis_id = await _analysis(uid, province="ON")
+    await _sealed_pair(uid, analysis_id)
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        marked = await ScenarioFreshnessService(s, uid).invalidate_for_tax_year(
+            2025, StaleReason.ENGINE_VERSION_CHANGED)
+    assert marked >= 1, "an unscoped event failed to fan out"
+
+
+# =============================================================================
+# 11. Registry activation — every governed component is reconciled
+# =============================================================================
+def test_every_governed_registry_is_reconciled_at_activation():
+    from app.services.ioe.freshness_producers import RUNNING_VERSIONS
+
+    required = {
+        FreshnessEvent.ENGINE_VERSION_CHANGED,
+        FreshnessEvent.REFERENCE_DATA_CHANGED,
+        FreshnessEvent.OBJECTIVE_POLICY_CHANGED,
+        FreshnessEvent.LEVER_REGISTRY_CHANGED,
+        FreshnessEvent.ASSUMPTION_REGISTRY_CHANGED,
+        FreshnessEvent.RELATIONSHIP_REGISTRY_CHANGED,
+        FreshnessEvent.SUPPORT_SCORE_POLICY_CHANGED,
+        FreshnessEvent.PROJECTION_METHODOLOGY_CHANGED,
+    }
+    assert required <= set(RUNNING_VERSIONS), (
+        f"unreconciled components: {required - set(RUNNING_VERSIONS)}")
+    # every resolver returns a non-empty bounded string
+    for event, resolve in RUNNING_VERSIONS.items():
+        value = resolve()
+        assert isinstance(value, str) and value, event.value
+
+
+@pytest.mark.asyncio
+async def test_activating_a_registry_emits_its_own_reason():
+    from app.services.ioe.version_activation import VersionActivationService
+
+    kind = FreshnessEvent.RELATIONSHIP_REGISTRY_CHANGED
+    async with unit_of_work(actor_type="system") as s:
+        outcome = await VersionActivationService(s).activate(
+            kind, f"rel-{_suffix()}")
+    assert outcome.activated is True
+
+    async with unit_of_work(actor_type="system") as s:
+        row = await s.scalar(
+            select(FreshnessOutbox)
+            .where(FreshnessOutbox.event_type == kind.value)
+            .order_by(FreshnessOutbox.created_at.desc()).limit(1))
+    assert row is not None
+    assert row.stale_reason_code == StaleReason.RELATIONSHIP_REGISTRY_CHANGED.value

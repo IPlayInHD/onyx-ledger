@@ -1,8 +1,8 @@
 # Onyx Ledger — Real Freshness Producer Wiring (Entry 9)
 
-**Status: PARTIALLY CLOSED.** Financial, profile, document/evidence and
-version-activation domains are wired end to end. Analysis supersession, rule
-publication scoping and registry activation are **not** — see §12.
+**Status: CLOSED.** Every source domain with an authoritative mutation pathway is
+wired end to end. Two domains have no such pathway and are classified
+`BLOCKED_NO_AUTHORITATIVE_MUTATION_PATH` — see §3.
 
 ## 1. Freshness is not integrity
 
@@ -39,7 +39,25 @@ or stale-state implementation was added.
 | Rules | `tkms/publication/service.py` publish / supersede | publish | `rule_published` / `rule_superseded` | `RULE_SNAPSHOT_SUPERSEDED` | year | ✅ pre-existing | ❌ **scoping unverified** |
 | Rules | withdrawal | withdraw | `rule_withdrawn` | — | — | ❌ **no withdrawal service exists** | ❌ |
 | Engine / reference / objective / lever / assumption registry | `VersionActivationService.activate` | activate | per component | per component | global | **✅ wired (startup)** | ✅ |
-| Reference data | dedicated activation service | activate | `reference_data_changed` | `REFERENCE_DATA_CHANGED` | year | ❌ **versions are code constants; activation is the only pathway** | via activation |
+| Reference data | dedicated activation service | activate | `reference_data_changed` | `REFERENCE_DATA_CHANGED` | year | `BLOCKED_NO_AUTHORITATIVE_MUTATION_PATH` — reached via `VersionActivationService` | ✅ |
+
+### Final classification
+
+Every known source domain, with no blank or ambiguous state:
+
+| Domain | Classification | Evidence |
+|---|---|---|
+| Financial create (income, expense) | **WIRED** | `FinancialService.add_income/.add_expense` |
+| Financial update/delete/archive/import/bulk | **UNSUPPORTED_DOMAIN** | no such method exists in `FinancialService` |
+| Profile — 11 tax-relevant fields | **WIRED** | `ProfileService.upsert_tax_profile` |
+| Profile — display name, locale, timezone, industry, employer | **NOT_CALCULATION_RELEVANT** | `PRESENTATION_FIELDS`, disjoint from `TAX_RELEVANT_FIELDS` |
+| Document upload / storage / extraction | **NOT_CALCULATION_RELEVANT** | nothing has entered the calculation yet |
+| Document confirmation | **WIRED** | `DocumentService.confirm` |
+| Analysis completion / supersession | **WIRED** | `AnalysisService.run` → `NEWER_ANALYSIS_AVAILABLE` |
+| Rule publication / supersession | **WIRED**, jurisdiction-scoped | `tkms/publication/service.py` + `_jurisdiction_of` |
+| Rule withdrawal | **BLOCKED_NO_AUTHORITATIVE_MUTATION_PATH** | no withdrawal service exists; `grep -rn "async def withdraw"` over `app/services/tkms/` returns nothing. `on_rule_withdrawn` remains callable for when one is built |
+| Reference-data activation | **BLOCKED_NO_AUTHORITATIVE_MUTATION_PATH** as a *runtime* service — the version is a Python constant (`engine_data.REFERENCE_DATA_VERSION`); the deployment pathway **is** wired through `VersionActivationService` | `RUNNING_VERSIONS` |
+| Registry activation (8 components) | **WIRED** | engine, reference data, objective, lever, assumption, relationship, support-score, projection |
 
 **A producer counts as wired only when the authoritative service calls it.** A
 helper, a route, a fixture or a test caller does not count.
@@ -131,23 +149,111 @@ kept explicitly separate — owner context, cross-tenant context, and **no**
 context (deny-by-default) each have their own test, and the helpers require an
 explicit viewer rather than inferring the owner.
 
+## 10b. Jurisdiction scoping
+
+`ioe.freshness_outbox.jurisdiction` (migration `0042`) is a **qualifier**, not a
+rival scope: it narrows a tax-year event rather than replacing it, which is why
+`freshness_outbox_scope_is_singular` over `(analysis_id, tax_year)` is unchanged.
+NULL means "not jurisdiction-specific" — a federal rule, an engine version — and
+fans out across the year exactly as every historical event does.
+
+`RulePublicationService._jurisdiction_of` maps `FED` to NULL deliberately: a
+federal rule applies everywhere, so narrowing on it would exclude every
+provincial result.
+
+Matrix: ON/2025 rule → ON/2025 stale; BC/2025 current; ON/2024 current; other
+tenant current. Running, failed and unsealed targets are excluded by the
+`workflow_status = 'completed'` predicate.
+
+## 10c. Multiple stale reasons
+
+The current model stores **one** `stale_reason_code` per target, and
+`ScenarioFreshnessService.apply` only transitions a **currently-fresh** record —
+`freshness_status = CURRENT` is in the WHERE clause of every invalidation. So a
+record already stale for `BASELINE_INPUTS_CHANGED` keeps that reason when a
+later analysis or rule event arrives: **the first cause wins and is never
+overwritten.**
+
+Causal history is not lost: every event remains in `ioe.freshness_outbox` with
+its own reason, and `ioe.freshness_outbox_audit` records each claim and
+transition. The reason on the record answers "why should I look at this again?",
+and the first answer is as good as the last. A reason *set* would be a schema
+change and is recorded here as a future option, not a gap.
+
+## 10d. Portfolio behaviour
+
+A portfolio is **always owned by an optimization** (`ioe.strategy_portfolio.run_id`
+is NOT NULL; there is no standalone-portfolio creation path). Portfolio freshness
+is therefore represented through its parent optimization's freshness, which the
+relay stales via `_stale_runs_for_tenant`. There is no independent portfolio
+freshness model and none is claimed.
+
+## 10e. Performance (local Unix socket — not a managed-database claim)
+
+| Producer | Statements | Outbox inserts | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `FinancialService.add_income` | 4 | 1 (of 2 inserts; the other is the income row) | 4.78 ms | 5.53 ms |
+| `ProfileService.upsert_tax_profile` | 4 | 1 | 4.32 ms | 5.51 ms |
+
+**Fan-out is O(1) in statements**, measured on a polluted database:
+
+| Targets | Fan-out statements | UPDATEs | Duration | ms/target | Peak RSS |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 2 | 1 | 6.8 ms | 6.829 | 81.3 MiB |
+| 10 | 2 | 1 | 10.1 ms | 1.010 | 81.3 MiB |
+| 100 | 2 | 1 | 64.6 ms | 0.646 | 81.3 MiB |
+| 1000 | 2 | 1 | 617.8 ms | 0.618 | 81.3 MiB |
+
+One set-based UPDATE per event regardless of target count — no per-target write
+in the source transaction and no N+1 at any scale. Duration grows with rows
+written, which is inherent; statement count does not.
+
+## 10f. Pollution verification
+
+Disposable database `onyx_poll9`, separate from the clean-suite database:
+**208 outbox + 416 audit rows (624 total), 78 stale scenarios, 43 stale
+optimizations, 462 integrity checks, 4 distinct stale reasons, 6 relay drains,
+4 integrity scheduler cycles.** Producer, freshness-event, integrity-scheduler,
+Item 3B and closeout suites: **129 passed**. No test assumes an empty queue,
+first queue position, a single target type, a single reason, or clean scheduler
+state.
+
+## 10g. Migration 0041 privilege audit
+
+`ioe.active_calculation_version` holds **exclusively global configuration** —
+columns are `id, version_type, active_version, activation_revision,
+activated_at, created_at, updated_at`. No `user_id`, no tenant-derived column,
+one row per component. That is what makes the absence of RLS correct, and it is
+classified in the RLS inventory alongside `weight_config`.
+
+| Grantee | Privilege | Why | Narrower possible? |
+|---|---|---|---|
+| `onyx_app_rw` | `SELECT, INSERT, UPDATE` | the activation service reads the row, inserts on first activation, and compare-and-swaps thereafter | No — all three are used |
+| `onyx_app_ro` | `SELECT` | read replicas / reporting | No |
+
+**`DELETE` was revoked.** `ALTER DEFAULT PRIVILEGES IN SCHEMA ioe`
+(`16_rls_grants.sql`) grants `arwd` on every new table, so DELETE arrived
+uninvited. Activation never deletes — a component that stops being governed
+keeps its last activation as history — so the blanket grant is explicitly
+narrowed. `onyx_freshness_worker` holds **nothing** on this table; PUBLIC holds
+nothing.
+
 ## 11. Known limitations
 
 1. `FinancialService` has only `add_income` / `add_expense`. Update, delete,
    archive, restore, import, bulk and reclassify **do not exist** in this
    repository, so there is nothing to wire — not a gap that was skipped.
-2. Rule-publication events exist but their **fan-out scoping is unverified**:
-   whether a jurisdiction-specific publication stales only that jurisdiction has
-   not been demonstrated.
-3. There is **no rule-withdrawal service**, so `on_rule_withdrawn` still has no
-   production caller.
-4. Reference-data versions are Python constants; activation is the only
-   pathway, so there is no separate `ReferenceDataService.activate_version`.
-5. Analysis supersession (`NEWER_ANALYSIS_AVAILABLE`) is not implemented; the
-   existing `analysis_completed` event does not distinguish "newer analysis
-   available" from "source data changed".
-6. Metrics for the freshness pipeline remain the existing relay counters; no new
-   metric surface was added and there is no exporter.
+2. There is **no rule-withdrawal service**, so `on_rule_withdrawn` still has no
+   production caller. The helper is retained for when one is built.
+3. Reference-data versions are Python constants, so there is no runtime
+   `ReferenceDataService.activate_version`; the deployment pathway is wired
+   through `VersionActivationService`.
+4. One stale reason per target — the first cause wins and is never overwritten.
+   Full causal history lives in the outbox and its audit (§10c).
+5. Metrics remain the existing relay counters; no exporter and no alerting
+   backend exists.
+6. Portfolios have no independent freshness model; they inherit their run's
+   (§10d).
 
 ## 12. Remaining risks
 

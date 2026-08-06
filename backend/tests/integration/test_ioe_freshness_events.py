@@ -218,7 +218,11 @@ async def test_a_completed_analysis_marks_scenarios_stale_through_the_relay():
     async with unit_of_work(user_id=uid, actor_type="user") as s:
         scenario = await s.get(Scenario, outcome.scenario_id)
         assert scenario.freshness_status == "stale"
-        assert scenario.stale_reason_code == "BASELINE_INPUTS_CHANGED"
+        # Entry 9 made this reason precise. A completed analysis means "a
+        # newer analysis exists" — which sends a reader to open it — not
+        # "your financial data changed", which would send them to re-check
+        # their figures. Different instruction, different code.
+        assert scenario.stale_reason_code == "NEWER_ANALYSIS_AVAILABLE"
         # sealed evidence untouched
         result = await s.scalar(
             select(ScenarioResult).where(

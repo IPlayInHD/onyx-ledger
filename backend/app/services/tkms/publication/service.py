@@ -33,6 +33,22 @@ class PublicationService:
         self.s = session
         self.admin = admin or AdminService(session)
 
+    async def _jurisdiction_of(self, version) -> str | None:
+        """The province a rule version applies to, or None for federal/global.
+
+        FED is deliberately mapped to None: a federal rule applies everywhere,
+        so narrowing on it would exclude every provincial result.
+        """
+        from app.database.models import Jurisdiction, TaxRule
+
+        rule = await self.s.get(TaxRule, version.tax_rule_id)
+        if rule is None or rule.jurisdiction_id is None:
+            return None
+        jurisdiction = await self.s.get(Jurisdiction, rule.jurisdiction_id)
+        if jurisdiction is None or jurisdiction.code == "FED":
+            return None
+        return jurisdiction.code
+
     async def publish(
         self, publisher_id: uuid.UUID, version_id: uuid.UUID, *, reindex: bool = False
     ) -> TaxRuleVersion:
@@ -76,6 +92,7 @@ class PublicationService:
             await emit(
                 self.s, FreshnessEvent.RULE_SUPERSEDED,
                 tax_year=version.tax_year,
+                jurisdiction=await self._jurisdiction_of(version),
                 dedupe_key=f"rule_superseded:{current.id}",
             )
 
@@ -90,9 +107,14 @@ class PublicationService:
         # A newly published rule changes what every completed result for that
         # year was evaluated against. Emitted here, inside the publishing
         # transaction, so it cannot be lost or fire for a rollback.
+        # Carrying the jurisdiction is what stops an Ontario publication from
+        # staling every other province's results for that year. A rule with no
+        # resolvable jurisdiction stays NULL, which fans out as it always did —
+        # broad, but never silently narrower than the truth.
         await emit(
             self.s, FreshnessEvent.RULE_PUBLISHED,
             tax_year=version.tax_year,
+            jurisdiction=await self._jurisdiction_of(version),
             dedupe_key=f"rule_published:{version.id}",
         )
         await self.s.flush()

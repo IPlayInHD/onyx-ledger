@@ -21,7 +21,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import FreshnessOutbox
+from app.services.ioe import projection
 from app.services.ioe.domain import assumptions as assumption_registry
+from app.services.ioe.domain import confidence, relationships
 from app.services.ioe.domain import levers as lever_registry
 from app.services.ioe.domain import savings as savings_domain
 from app.services.ioe.freshness_events import FreshnessEvent, emit
@@ -71,6 +73,26 @@ async def on_document_status_changed(
     )
 
 
+async def on_analysis_superseded(
+    session: AsyncSession, user_id: uuid.UUID, *, analysis_id: uuid.UUID,
+    tax_year: int,
+) -> bool:
+    """A newer completed analysis supersedes older ones for this user and year.
+
+    Distinct from `ANALYSIS_COMPLETED`'s implicit meaning: this names the reason
+    a reader acts on. `NEWER_ANALYSIS_AVAILABLE` sends a user to open the new
+    analysis; `BASELINE_INPUTS_CHANGED` would send them to check their figures,
+    which is a different and wrong instruction.
+
+    Scoped by tax year, so completing a 2025 analysis leaves 2024 results alone.
+    """
+    return await emit(
+        session, FreshnessEvent.ANALYSIS_SUPERSEDED,
+        user_id=user_id, tax_year=tax_year,
+        dedupe_key=f"analysis_superseded:{analysis_id}",
+    )
+
+
 async def on_rule_withdrawn(
     session: AsyncSession, rule_version_id: uuid.UUID, tax_year: int
 ) -> bool:
@@ -105,6 +127,12 @@ RUNNING_VERSIONS: dict[FreshnessEvent, Callable[[], str]] = {
     ),
     FreshnessEvent.LEVER_REGISTRY_CHANGED: lambda: lever_registry.LEVER_REGISTRY_VERSION,
     FreshnessEvent.ASSUMPTION_REGISTRY_CHANGED: assumption_registry.registry_version,
+    FreshnessEvent.RELATIONSHIP_REGISTRY_CHANGED: (
+        lambda: relationships.RELATIONSHIP_REGISTRY_VERSION),
+    FreshnessEvent.SUPPORT_SCORE_POLICY_CHANGED: (
+        lambda: confidence.CONFIDENCE_ALGORITHM_VERSION),
+    FreshnessEvent.PROJECTION_METHODOLOGY_CHANGED: (
+        lambda: projection.PROJECTION_METHODOLOGY_VERSION),
 }
 
 
@@ -149,6 +177,7 @@ async def emit_version_changes(session: AsyncSession) -> list[FreshnessEvent]:
 __all__ = [
     "RUNNING_VERSIONS",
     "emit_version_changes",
+    "on_analysis_superseded",
     "on_document_status_changed",
     "on_financial_data_changed",
     "on_profile_changed",

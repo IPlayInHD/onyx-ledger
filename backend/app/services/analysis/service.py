@@ -96,10 +96,15 @@ class AnalysisService:
         run.data_verified = True
         await self.s.flush()
 
-        # A completed analysis is a new baseline: any scenario or optimization
-        # measured against an older one no longer describes today's position.
+        # A completed analysis supersedes older ones for this user and year:
+        # any scenario or optimization measured against an earlier baseline is
+        # no longer the current recommendation. The event carries
+        # NEWER_ANALYSIS_AVAILABLE, which tells a reader to open the new
+        # analysis rather than to go and re-check their figures.
+        #
         # Emitted in this transaction so the event and the analysis commit
-        # together.
+        # together — and scoped to this tax year, so completing a 2025 analysis
+        # leaves 2024 results alone.
         await emit(
             self.s, FreshnessEvent.ANALYSIS_COMPLETED,
             user_id=user_id, tax_year=tax_year,

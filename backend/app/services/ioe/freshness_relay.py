@@ -63,6 +63,9 @@ class ClaimedEvent:
     stale_reason_code: str
     analysis_id: uuid.UUID | None
     tax_year: int | None
+    # Optional QUALIFIER, not a rival scope. NULL means "not jurisdiction
+    # scoped" and fans out as before; a value narrows to matching results.
+    jurisdiction: str | None
     user_id: uuid.UUID | None
 
     @property
@@ -98,6 +101,7 @@ class FreshnessRelay:
                 "       out_stale_reason_code AS stale_reason_code, "
                 "       out_analysis_id AS analysis_id, "
                 "       out_tax_year AS tax_year, "
+                "       out_jurisdiction AS jurisdiction, "
                 "       out_user_id AS user_id "
                 "FROM ioe.claim_freshness_events(:batch, :worker)"
             ),
@@ -181,7 +185,8 @@ class FreshnessRelay:
                     event.analysis_id, reason
                 )
             elif event.tax_year is not None:
-                marked = await service.invalidate_for_tax_year(event.tax_year, reason)
+                marked = await service.invalidate_for_tax_year(
+                    event.tax_year, reason, jurisdiction=event.jurisdiction)
             else:
                 marked = await service.invalidate_for_user(reason)
             await self._stale_runs_for_tenant(session, event)

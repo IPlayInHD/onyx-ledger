@@ -40,6 +40,7 @@ ERROR_RELAY_FAILED = "RELAY_FAILED"
 
 class FreshnessEvent(StrEnum):
     ANALYSIS_COMPLETED = "analysis_completed"
+    ANALYSIS_SUPERSEDED = "analysis_superseded"
     BASELINE_INPUTS_CHANGED = "baseline_inputs_changed"
     FINANCIAL_DATA_CHANGED = "financial_data_changed"
     PROFILE_CHANGED = "profile_changed"
@@ -52,13 +53,19 @@ class FreshnessEvent(StrEnum):
     OBJECTIVE_POLICY_CHANGED = "objective_policy_changed"
     LEVER_REGISTRY_CHANGED = "lever_registry_changed"
     ASSUMPTION_REGISTRY_CHANGED = "assumption_registry_changed"
+    RELATIONSHIP_REGISTRY_CHANGED = "relationship_registry_changed"
+    SUPPORT_SCORE_POLICY_CHANGED = "support_score_policy_changed"
+    PROJECTION_METHODOLOGY_CHANGED = "projection_methodology_changed"
 
 
 # The stale reason each event implies. Resolved here, at the producer, because
 # the producer knows what actually moved; a consumer inferring it would be
 # guessing at the cause from the symptom.
 EVENT_STALE_REASON: dict[FreshnessEvent, StaleReason] = {
-    FreshnessEvent.ANALYSIS_COMPLETED: StaleReason.BASELINE_INPUTS_CHANGED,
+    # A newly completed analysis supersedes older ones for that year. The
+    # reason names THAT, not "your inputs moved" — see StaleReason.
+    FreshnessEvent.ANALYSIS_COMPLETED: StaleReason.NEWER_ANALYSIS_AVAILABLE,
+    FreshnessEvent.ANALYSIS_SUPERSEDED: StaleReason.NEWER_ANALYSIS_AVAILABLE,
     FreshnessEvent.BASELINE_INPUTS_CHANGED: StaleReason.BASELINE_INPUTS_CHANGED,
     FreshnessEvent.FINANCIAL_DATA_CHANGED: StaleReason.BASELINE_INPUTS_CHANGED,
     FreshnessEvent.PROFILE_CHANGED: StaleReason.BASELINE_INPUTS_CHANGED,
@@ -73,6 +80,12 @@ EVENT_STALE_REASON: dict[FreshnessEvent, StaleReason] = {
     FreshnessEvent.OBJECTIVE_POLICY_CHANGED: StaleReason.OBJECTIVE_POLICY_CHANGED,
     FreshnessEvent.LEVER_REGISTRY_CHANGED: StaleReason.LEVER_REGISTRY_CHANGED,
     FreshnessEvent.ASSUMPTION_REGISTRY_CHANGED: StaleReason.ASSUMPTION_SET_CHANGED,
+    FreshnessEvent.RELATIONSHIP_REGISTRY_CHANGED: (
+        StaleReason.RELATIONSHIP_REGISTRY_CHANGED),
+    FreshnessEvent.SUPPORT_SCORE_POLICY_CHANGED: (
+        StaleReason.SUPPORT_SCORE_POLICY_CHANGED),
+    FreshnessEvent.PROJECTION_METHODOLOGY_CHANGED: (
+        StaleReason.PROJECTION_METHODOLOGY_CHANGED),
 }
 
 
@@ -83,6 +96,7 @@ async def emit(
     user_id: uuid.UUID | None = None,
     analysis_id: uuid.UUID | None = None,
     tax_year: int | None = None,
+    jurisdiction: str | None = None,
     dedupe_key: str | None = None,
 ) -> bool:
     """Write an invalidation event IN THE CALLER'S TRANSACTION.
@@ -109,6 +123,7 @@ async def emit(
             user_id=user_id,
             analysis_id=analysis_id,
             tax_year=tax_year,
+            jurisdiction=jurisdiction,
             dedupe_key=key,
         )
         .on_conflict_do_nothing(index_elements=["dedupe_key"])

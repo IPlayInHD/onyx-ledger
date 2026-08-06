@@ -171,7 +171,7 @@ async def _tamper(scenario_id: uuid.UUID, **columns) -> None:
     values = [
         json.dumps(v) if isinstance(v, dict) else v for v in columns.values()
     ]
-    conn = await asyncpg.connect(owner_dsn().replace("onyx_migrator", "onyx_super"))
+    conn = await asyncpg.connect(owner_dsn())
     try:
         await conn.execute(
             "ALTER TABLE ioe.scenario DISABLE TRIGGER trg_guard_transition")

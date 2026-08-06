@@ -824,6 +824,7 @@ class FreshnessOutbox(Base):
     )
     analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     tax_year: Mapped[int | None] = mapped_column(Integer)
+    jurisdiction: Mapped[str | None] = mapped_column(Text)
     dedupe_key: Mapped[str] = mapped_column(
         Text, nullable=False,
         comment="Uniquely identifies the logical event. Delivery is at-least-once, so processing must be idempotent and a duplicate write must collide here.",
