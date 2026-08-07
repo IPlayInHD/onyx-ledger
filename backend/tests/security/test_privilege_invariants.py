@@ -381,3 +381,85 @@ async def test_worker_payloads_carry_identifiers_only():
                 f"{name} takes a payload-shaped argument: {param.name}"
             )
         break
+
+
+# ---------------------------------------------------------------------------
+# Privacy: the append-only audit log must never receive a credential secret
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_the_audit_log_never_stores_a_credential_secret():
+    """Entry 11A regression.
+
+    `audit.log_change` copies the whole changed row, and one of the audited
+    tables is `identity.user_credential` — so every registration wrote the
+    account's Argon2 hash into `audit.audit_log`. That log carries a
+    `reject_mutation` trigger and has NO foreign key to the user, so the copy
+    was append-only, uncascadable, and unreachable by any future account
+    deletion: a credential-equivalent secret in the one store designed to be
+    impossible to erase.
+
+    Asserted end to end through the real registration path, because the defect
+    lived in a trigger and no application code would ever have shown it.
+    """
+    from app.services.auth.service import AuthService
+
+    email = f"auditsecret_{uuid.uuid4().hex[:10]}@test.ca"
+    async with unit_of_work(actor_type="system") as session:
+        await AuthService(session).register(email, "supersecret1")
+
+    # Read as the OWNER: the runtime role deliberately has no SELECT on
+    # audit.audit_log — the trigger writes through SECURITY DEFINER — so a
+    # session-scoped read would fail on privileges rather than on content.
+    conn, cur = _owner_cursor()
+    try:
+        cur.execute("""
+            SELECT entity_table,
+                   new_value ->> 'password_hash',
+                   previous_value ->> 'password_hash'
+              FROM audit.audit_log
+             WHERE entity_table = 'user_credential'
+               AND created_at > now() - interval '2 minutes'
+        """)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    assert rows, (
+        "no credential audit row was written; the test can no longer prove "
+        "anything and the trigger coverage must be re-checked"
+    )
+    for table, new_hash, old_hash in rows:
+        for value in (new_hash, old_hash):
+            if value is None:
+                continue
+            assert value == "[redacted]", (
+                f"{table}: the audit log stored a real credential value; it is "
+                "append-only and account deletion cannot reach it"
+            )
+            assert not value.startswith("$argon2"), (
+                f"{table}: an Argon2 hash reached the audit log"
+            )
+
+
+def test_redaction_does_not_touch_sealed_evidence_hashes():
+    """The redaction list is explicit for a reason.
+
+    A pattern over column names — `%hash%` — would also strip
+    `optimization_result_hash` and `manifest_hash`, which are content addresses
+    of sealed evidence that the audit trail exists to preserve. Fixing a
+    credential leak must not quietly damage replay verification.
+    """
+    conn, cur = _owner_cursor()
+    try:
+        cur.execute("""
+            SELECT count(*) FROM audit.audit_log
+             WHERE new_value ->> 'optimization_result_hash' = '[redacted]'
+                OR new_value ->> 'manifest_hash' = '[redacted]'
+                OR new_value ->> 'optimization_spec_hash' = '[redacted]'
+        """)
+        redacted = cur.fetchone()[0]
+    finally:
+        conn.close()
+    assert int(redacted or 0) == 0, (
+        "a sealed-evidence content hash was redacted out of the audit trail"
+    )
