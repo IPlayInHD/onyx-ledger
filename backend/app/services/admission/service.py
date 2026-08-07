@@ -93,7 +93,31 @@ _LEASE_RETENTION = timedelta(hours=24)
 ADMISSION_REQUESTS: Counter[str] = Counter()
 ADMISSION_ACCEPTED: Counter[str] = Counter()
 ADMISSION_REJECTED: Counter[str] = Counter()
+ADMISSION_BYPASSED: Counter[str] = Counter()
 LEASES_RECOVERED: Counter[str] = Counter()
+
+#: Whether the "admission is switched off" warning has already been emitted in
+#: this process. The condition must be VISIBLE — an operator who forgets to turn
+#: the switch back on has removed every protection in this entry — but one line
+#: per request would be its own denial of service against the log pipeline.
+_bypass_announced = False
+
+
+def _admission_disabled() -> bool:
+    """The incident switch, read per call so it can be changed without a deploy.
+
+    `get_settings()` is `lru_cache`d, so this costs an attribute read.
+    """
+    global _bypass_announced
+    from app.core.config import get_settings
+
+    if get_settings().admission_enabled:
+        return False
+    if not _bypass_announced:
+        log.warning("admission_disabled",
+                    note="every rate, concurrency and capacity limit is off")
+        _bypass_announced = True
+    return True
 
 
 def admission_metrics() -> dict[str, dict[str, int]]:
@@ -102,13 +126,14 @@ def admission_metrics() -> dict[str, dict[str, int]]:
         "admission_requests_total": dict(ADMISSION_REQUESTS),
         "admission_accepted_total": dict(ADMISSION_ACCEPTED),
         "admission_rejected_total": dict(ADMISSION_REJECTED),
+        "admission_bypassed_total": dict(ADMISSION_BYPASSED),
         "job_lease_recovered_total": dict(LEASES_RECOVERED),
     }
 
 
 def reset_admission_metrics() -> None:
     for counter in (ADMISSION_REQUESTS, ADMISSION_ACCEPTED, ADMISSION_REJECTED,
-                    LEASES_RECOVERED):
+                    ADMISSION_BYPASSED, LEASES_RECOVERED):
         counter.clear()
 
 
@@ -380,6 +405,12 @@ class AdmissionService:
         now = now or datetime.now(tz=UTC)
         ADMISSION_REQUESTS[OperationClass.AUTH_ATTEMPT.value] += 1
 
+        if _admission_disabled():
+            ADMISSION_BYPASSED[OperationClass.AUTH_ATTEMPT.value] += 1
+            return AuthAdmissionDecision(
+                accepted=True, retry_after_seconds=policy.retry_after_seconds
+            )
+
         try:
             source_ok = await self._check_rate(
                 policy, ScopeType.IP, source_scope_id, now=now)
@@ -432,6 +463,18 @@ class AdmissionService:
         policy = policy_for(operation)
         now = now or datetime.now(tz=UTC)
         ADMISSION_REQUESTS[operation.value] += 1
+
+        # The incident switch. Checked AFTER the request is counted, so the
+        # metrics still show what was asked for while the limits are off, and
+        # before any statement runs, so an admission-store problem cannot be
+        # what keeps the platform down.
+        #
+        # Deliberately does NOT disable the size and complexity bounds: those
+        # are validation, they live in the handlers, and a payload that is too
+        # large is malformed whether or not the platform is under strain.
+        if _admission_disabled():
+            ADMISSION_BYPASSED[operation.value] += 1
+            return AdmissionTicket(None, operation, scope_id)
 
         try:
             return await self._admit(policy, scope_id, scope_type, dedupe_key, now)

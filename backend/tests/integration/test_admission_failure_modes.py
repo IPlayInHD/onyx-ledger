@@ -156,3 +156,63 @@ async def test_a_failed_operation_returns_its_slot():
     async with unit_of_work(actor_type="admin") as session:
         assert await AdmissionService(session).active_count(
             OperationClass.SCENARIO_RUN, scope_id=scope) == 0
+
+
+@pytest.mark.asyncio
+async def test_the_incident_switch_actually_switches_admission_off():
+    """`admission_enabled` is documented as the way to turn every limit off
+    during an incident without a deploy. Before this test it was read by
+    nothing: an operator would have flipped it, watched the limits keep
+    refusing, and had no way to tell the switch from a bug.
+
+    Asserted in both directions, because a kill switch that cannot be turned
+    back on is worse than none.
+    """
+    from app.core.config import get_settings
+    from app.services.admission.policy import POLICIES
+    from app.services.admission.service import ADMISSION_BYPASSED
+
+    settings = get_settings()
+    scope = str(uuid.uuid4())
+    allowance = POLICIES[OperationClass.ANALYSIS_RUN].rate_allowance
+    assert allowance is not None
+
+    # Exhaust the allowance so the NEXT admission must be refused.
+    async with unit_of_work(actor_type="admin") as session:
+        service = AdmissionService(session)
+        for _ in range(allowance):
+            await service.release_ticket(
+                await service.admit(OperationClass.ANALYSIS_RUN, scope_id=scope))
+
+    async with unit_of_work(actor_type="admin") as session:
+        with pytest.raises(AdmissionRejected):
+            await AdmissionService(session).admit(
+                OperationClass.ANALYSIS_RUN, scope_id=scope)
+
+    settings.admission_enabled = False
+    try:
+        before = ADMISSION_BYPASSED[OperationClass.ANALYSIS_RUN.value]
+        async with unit_of_work(actor_type="admin") as session:
+            ticket = await AdmissionService(session).admit(
+                OperationClass.ANALYSIS_RUN, scope_id=scope)
+        assert not ticket.holds_lease, (
+            "a bypassed admission must not hold a slot it never checked for"
+        )
+        assert ADMISSION_BYPASSED[OperationClass.ANALYSIS_RUN.value] == before + 1, (
+            "the bypass was not countable"
+        )
+
+        # The credential surface honours it too, or an incident would leave
+        # login throttled while everything else was open.
+        async with unit_of_work(actor_type="admin") as session:
+            decision = await AdmissionService(session).charge_auth_attempt(
+                source_scope_id="bypass-source", subject_scope_id="bypass-subject")
+        assert decision.accepted
+    finally:
+        settings.admission_enabled = True
+
+    # And it comes back on.
+    async with unit_of_work(actor_type="admin") as session:
+        with pytest.raises(AdmissionRejected):
+            await AdmissionService(session).admit(
+                OperationClass.ANALYSIS_RUN, scope_id=scope)

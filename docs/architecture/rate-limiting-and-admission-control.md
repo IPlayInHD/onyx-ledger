@@ -700,26 +700,33 @@ Real, not hedging:
    this product (§3). They exist so a future organization tier does not need a
    new enumeration.
 4. **Metrics have no exporter and there is no alerting** (§19).
-5. **Worker queue isolation is half a guarantee.** Which queue a task lands on
+5. **The incident switch removes everything at once.** `ONYX_ADMISSION_ENABLED=false`
+   bypasses every rate, concurrency and capacity limit, including the login
+   throttle — that is the point of an incident switch, and it is why the bypass
+   is counted (`admission_bypassed_total`) and announced once per process at
+   WARNING. It does not disable the size and complexity bounds: those are
+   validation, and a payload that is too large is malformed whether or not the
+   platform is under strain.
+6. **Worker queue isolation is half a guarantee.** Which queue a task lands on
    is code-enforced and asserted (`tests/unit/test_admission_wiring.py`); how
    many workers consume each queue is a deployment property — a `-Q` flag and a
    concurrency setting — that no file in this repository decides. One worker
    subscribed to all queues makes the separation nominal.
-6. **Fixed window, not sliding.** A caller can spend two allowances across a
+7. **Fixed window, not sliding.** A caller can spend two allowances across a
    window boundary; `burst` assumes that shape.
-7. **The source-address scope degrades behind a load balancer.** `client_ip`
+8. **The source-address scope degrades behind a load balancer.** `client_ip`
    reads the ASGI transport peer and refuses to trust `X-Forwarded-For`, so
    behind a proxy that does not use PROXY protocol every request appears to come
    from the balancer and the address scope collapses to one bucket. That fails
    toward over-throttling one shared bucket rather than toward no throttling;
    the per-identity scope is unaffected. Trusting the header requires a
    configured list of trusted hops, which does not exist yet.
-8. **Per-identity throttling is a lockout vector.** Someone who knows an
+9. **Per-identity throttling is a lockout vector.** Someone who knows an
    address can spend its allowance and have the owner refused for the rest of
    the minute. The window is one minute, the alternative leaves the account open
    to sustained guessing from a rotating address pool, and the trade is made
    knowingly.
-9. **Failed logins record nothing.** `AuthService` adds a `login_event` row and
+10. **Failed logins record nothing.** `AuthService` adds a `login_event` row and
    then raises, so the row rolls back with the request's transaction. Noticed
    while writing the ordering test, and left alone: it is authentication
    behaviour, not admission behaviour, and changing it in this entry would be
