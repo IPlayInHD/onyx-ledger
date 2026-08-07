@@ -677,6 +677,12 @@ Note also that in production nobody reaches the lock 500 times: the rate check
 runs first, and `OPTIMIZATION_RUN` allows 8 attempts per minute. The measurement
 called `_acquire_lease` directly to isolate the lock.
 
+Latencies move run to run with machine noise — a second run of the same
+scenarios gave 404 ms p50 for the 500-way blocking case rather than 511 ms. What
+is stable, and what the conclusion rests on, is the shape: **overshoot 0 in every
+run**, peak backends pinned at the pool ceiling, and a spurious-refusal ratio for
+try-lock of 93-94%.
+
 Reproduce with `python scripts/load_admission.py`.
 
 ## 27. Known limitations
