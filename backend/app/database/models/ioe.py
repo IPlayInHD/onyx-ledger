@@ -136,7 +136,7 @@ class OptimizationRun(Base):
     # ---- spec inputs that enter optimization_spec_hash ----
     user_constraints: Mapped[dict | None] = mapped_column(
         JSONB,
-        comment="The canonicalized constraints that entered optimization_spec_hash. Stored so the spec hash can be recomputed during replay verification.",
+        comment="The canonicalized constraints that entered optimization_spec_hash. Stored so the spec hash can be recomputed during replay verification. NULL on runs sealed before this column existed, which makes their spec hash unverifiable rather than wrong.",
     )
     assumption_set: Mapped[dict | None] = mapped_column(
         JSONB,
@@ -145,7 +145,7 @@ class OptimizationRun(Base):
 
     input_execution_policy_version: Mapped[str] = mapped_column(
         Text, nullable=False, default="live_source_legacy",
-        comment="Which input-execution rule this run was computed under. live_source_legacy runs predate item 3A and may have been calculated from data that differs from the snapshot their spec hash names; frozen_snapshot_v1 runs were calculated exclusively from the pinned snapshot.",
+        comment="Which input-execution rule this run was computed under. live_source_legacy runs predate item 3A and may have been calculated from data that differs from the snapshot their spec hash names; frozen_snapshot_v1 runs were calculated exclusively from the pinned snapshot. Historical rows are never backfilled as frozen_snapshot_v1.",
     )
 
     # ---- current replay-integrity metadata (history lives in integrity_check) ----
@@ -437,8 +437,11 @@ class StrategyPortfolio(Base):
     total_deferral_amount: Mapped[Decimal | None] = mapped_column(MONEY)
     total_recurring_annual: Mapped[Decimal | None] = mapped_column(MONEY)
     total_multi_year_projected: Mapped[Decimal | None] = mapped_column(MONEY)
-    total_future_option_value: Mapped[Decimal | None] = mapped_column(
-        MONEY,
+    # NOT NULL in the applied schema — the model declared it optional, which
+    # let a reader believe a portfolio could seal without this component of its
+    # canonical form.
+    total_future_option_value: Mapped[Decimal] = mapped_column(
+        MONEY, nullable=False,
         comment="Future option value. Part of the portfolio canonical form and therefore of portfolio_result_hash; stored so the hash can be independently recomputed from this row.",
     )
 
@@ -451,7 +454,9 @@ class StrategyPortfolio(Base):
 
     portfolio_result_hash: Mapped[str | None] = mapped_column(
         Text,
-        comment="Domain-separated hash of the portfolio's canonical form. The expected value a portfolio integrity check replays against.",
+        comment=(
+            "Domain-separated hash of the portfolio's canonical form. The expected value a portfolio integrity check replays against; NULL on portfolios sealed before the column was written, which makes them unverifiable rather than mismatched."
+        ),
     )
 
     integrity_status: Mapped[str] = mapped_column(
@@ -824,7 +829,10 @@ class FreshnessOutbox(Base):
     )
     analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     tax_year: Mapped[int | None] = mapped_column(Integer)
-    jurisdiction: Mapped[str | None] = mapped_column(Text)
+    jurisdiction: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Optional jurisdiction QUALIFIER. NULL means the event is not jurisdiction-scoped and fans out across jurisdictions, which is the historical behaviour. A value narrows fan-out to matching results only.",
+    )
     dedupe_key: Mapped[str] = mapped_column(
         Text, nullable=False,
         comment="Uniquely identifies the logical event. Delivery is at-least-once, so processing must be idempotent and a duplicate write must collide here.",
@@ -879,7 +887,15 @@ class IntegrityCheck(Base):
     """
 
     __tablename__ = "integrity_check"
-    __table_args__ = {"schema": "ioe"}
+    __table_args__ = {
+        "schema": "ioe",
+        "comment": (
+            "Append-only replay-verification history. One row per verification "
+            "attempt. Never updated except to transition a claimed running row "
+            "to its terminal outcome; never deleted; never a source of "
+            "authorization."
+        ),
+    }
 
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -897,7 +913,10 @@ class IntegrityCheck(Base):
     )
 
     status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
-    reason_code: Mapped[str] = mapped_column(Text, nullable=False, default="NONE")
+    reason_code: Mapped[str] = mapped_column(
+        Text, nullable=False, default="NONE",
+        comment="Closed enumeration explaining the outcome. LEGACY_EXECUTION_POLICY_UNVERIFIABLE marks a result sealed before the frozen-input correction: it is an unavailable reason, never a mismatch, because the result was computed from sources that were never recorded and so nothing was compared.",
+    )
 
     expected_spec_hash: Mapped[str | None] = mapped_column(Text)
     expected_result_hash: Mapped[str] = mapped_column(
@@ -934,12 +953,23 @@ class ActiveCalculationVersion(Base):
     """
 
     __tablename__ = "active_calculation_version"
-    __table_args__ = {"schema": "ioe"}
+    __table_args__ = {
+        "schema": "ioe",
+        "comment": (
+            "Authoritative active version of each calculation component. "
+            "Compare-and-swapped under FOR UPDATE by ioe version activation, "
+            "with the freshness event emitted in the same transaction. "
+            "Deployment state, not user data: no user_id, no RLS."
+        ),
+    }
 
     id: Mapped[uuid.UUID] = uuid_pk()
     version_type: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     active_version: Mapped[str] = mapped_column(Text, nullable=False)
-    activation_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    activation_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1,
+        comment="Monotonic transition counter. Part of the freshness dedupe key so an A->B->A cycle emits three events rather than colliding.",
+    )
     activated_at: Mapped[datetime] = created_at_col()
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
