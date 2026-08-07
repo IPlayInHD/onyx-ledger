@@ -50,6 +50,14 @@ protected_scope = ["app", "workers"]
 python_version = "3.11"
 python_patch = "3.11.15"
 
+# The lock is compiled in an ISOLATED environment pinned to these versions, not
+# with whatever pip happens to be installed. Two reasons, both learned in CI:
+#   * pip-tools reaches into `pip._internal`, and pip 26 removed a symbol it
+#     imports — so the ambient pip decides whether the lock gate runs at all;
+#   * a lock is only reproducible if the tool that produced it is pinned too.
+lock_tool_pip = "25.3"
+lock_tool_pip_tools = "7.6.0"
+
 # Overrides permitted to relax the strict mypy configuration. Anything else is a
 # policy violation and the test fails. `ignore_errors` is never permitted.
 permitted_mypy_overrides = ["celery", "celery.*", "workers.tasks.*"]

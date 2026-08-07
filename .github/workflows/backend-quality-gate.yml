@@ -67,9 +67,12 @@ jobs:
       - name: Dependency lock consistency
         # Fails when pyproject.toml resolves to something the committed locks do
         # not describe — i.e. someone changed a dependency and did not relock.
-        run: |
-          pip install pip-tools
-          ./scripts/check_lock.sh
+        #
+        # No `pip install pip-tools` here: the script builds its own isolated,
+        # pinned tool environment. The runner's pip is 26.x, which pip-tools
+        # cannot import against, and a lock compiled by an unpinned resolver is
+        # not a reproducible lock.
+        run: ./scripts/check_lock.sh
 
       - name: Ruff
         run: ruff check app workers scripts tests

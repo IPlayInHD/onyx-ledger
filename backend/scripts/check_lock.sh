@@ -4,22 +4,23 @@
 #
 # The failure this closes is mundane and common: a dependency is added or
 # bumped in pyproject.toml and the lock is not regenerated, so CI and production
-# quietly install something the declaration no longer describes. Recompiling
-# into a temporary directory and diffing makes that impossible to forget.
+# quietly install something the declaration no longer describes.
 #
-# Deterministic by construction: pip-compile sorts its output, and --no-header
-# keeps the invocation out of the artifact, so an unchanged declaration
-# recompiles byte-identically.
+# THE QUESTION THIS ASKS is "do the committed locks still satisfy the
+# declaration?" — NOT "has anything new been published?". Those are different,
+# and getting them confused makes the gate fail on an unrelated upstream
+# release, which trains people to ignore it. So the committed lock is copied
+# into the scratch directory FIRST: pip-compile preserves pins it already has
+# and changes only what the declaration forces. Deliberate upgrades go through
+# `lock_dependencies.sh --upgrade`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+cleanup() { rm -rf "$TMP" "${LOCK_TOOLS_DIR:-}"; }
+trap cleanup EXIT
 
-PIP_COMPILE=(python -m piptools compile --quiet --generate-hashes --strip-extras --no-header)
-
-"${PIP_COMPILE[@]}" --output-file="$TMP/requirements.lock.txt" pyproject.toml
-"${PIP_COMPILE[@]}" --extra=dev --output-file="$TMP/requirements-dev.lock.txt" pyproject.toml
+source ./scripts/_lock_tools.sh
 
 STATUS=0
 for lock in requirements.lock.txt requirements-dev.lock.txt; do
@@ -28,6 +29,14 @@ for lock in requirements.lock.txt requirements-dev.lock.txt; do
     STATUS=1
     continue
   fi
+  cp "$lock" "$TMP/$lock"
+done
+[ "$STATUS" -eq 0 ] || exit 1
+
+"${PIP_COMPILE[@]}" --output-file="$TMP/requirements.lock.txt" pyproject.toml
+"${PIP_COMPILE[@]}" --extra=dev --output-file="$TMP/requirements-dev.lock.txt" pyproject.toml
+
+for lock in requirements.lock.txt requirements-dev.lock.txt; do
   if ! diff -u "$lock" "$TMP/$lock" > "$TMP/$lock.diff"; then
     echo "FAIL: $lock is stale — pyproject.toml resolves to something else." >&2
     head -40 "$TMP/$lock.diff" >&2
