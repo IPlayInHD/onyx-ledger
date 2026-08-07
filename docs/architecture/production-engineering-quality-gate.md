@@ -270,15 +270,37 @@ Because the protected scope is the whole application, "protected mypy" and
 | Python runtime | **3.11.15**, pinned |
 | Lock artifacts | `backend/requirements.lock.txt` (56 packages, production), `backend/requirements-dev.lock.txt` (68 packages, production + dev) |
 | Hashes | Yes — `--generate-hashes`, verified at install with `--require-hashes` |
-| Regenerate | `./scripts/lock_dependencies.sh` |
+| Regenerate | `./scripts/lock_dependencies.sh` (add `--upgrade` to move pins deliberately) |
 | Install (local) | `pip install --require-hashes -r requirements-dev.lock.txt && pip install --no-deps -e .` |
 | Install (CI/production) | identical; `--no-deps -e .` prevents the package itself pulling an unlocked resolution in behind the lock |
-| Consistency gate | `./scripts/check_lock.sh` — recompiles into a temp directory and diffs |
+| Consistency gate | `./scripts/check_lock.sh` — seeds a temp directory with the committed locks, recompiles, and diffs |
+| Lock tooling | pinned and **isolated**: pip 25.3 + pip-tools 7.6.0 in their own venv (`scripts/_lock_tools.sh`), declared in `[tool.onyx.quality_gate]` |
 
-The consistency gate is what makes this hold. Recompiling with `--no-header`
-into a temporary directory and diffing means a dependency changed in
+The consistency gate is what makes this hold: a dependency changed in
 `pyproject.toml` without a relock fails, rather than depending on anyone
 remembering.
+
+Two details in that gate are load-bearing, and both were established by the
+first real CI run rather than by design (see §15, *First real CI execution*):
+
+- **The committed lock is copied into the scratch directory first.** The gate
+  asks *"do the committed locks still satisfy the declaration?"* — not *"has
+  the world moved?"*. Compiling into an empty directory re-resolves from
+  scratch and reports every release published since the lock was written; it
+  caught `pydantic-settings` 2.15.0 and would have failed CI for an upstream
+  release nobody here made. A gate that fails for reasons the repository cannot
+  control is a gate people learn to ignore.
+- **The resolver is pinned and isolated.** `scripts/_lock_tools.sh` builds a
+  venv with pip 25.3 and pip-tools 7.6.0 rather than using the ambient pip.
+  pip-tools imports `pip._internal.utils.compat.stdlib_pkgs`, which pip 26
+  removed, so on a GitHub runner (pip 26.2.1) every invocation died before
+  compiling anything — whether the gate ran at all depended on which pip the
+  machine shipped. Pinning the interpreter while leaving the resolver floating
+  was half a guarantee anyway.
+
+Neither change weakens the gate, and that is verified rather than asserted:
+with `tenacity` added to `pyproject.toml` and no relock, `check_lock.sh` still
+fails.
 
 ### Python runtime pin
 
@@ -682,7 +704,94 @@ is also the one that stops a silent dependency drift, so it stays.
 
 ---
 
-## 14. Limitations and remaining risks
+## 14. First real CI execution
+
+The workflow's first two runs on GitHub Actions, and what they taught.
+
+### Run 1 — `31142166634` on `9ca4e5e`: FAILURE in 28s
+
+Two environment defects, no application defect. Both were invisible locally,
+which is the whole reason the closure condition was to actually run it.
+
+| Defect | Class | What happened |
+|---|---|---|
+| Missing executable bit | `CI_ENVIRONMENT_INTEGRATION` | `scripts/ci_provision_postgres.sh` was committed `100644`. All four database jobs died at "Provision PostgreSQL 16 + pgvector" with `Permission denied` (exit 126) before doing anything. It was the one script created after the `chmod +x` pass; every other shell script was already `100755` |
+| pip-tools vs. the runner's pip | `CI_ENVIRONMENT_INTEGRATION` | The static job died at "Dependency lock consistency" with `ImportError: cannot import name 'stdlib_pkgs' from 'pip._internal.utils.compat'`. pip-tools 7.6.0 (the latest) reaches into pip internals that pip 26 removed; the runner ships pip 26.2.1, this development venv had 24.0 |
+
+The second was reproduced in a throwaway venv before anything was changed: pip
+26.2.1 breaks, 25.3 / 25.2 / 24.3.1 work. Switching to the `pip-compile` console
+script was tried and rejected — `--version` succeeds but a real compile hits the
+same import. The fix is `scripts/_lock_tools.sh`, an isolated venv pinned to pip
+25.3 + pip-tools 7.6.0.
+
+A third defect surfaced while verifying the second, and it had not fired yet:
+`check_lock.sh` compiled into an *empty* temp directory, so pip-compile
+re-resolved from scratch and reported `pydantic-settings` 2.15.0 — a release
+nobody in this repository made. See §7.
+
+Fixed in `417fd28` (Entry 7F). No production code changed and no gate was
+weakened; the lock gate was re-proved to still reject an unlocked dependency.
+
+### Run 2 — `31203068291` on `417fd28`: SUCCESS
+
+| Job | Result | Blocking | Duration |
+|---|---|---|---|
+| `static` — lint + protected types + lock | **PASS** | yes | 48s |
+| `migrations` — migrations + schema drift | **PASS** | yes | 87s |
+| `security` — security invariants | **PASS** | yes | 85s |
+| `determinism` — canonicalization + replay | **PASS** | yes | 55s |
+| `tests` — full suite (fresh database) | **PASS** | yes | 3m 31s |
+| **workflow total** (5 jobs in parallel) | **success** | | **3m 34s** |
+
+Every job's blocking behaviour is demonstrated rather than assumed: run 1 failed
+the workflow because two steps exited non-zero, and the steps after them were
+`skipped` rather than run.
+
+**What the run actually proved**, from its own logs:
+
+```
+commit:  417fd28aac7e06c1b761f58660306f44f4ba5d74
+python:  3.11.15
+sqlalchemy 2.0.51   alembic 1.19.0    fastapi 0.141.1   pydantic 2.13.4
+asyncpg 0.31.0      psycopg2-binary 2.9.12              celery 5.6.3
+pgvector 0.5.0      mypy 2.3.0        ruff 0.16.1       pytest 9.1.1
+alembic heads -> 0043_schema_comment_convergence (head)
+
+full suite:        734 passed, 0 failed, 0 skipped, 168.29s
+security suite:     50 passed
+schema drift proof:  7 passed, 0 failed
+unexpected schema drift: 0
+```
+
+- **Dependency install came from the lock.** Every line reads
+  `Collecting <pkg>==<version> (from -r requirements-dev.lock.txt (line N))`,
+  under `--require-hashes`, followed by `pip install --no-deps -e .`.
+- **The runtime matched policy.** `Successfully set up CPython (3.11.15)` and
+  `check_python.sh` passed as its own step before anything else ran.
+- **Identities were correct.** `PGSUPER: onyx_migrator` provisioned;
+  `role "onyx_test" has already been granted membership in role "onyx_app_rw"`;
+  the suite connected as `onyx_test`. Nothing ran as a PostgreSQL superuser.
+- **The test count matched local exactly** — 734 in both, so GitHub is not
+  discovering a different suite.
+
+**Role safety across jobs.** Each database job provisions its *own* PostgreSQL
+on its *own* runner, so the cluster-wide role hazard from §12 cannot arise
+between jobs at all. That isolation is the primary protection; the idempotent
+role creation added in Entry 7E is the second layer, and it is what makes the
+scripts safe to run concurrently on one developer machine.
+
+**Pollution regression is deliberately not in CI** — it is a release-level check
+costing roughly three full-suite runs. See §12.
+
+One benign warning appears in several jobs:
+`Failed to save: Unable to reserve cache with key setup-python-…` — parallel
+jobs racing to write the same pip cache key. It affects nothing: the cache is
+keyed on the interpreter, OS, and lock hashes, and `check_lock.sh` runs
+regardless of cache hits.
+
+---
+
+## 15. Limitations and remaining risks
 
 **In this entry's scope, and honest about it:**
 
@@ -696,13 +805,15 @@ is also the one that stops a silent dependency drift, so it stays.
   different columns), because the ORM has nothing to compare against.
 - No container image exists, so the runtime pin is enforced in `pyproject.toml`,
   `.python-version`, CI, and `check_python.sh`, but not in a Dockerfile.
-- The CI workflow has not executed on GitHub — this repository had no `.github`
-  directory before this change. Every step was run locally against a real
-  PostgreSQL 16 with pgvector; the first push will be its first real execution.
 - Two database jobs sharing one PostgreSQL cluster still share its role
   namespace. The drop-and-recreate hazard is gone, but a future script that
   drops a cluster-wide role would reintroduce it. In CI each job provisions its
   own cluster, so the exposure is local-only.
+- `pip-tools` depends on pip internals with no upper bound declared, so a future
+  pip release can break the lock tooling again. The pinned isolated environment
+  contains the blast radius to `_lock_tools.sh`, and the pins are declared in
+  `pyproject.toml` where a bump is a reviewable change — but it is a dependency
+  on an unsupported interface, and it will need attention again.
 
 **Outside this entry's scope** (unchanged, and not release-blocking for it):
 rate/admission limiting, privacy and data-lifecycle implementation, backup/PITR
