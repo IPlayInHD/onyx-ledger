@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.exceptions import Conflict
+from app.database.models import AnalysisRun
 from app.database.session import unit_of_work
 from app.schemas.ioe import ScenarioCreateRequest, ScenarioDetailOut
 from app.services.ioe import presentation
@@ -88,9 +91,10 @@ class ScenarioQueryService:
         return await self.detail(outcome.scenario_id)
 
     @staticmethod
-    async def _analysis(session, analysis_id: uuid.UUID):
+    async def _analysis(
+        session: AsyncSession, analysis_id: uuid.UUID
+    ) -> AnalysisRun:
         from app.core.exceptions import NotFound
-        from app.database.models import AnalysisRun
 
         analysis = await session.get(AnalysisRun, analysis_id)
         if analysis is None:

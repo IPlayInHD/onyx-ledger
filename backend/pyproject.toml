@@ -29,7 +29,22 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.5",
     "mypy>=1.10",
+    "types-defusedxml>=0.7",
 ]
+
+[tool.onyx.quality_gate]
+# The single declaration of the protected typing scope, read by
+# scripts/release_gate.sh, the CI workflow, and tests/unit/test_quality_gate_policy.py.
+#
+# PACKAGE ROOTS, not a file list: a module added anywhere beneath these roots is
+# in scope the moment it exists, with nothing to remember to update. The policy
+# test asserts that every importable top-level package in the repository is
+# covered by one of them, so a new package cannot appear outside the gate.
+protected_scope = ["app", "workers"]
+
+# Overrides permitted to relax the strict mypy configuration. Anything else is a
+# policy violation and the test fails. `ignore_errors` is never permitted.
+permitted_mypy_overrides = ["celery", "celery.*", "workers.tasks.*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -47,9 +62,54 @@ ignore = ["E501", "B008"]  # E501: long strings; B008: FastAPI Depends()/Query()
 "tests/**" = ["E501"]
 
 [tool.mypy]
+# ---------------------------------------------------------------------------
+# PROTECTED SCOPE. The configured scope is the whole application: `app` and
+# `workers`. It is not a subset, so there is no boundary a defect can be moved
+# across to escape the gate. See docs/architecture/production-engineering-
+# quality-gate.md for the scope definition and the debt register.
+#
+# `scripts/release_gate.sh` runs `mypy app workers` and blocks on any error.
+# ---------------------------------------------------------------------------
 python_version = "3.11"
 plugins = ["pydantic.mypy"]
+
+# `ignore_missing_imports` is NOT set globally. A blanket true silently turns
+# every future untyped dependency into Any; the two real exceptions are named
+# per-module below, so adding a third is a deliberate, reviewable act.
+ignore_missing_imports = false
+
+# Every function is checked, and every function must declare its types. Without
+# `check_untyped_defs` mypy skips the bodies of unannotated functions entirely,
+# which would make a clean run mean far less than it appears to.
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+
+# A value that has decayed to Any must not be laundered through a declared
+# return type — that is precisely how a wrong row type reaches a caller.
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+disallow_subclassing_any = true
+strict_equality = true
+extra_checks = true
+
+# Celery ships no py.typed marker and has no stub package. Narrowly scoped:
+# only the bind=True task `self` and `.delay`/`.retry` are affected, and the
+# task bodies themselves are fully annotated and checked.
+[[tool.mypy.overrides]]
+module = ["celery", "celery.*"]
 ignore_missing_imports = true
+
+# Celery's `@celery_app.task` is an untyped decorator, so mypy would report
+# every task function it wraps as untyped regardless of its own annotations.
+# Confined to the two worker task modules; the services they call are checked
+# under the full configuration above.
+[[tool.mypy.overrides]]
+module = ["workers.tasks.*"]
+disallow_untyped_decorators = false
 
 [build-system]
 requires = ["setuptools>=68"]

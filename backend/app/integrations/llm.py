@@ -44,6 +44,6 @@ class TemplateLlmClient:
 #         return "".join(b.text for b in msg.content if b.type == "text")
 
 
-def get_llm_client():
+def get_llm_client() -> TemplateLlmClient:
     _ = get_settings()  # provider/model selection happens here in production
     return TemplateLlmClient()

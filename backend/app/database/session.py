@@ -7,6 +7,7 @@ triggers see the acting principal. Runtime connects as `onyx_app_rw`.
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import text
@@ -31,7 +32,7 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 async def unit_of_work(
     user_id: uuid.UUID | None = None,
     actor_type: str = "system",
-):
+) -> AsyncIterator[AsyncSession]:
     """Transactional scope with RLS context set for the acting principal."""
     async with SessionLocal() as session:
         async with session.begin():

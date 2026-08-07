@@ -23,7 +23,7 @@ from app.database.models import (
     AnalysisRun,
     Recommendation,
 )
-from app.integrations.llm import get_llm_client
+from app.integrations.llm import TemplateLlmClient, get_llm_client
 from app.services.ai.retrieval import KnowledgeIndex
 
 SYSTEM_PROMPT = (
@@ -53,7 +53,9 @@ class AiExplanationService:
 
 
 class AiService:
-    def __init__(self, session: AsyncSession, llm=None):
+    def __init__(
+        self, session: AsyncSession, llm: TemplateLlmClient | None = None
+    ) -> None:
         self.s = session
         self.llm = llm or get_llm_client()
         self.index = KnowledgeIndex(session)
@@ -106,7 +108,12 @@ class AiService:
             "grounded": bool(chunks),
         }
 
-    async def _conversation(self, user_id, conversation_id, question) -> AiConversation:
+    async def _conversation(
+        self,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID | None,
+        question: str,
+    ) -> AiConversation:
         if conversation_id is not None:
             conv = await self.s.get(AiConversation, conversation_id)
             if not conv or conv.user_id != user_id:
@@ -117,7 +124,9 @@ class AiService:
         await self.s.flush()
         return conv
 
-    async def _verified_context(self, user_id, tax_year) -> tuple[dict, uuid.UUID | None]:
+    async def _verified_context(
+        self, user_id: uuid.UUID, tax_year: int
+    ) -> tuple[dict[str, Decimal | str | None], uuid.UUID | None]:
         run = await self.s.scalar(
             select(AnalysisRun).where(
                 AnalysisRun.user_id == user_id, AnalysisRun.tax_year == tax_year,
@@ -126,7 +135,10 @@ class AiService:
         )
         if not run:
             return {}, None
-        verified = {
+        # Figures and opportunity titles share this map; annotated so the string
+        # titles added below are part of the declared shape rather than a silent
+        # widening of a Decimal-only dict.
+        verified: dict[str, Decimal | str | None] = {
             "taxable_income": run.taxable_income,
             "estimated_tax": run.estimated_tax,
             "estimated_savings": run.estimated_savings,
@@ -150,7 +162,7 @@ class AiService:
         )
 
 
-def _is_number(v) -> bool:
+def _is_number(v: object) -> bool:
     try:
         Decimal(str(v))
         return True

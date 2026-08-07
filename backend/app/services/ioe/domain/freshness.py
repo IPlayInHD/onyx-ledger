@@ -230,6 +230,17 @@ def compare(left: ComparableScenario, right: ComparableScenario) -> ComparisonRe
     """Compare two scenarios, or refuse. Reads sealed values; recomputes nothing."""
     assert_comparable(left, right)
 
+    # `assert_comparable` has already refused a pair missing either objective
+    # identity or either delta. Re-stating that here turns a guarantee the
+    # reader has to remember into one the type checker enforces, and gives a
+    # loud failure instead of an AttributeError if that guard ever weakens.
+    if (
+        left.objective_delta is None or right.objective_delta is None
+        or left.objective_code is None or left.objective_version is None
+    ):
+        raise ScenariosNotComparable(
+            ["incomparable: a sealed objective identity or delta is missing"])
+
     delta_left = left.objective_delta.quantize(MONEY, ROUND_HALF_UP)
     delta_right = right.objective_delta.quantize(MONEY, ROUND_HALF_UP)
     difference = (delta_left - delta_right).quantize(MONEY, ROUND_HALF_UP)

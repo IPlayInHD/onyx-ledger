@@ -43,6 +43,7 @@ from app.services.ioe.replay.events import IntegrityEventService
 from app.services.ioe.replay.verification import (
     IntegrityVerificationService,
     VerificationAlreadyRunning,
+    VerificationResult,
 )
 
 log = get_logger("onyx.ioe.integrity_scheduler")
@@ -267,7 +268,7 @@ class IntegrityScheduler:
             ))
         return total
 
-    async def _verify(self, target: ScheduledTarget):
+    async def _verify(self, target: ScheduledTarget) -> VerificationResult:
         """Step 3–5 of the keyhole flow: tenant context, ordinary service, commit.
 
         `IntegrityVerificationService` opens its own transactions with

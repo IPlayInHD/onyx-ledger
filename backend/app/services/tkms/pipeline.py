@@ -8,18 +8,25 @@ resumes rather than restarts.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.storage import LocalObjectStorage
 from app.services.tkms.comparison.service import ComparisonService
 from app.services.tkms.extraction.service import ExtractionService
 from app.services.tkms.ingestion.service import ImportService
+from app.services.tkms.parsers.registry import ParserRegistry
 from app.services.tkms.validation.service import ValidationService
 
 
 async def run_ingestion_pipeline(
-    session: AsyncSession, job_id: uuid.UUID, *, registry=None, storage=None
-) -> dict:
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    *,
+    registry: ParserRegistry | None = None,
+    storage: LocalObjectStorage | None = None,
+) -> dict[str, Any]:
     """Run parse→extract→promote→validate→compare for a stored import job."""
     imp = ImportService(session, storage=storage, registry=registry)
     await imp.parse(job_id)

@@ -106,7 +106,9 @@ class GovernanceService:
         return version
 
     async def _open_change_request(self, version_id: uuid.UUID) -> RuleChangeRequest | None:
-        return await self.s.scalar(
+        # `AsyncSession.scalar` is typed `-> Any`; bound so the declared row type
+        # is what callers actually see.
+        request: RuleChangeRequest | None = await self.s.scalar(
             select(RuleChangeRequest)
             .where(
                 RuleChangeRequest.tax_rule_version_id == version_id,
@@ -114,9 +116,10 @@ class GovernanceService:
             )
             .order_by(RuleChangeRequest.created_at.desc())
         )
+        return request
 
     async def _pending_change_request(self, version_id: uuid.UUID) -> RuleChangeRequest | None:
-        return await self.s.scalar(
+        pending: RuleChangeRequest | None = await self.s.scalar(
             select(RuleChangeRequest)
             .where(
                 RuleChangeRequest.tax_rule_version_id == version_id,
@@ -124,3 +127,4 @@ class GovernanceService:
             )
             .order_by(RuleChangeRequest.created_at.desc())
         )
+        return pending

@@ -54,13 +54,19 @@ def normalize_rule(raw: dict) -> tuple[ExtractedRule | None, list[str]]:
     jurisdiction = _s(raw.get("jurisdiction"))
     tax_year_raw = _s(raw.get("tax_year"))
 
-    missing = [
-        label for label, val in (
-            ("rule_code", code), ("name", name), ("category", category),
-            ("jurisdiction", jurisdiction), ("tax_year", tax_year_raw),
-        ) if not val
-    ]
-    if missing:
+    # Written as an explicit disjunction rather than a truthiness test over a
+    # comprehension: `_s` already collapses absent and blank to None, so this is
+    # the same check, in the one form that also narrows the five names below.
+    if (
+        code is None or name is None or category is None
+        or jurisdiction is None or tax_year_raw is None
+    ):
+        missing = [
+            label for label, val in (
+                ("rule_code", code), ("name", name), ("category", category),
+                ("jurisdiction", jurisdiction), ("tax_year", tax_year_raw),
+            ) if val is None
+        ]
         return None, [f"missing required field(s): {', '.join(missing)}"]
 
     category = category.lower()
@@ -220,7 +226,10 @@ class BaseParser(ABC):
     version: str = "0.0.0"
     source: str = "generic"
     fmt: str = "manual"
-    base_confidence: Decimal = Decimal("0.98")
+    # None means "this parser states no default confidence" — an OCR/LLM-assisted
+    # parser derives it per run. Declared optional here because a subclass already
+    # relies on that, and a fabricated 0.98 would be a confidence nobody measured.
+    base_confidence: Decimal | None = Decimal("0.98")
 
     def extract_text(self, raw: bytes) -> str:
         """Default: decode structured text formats as UTF-8."""
@@ -239,7 +248,7 @@ class BaseParser(ABC):
             warnings.extend(f"row {i}: {msg}" for msg in w)
             if rule is None:
                 continue
-            if rule.confidence is None:
+            if rule.confidence is None and self.base_confidence is not None:
                 rule = _with_confidence(rule, self.base_confidence)
             rules.append(rule)
         return ExtractedRuleSet(

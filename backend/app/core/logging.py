@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import logging
 from contextvars import ContextVar
+from typing import cast
 
 import structlog
+from structlog.typing import EventDict, FilteringBoundLogger, WrappedLogger
 
 correlation_id: ContextVar[str] = ContextVar("correlation_id", default="-")
 
 
-def _add_correlation_id(_, __, event_dict):
+def _add_correlation_id(
+    _: WrappedLogger, __: str, event_dict: EventDict
+) -> EventDict:
     event_dict["correlation_id"] = correlation_id.get()
     return event_dict
 
@@ -33,5 +37,9 @@ def configure_logging(debug: bool = False) -> None:
     )
 
 
-def get_logger(name: str = "onyx"):
-    return structlog.get_logger(name)
+def get_logger(name: str = "onyx") -> FilteringBoundLogger:
+    # `structlog.get_logger` returns Any by design: the bound logger's type is
+    # whatever `wrapper_class` produces. `configure_logging` above pins that to
+    # `make_filtering_bound_logger`, and this cast records that pairing so
+    # callers get a checked logger instead of an unchecked Any.
+    return cast(FilteringBoundLogger, structlog.get_logger(name))

@@ -113,26 +113,31 @@ class DocumentService:
             if not target or field.value_number is None:
                 continue
             kind, code = target
+            # Distinct names per branch: one `row` reused across both made an
+            # expense row and an income row interchangeable to a reader and to
+            # the type checker, and the link below is keyed on which one it is.
             if kind == "income" and code in income_types:
-                row = IncomeSource(
+                income_row = IncomeSource(
                     user_id=user_id, tax_year=tax_year, income_type_id=income_types[code],
                     amount=field.value_number, verification_status="document_backed",
                 )
-                self.s.add(row)
+                self.s.add(income_row)
                 await self.s.flush()
                 self.s.add(DocumentLink(
-                    document_id=doc.id, income_source_id=row.id, income_tax_year=tax_year
+                    document_id=doc.id, income_source_id=income_row.id,
+                    income_tax_year=tax_year,
                 ))
                 created["income"] += 1
             elif kind == "expense" and code in categories:
-                row = ExpenseRecord(
+                expense_row = ExpenseRecord(
                     user_id=user_id, tax_year=tax_year, expense_category_id=categories[code],
                     amount=field.value_number, verification_status="document_backed",
                 )
-                self.s.add(row)
+                self.s.add(expense_row)
                 await self.s.flush()
                 self.s.add(DocumentLink(
-                    document_id=doc.id, expense_record_id=row.id, expense_tax_year=tax_year
+                    document_id=doc.id, expense_record_id=expense_row.id,
+                    expense_tax_year=tax_year,
                 ))
                 created["expense"] += 1
 

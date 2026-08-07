@@ -114,7 +114,11 @@ def _surtax(prov_tax: Decimal, tiers: list[tuple[Decimal, Decimal]]) -> Decimal:
     return s
 
 
-def _health_premium(taxable: Decimal, table: list[tuple[Decimal, Decimal]]) -> Decimal:
+def _health_premium(
+    taxable: Decimal, table: list[tuple[Decimal | None, Decimal]]
+) -> Decimal:
+    # `up_to` is None on the final, open-ended band. The body already handles
+    # that; only the annotation claimed otherwise.
     for up_to, amount in table:
         if up_to is None or taxable <= up_to:
             return amount

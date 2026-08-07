@@ -31,13 +31,14 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass, field
+from typing import Any, cast
 
-from sqlalchemy import text
+from sqlalchemy import CursorResult, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.database.session import unit_of_work
-from app.services.ioe.domain.scenario import FreshnessStatus
+from app.services.ioe.domain.scenario import FreshnessStatus, StaleReason
 
 log = get_logger("onyx.ioe.freshness_relay")
 
@@ -217,7 +218,10 @@ class FreshnessRelay:
                 stale_reason_codes=[event.stale_reason_code],
             )
         )
-        return result.rowcount or 0
+        # `AsyncSession.execute` is typed as returning `Result`, but a DML
+        # statement always yields a `CursorResult`, which is where
+        # `rowcount` lives. The cast states that rather than hiding it.
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     # -- fan-out and step 6 ---------------------------------------------------
     async def _fan_out(self, event: ClaimedEvent) -> int:
@@ -245,9 +249,7 @@ class FreshnessRelay:
             return bool(ok)
 
 
-def _reason(code: str):
-    from app.services.ioe.domain.scenario import StaleReason
-
+def _reason(code: str) -> StaleReason:
     return StaleReason(code)
 
 

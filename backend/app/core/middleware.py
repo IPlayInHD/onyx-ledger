@@ -4,8 +4,9 @@ from __future__ import annotations
 import time
 import uuid
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
+from starlette.responses import Response
 
 from app.core.logging import correlation_id, get_logger
 
@@ -13,7 +14,9 @@ log = get_logger("onyx.request")
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         cid = request.headers.get("X-Correlation-Id") or str(uuid.uuid4())
         correlation_id.set(cid)
         start = time.perf_counter()

@@ -8,13 +8,15 @@ from __future__ import annotations
 import asyncio
 import uuid
 
+from celery import Task
+
 from app.database.session import unit_of_work
 from app.services.analysis.service import AnalysisService
 from workers.celery_app import celery_app
 
 
 @celery_app.task(name="workers.tasks.analysis.run_analysis", bind=True, max_retries=3)
-def run_analysis(self, user_id: str, tax_year: int) -> str:
+def run_analysis(self: Task, user_id: str, tax_year: int) -> str:
     async def _run() -> str:
         async with unit_of_work(user_id=uuid.UUID(user_id), actor_type="user") as session:
             run = await AnalysisService(session).run(uuid.UUID(user_id), tax_year)

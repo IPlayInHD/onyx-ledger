@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -225,7 +227,9 @@ class RuleSnapshotService:
             content=content,
         )
 
-    async def _formula_artifacts(self, versions) -> list[SnapshotArtifact]:
+    async def _formula_artifacts(
+        self, versions: Sequence[TaxRuleVersion]
+    ) -> list[SnapshotArtifact]:
         formula_ids = [v.formula_id for v in versions if v.formula_id]
         if not formula_ids:
             return []
@@ -257,7 +261,9 @@ class RuleSnapshotService:
             ))
         return out
 
-    async def _condition_artifacts(self, version_ids) -> list[SnapshotArtifact]:
+    async def _condition_artifacts(
+        self, version_ids: Sequence[uuid.UUID]
+    ) -> list[SnapshotArtifact]:
         groups = list(await self.s.scalars(
             select(RuleConditionGroup).where(
                 RuleConditionGroup.rule_version_id.in_(version_ids)
@@ -298,7 +304,9 @@ class RuleSnapshotService:
             ))
         return out
 
-    async def _outcome_artifacts(self, version_ids) -> list[SnapshotArtifact]:
+    async def _outcome_artifacts(
+        self, version_ids: Sequence[uuid.UUID]
+    ) -> list[SnapshotArtifact]:
         out: list[SnapshotArtifact] = []
         for o in await self.s.scalars(
             select(RuleOutcome).where(RuleOutcome.rule_version_id.in_(version_ids))
@@ -332,7 +340,7 @@ class RuleSnapshotService:
         return out
 
 
-def _describe(dataset) -> dict:
+def _describe(dataset: object) -> dict[str, Any]:
     """Canonical description of an in-code dataclass dataset (public fields only)."""
     from dataclasses import fields, is_dataclass
 
@@ -345,7 +353,7 @@ def _describe(dataset) -> dict:
     return out
 
 
-def _describe_value(value):
+def _describe_value(value: Any) -> Any:
     from dataclasses import is_dataclass
     from decimal import Decimal
 

@@ -230,3 +230,42 @@ async def test_comparison_reports_changes_vs_published():
         assert "max_amount" in changed
         assert changed["max_amount"].old_value == "2000"
         assert changed["max_amount"].new_value == "3000"
+
+
+@pytest.mark.asyncio
+async def test_extraction_refuses_a_parse_result_with_no_stored_text():
+    """Regression: a succeeded parse whose text object was never persisted.
+
+    `ParseResult.text_object_key` is nullable, and `extract` passed it straight
+    into the object store. The store answers a missing key with empty bytes, so
+    the parser was handed `""`, found no rules, and the job was recorded as a
+    SUCCESSFUL extraction of zero rules — a governed import silently producing
+    nothing. Surfaced by the type checker (`str | None` into a `str` parameter),
+    fixed as a runtime refusal, and pinned here.
+    """
+    from app.core.exceptions import ValidationError
+    from app.database.models import ExtractedRule as StagedRow
+
+    code = f"TKMS_NOTEXT_{uuid.uuid4().hex[:8].upper()}"
+    async with unit_of_work(actor_type="admin") as s:
+        imp = ImportService(s)
+        job = await imp.create_job(source_org="CRA", fmt="csv", tax_year=2025)
+        await imp.store_raw(job.id, _csv(code), mime_type="text/csv")
+        pr = await imp.parse(job.id)
+        assert pr.status == "succeeded"
+
+        # The parse row survives; only its stored-text pointer is gone — exactly
+        # the state a failed object-store write leaves behind.
+        pr.text_object_key = None
+        await s.flush()
+
+        with pytest.raises(ValidationError):
+            await imp.extract(job.id)
+
+        # And nothing was staged: the refusal happens before any row is written,
+        # so a later retry starts from a clean parse result rather than from an
+        # empty extraction that `extract` would return as already-done.
+        staged = list(await s.scalars(
+            select(StagedRow).where(StagedRow.parse_result_id == pr.id)
+        ))
+        assert staged == []

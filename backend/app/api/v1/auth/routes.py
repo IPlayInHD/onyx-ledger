@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,5 +33,8 @@ async def refresh(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(user_id=Depends(current_user_id), session: AsyncSession = Depends(db_authed)) -> None:
+async def logout(
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> None:
     await AuthService(session).logout(user_id)

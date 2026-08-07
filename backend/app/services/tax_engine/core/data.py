@@ -21,7 +21,7 @@ from decimal import Decimal
 REFERENCE_DATA_VERSION = "2025.1.0"
 
 
-def D(x) -> Decimal:
+def D(x: int | str | Decimal) -> Decimal:
     return Decimal(str(x))
 
 
@@ -39,7 +39,8 @@ class ProvincialData:
     credit_rate: Decimal
     abatement: Decimal = D(0)
     surtax: list[tuple[Decimal, Decimal]] = field(default_factory=list)  # (over, rate)
-    health_premium: list[tuple[Decimal, Decimal]] = field(default_factory=list)  # (up_to, amount)
+    # The final band is open-ended: `None` upper bound means 'and above'.
+    health_premium: list[tuple[Decimal | None, Decimal]] = field(default_factory=list)  # (up_to, amount)
 
 
 @dataclass(frozen=True)

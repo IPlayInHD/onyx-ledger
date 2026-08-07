@@ -387,7 +387,9 @@ def _assert_writable(spec: LeverSpec, target_field: str) -> None:
         )
 
 
-def _new_value(spec: LeverSpec, target_field: str, old: Any, resolved: dict[str, Any]):
+def _new_value(
+    spec: LeverSpec, target_field: str, old: Any, resolved: dict[str, Any]
+) -> Any:
     """Compute the new value for one field under the lever's direction."""
     # A composite lever names its parameter after the field it sets.
     if target_field in resolved:

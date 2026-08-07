@@ -27,8 +27,9 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Scenario, ScenarioEvent
@@ -206,7 +207,10 @@ class ScenarioFreshnessService:
                 freshness_evaluated_at=datetime.now(tz=UTC),
             )
         )
-        return result.rowcount or 0
+        # `AsyncSession.execute` is typed as returning `Result`, but a DML
+        # statement always yields a `CursorResult`, which is where
+        # `rowcount` lives. The cast states that rather than hiding it.
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     async def invalidate_for_tax_year(
         self, tax_year: int, reason: StaleReason, *,
@@ -236,7 +240,10 @@ class ScenarioFreshnessService:
                 freshness_evaluated_at=datetime.now(tz=UTC),
             )
         )
-        return result.rowcount or 0
+        # `AsyncSession.execute` is typed as returning `Result`, but a DML
+        # statement always yields a `CursorResult`, which is where
+        # `rowcount` lives. The cast states that rather than hiding it.
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     async def invalidate_for_user(self, reason: StaleReason) -> int:
         """Every completed scenario this tenant owns.
@@ -256,7 +263,10 @@ class ScenarioFreshnessService:
                 freshness_evaluated_at=datetime.now(tz=UTC),
             )
         )
-        return result.rowcount or 0
+        # `AsyncSession.execute` is typed as returning `Result`, but a DML
+        # statement always yields a `CursorResult`, which is where
+        # `rowcount` lives. The cast states that rather than hiding it.
+        return cast("CursorResult[Any]", result).rowcount or 0
 
     # ----------------------------------------------------------- scheduled ---
     async def sweep(self, *, limit: int = SWEEP_BATCH_SIZE) -> list[FreshnessTransition]:

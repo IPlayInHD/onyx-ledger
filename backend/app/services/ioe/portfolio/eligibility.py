@@ -24,8 +24,9 @@ coincidence.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from enum import StrEnum
+from typing import Any, TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,7 +52,11 @@ class PinnedEligibilityRechecker:
     rule cannot enter an in-flight run through this path.
     """
 
-    def __init__(self, condition_trees: dict[str, dict | None], facts_fn):
+    def __init__(
+        self,
+        condition_trees: dict[str, dict | None],
+        facts_fn: Callable[[dict], dict],
+    ) -> None:
         # Keyed by rule_version_id as text. A key present with value None means
         # "pinned, and unconditional" — that rule always matches.
         self._trees = condition_trees
@@ -107,11 +112,22 @@ async def load_pinned_condition_trees(
     for c in conditions:
         by_group.setdefault(c.group_id, []).append(c)
 
-    nodes = {
-        g.id: {
-            "logical_op": g.logical_op, "conditions": [], "groups": [],
-            "_parent": g.parent_group_id, "_version": str(g.rule_version_id),
-        }
+    # A condition-group node under construction. Typed explicitly because the
+    # two private keys hold a UUID and a str while the two public ones hold
+    # lists — an untyped dict collapsed all four into one union and made every
+    # `.append` and every index below unchecked.
+    class _Node(TypedDict):
+        logical_op: str
+        conditions: list[dict[str, Any]]
+        groups: list[dict[str, Any]]
+        _parent: uuid.UUID | None
+        _version: str
+
+    nodes: dict[uuid.UUID, _Node] = {
+        g.id: _Node(
+            logical_op=g.logical_op, conditions=[], groups=[],
+            _parent=g.parent_group_id, _version=str(g.rule_version_id),
+        )
         for g in groups
     }
     for group_id, node in nodes.items():
@@ -124,12 +140,17 @@ async def load_pinned_condition_trees(
                 "value_set": None,
             })
     for node in list(nodes.values()):
-        parent = node.pop("_parent")
-        version = node.pop("_version")
+        # Popped rather than kept: `_parent` and `_version` are scaffolding for
+        # assembling the tree, not part of the pinned condition shape that gets
+        # hashed. `dict(node)` drops the TypedDict identity so the remaining
+        # plain mapping is what callers see.
+        parent = node.pop("_parent")          # type: ignore[misc]
+        version = node.pop("_version")        # type: ignore[misc]
+        plain: dict[str, Any] = dict(node)
         if parent is None:
-            trees[version] = node
+            trees[str(version)] = plain
         else:
-            nodes[parent]["groups"].append(node)
+            nodes[parent]["groups"].append(plain)
     return trees
 
 

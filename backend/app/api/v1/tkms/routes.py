@@ -353,11 +353,14 @@ async def stats(
     session: AsyncSession = Depends(db_admin),
 ) -> dict:
     await AdminService(session).require_permission(admin_id, "tkms.read")
-    jobs_by_status = dict(
-        (await session.execute(
+    # `Row` is tuple-like but not a `tuple` to the type checker, so the pairs are
+    # unpacked explicitly rather than fed to `dict()` as opaque rows.
+    jobs_by_status: dict[str, int] = {
+        status: count
+        for status, count in (await session.execute(
             select(ImportJob.status, func.count(ImportJob.id)).group_by(ImportJob.status)
         )).all()
-    )
+    }
     published = await session.scalar(
         select(func.count(TaxRuleVersion.id)).where(TaxRuleVersion.status == "published")
     )
@@ -382,8 +385,11 @@ def _job_summary(j: ImportJob) -> dict:
 
 
 async def _latest_report(session: AsyncSession, job_id: uuid.UUID) -> ValidationReport | None:
-    return await session.scalar(
+    # `AsyncSession.scalar` is typed `-> Any`; bound so the declared row type is
+    # what callers actually see.
+    report: ValidationReport | None = await session.scalar(
         select(ValidationReport)
         .where(ValidationReport.import_job_id == job_id)
         .order_by(desc(ValidationReport.created_at))
     )
+    return report

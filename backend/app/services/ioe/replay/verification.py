@@ -57,6 +57,7 @@ from app.services.ioe.replay.events import IntegrityEventService
 from app.services.ioe.replay.services import (
     OptimizationReplayService,
     PortfolioReplayService,
+    ReplayOutcome,
     ScenarioReplayService,
 )
 
@@ -209,7 +210,7 @@ class IntegrityVerificationService:
         return portfolio.portfolio_result_hash, run.optimization_spec_hash
 
     # ---------------------------------------------------------------- replay -
-    async def _replay(self, kind: EntityType, entity_id: uuid.UUID):
+    async def _replay(self, kind: EntityType, entity_id: uuid.UUID) -> ReplayOutcome:
         if kind is EntityType.OPTIMIZATION:
             return await OptimizationReplayService(self.user_id).replay(entity_id)
         if kind is EntityType.SCENARIO:
@@ -283,7 +284,13 @@ class IntegrityVerificationService:
             )
 
     @staticmethod
-    def _result(check, kind, entity_id, duration_ms, engine_runs) -> VerificationResult:
+    def _result(
+        check: IntegrityCheck,
+        kind: EntityType,
+        entity_id: uuid.UUID,
+        duration_ms: int,
+        engine_runs: int,
+    ) -> VerificationResult:
         status = {
             CheckStatus.VERIFIED.value: IntegrityStatus.VERIFIED,
             CheckStatus.MISMATCH.value: IntegrityStatus.MISMATCH,

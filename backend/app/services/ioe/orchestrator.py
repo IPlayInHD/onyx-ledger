@@ -22,9 +22,11 @@ silently replaying a result that does not match what was asked for.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -68,6 +70,7 @@ from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import confidence as support
 from app.services.ioe.domain import cost_taxonomy, scoring
 from app.services.ioe.domain import levers as lever_registry
+from app.services.ioe.domain import models as domain_models
 from app.services.ioe.domain import portfolio as assembly
 from app.services.ioe.domain import relationships as relationship_rules
 from app.services.ioe.domain import savings as savings_domain
@@ -102,6 +105,7 @@ from app.services.ioe.projection import PROJECTION_METHODOLOGY_VERSION
 from app.services.ioe.snapshot.service import RuleSnapshotService
 from app.services.tax_engine.contracts import CONTRACT_VERSION
 from app.services.tax_engine.core import data as engine_data
+from app.services.tax_engine.core.engine import TaxInput
 from app.services.tax_engine.rules_service import RulesEvaluatorService
 from app.services.tax_engine.service import ENGINE_VERSION, TaxEngineService
 
@@ -293,7 +297,10 @@ class OptimizationOrchestrator:
                     )
                 return keyed
 
-        return await session.scalar(
+        # Bound to a name with a declared type: `AsyncSession.scalar` is typed
+        # `-> Any`, so returning its result directly erased this method's own
+        # declared return type at every call site.
+        existing: OptimizationRun | None = await session.scalar(
             select(OptimizationRun).where(
                 OptimizationRun.user_id == self.user_id,
                 OptimizationRun.optimization_spec_hash == spec.spec_hash,
@@ -301,6 +308,7 @@ class OptimizationOrchestrator:
                 OptimizationRun.freshness_status == "current",
             )
         )
+        return existing
 
     # ------------------------------------------------------------ pipeline ---
     async def generate(
@@ -388,7 +396,9 @@ class OptimizationOrchestrator:
             ),
         )
 
-    async def _compute(self, spec: PinnedSpec, *, baseline_input=None) -> dict:
+    async def _compute(
+        self, spec: PinnedSpec, *, baseline_input: TaxInput | None = None
+    ) -> dict[str, Any]:
         """Pure domain maths over the FROZEN baseline. Holds no transaction.
 
         The input comes from the snapshot pinned in TX-1 and from nowhere else.
@@ -668,7 +678,12 @@ class OptimizationOrchestrator:
         return result_hash
 
     async def _persist_projections(
-        self, session, run_id, spec, candidates, authorizations: dict
+        self,
+        session: AsyncSession,
+        run_id: uuid.UUID,
+        spec: PinnedSpec,
+        candidates: Sequence[domain_models.OptimizationCandidate],
+        authorizations: dict[str, Any],
     ) -> int:
         """Generate projections ONLY for candidates a published rule authorized.
 

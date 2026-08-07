@@ -12,8 +12,10 @@ re-implements a digest.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +49,13 @@ from app.services.ioe.frozen.models import (
     scenario_execution_policy,
 )
 from app.services.ioe.portfolio.service import engine_evaluator
-from app.services.ioe.replay.resolver import ReplayDependencyResolver
+from app.services.ioe.replay.resolver import (
+    ReplayDependencyResolver,
+    ResolvedDependencies,
+)
+
+if TYPE_CHECKING:   # runtime import stays local: the domain module imports back
+    from app.services.ioe.domain.scenario import ScenarioSpec
 
 MONEY = Decimal("0.01")
 
@@ -224,7 +232,12 @@ class PortfolioReplayService:
             mismatch_reason=IntegrityReason.PORTFOLIO_HASH_MISMATCH,
         )
 
-    async def _rebuild(self, session: AsyncSession, portfolio, deps) -> tuple[dict, int]:
+    async def _rebuild(
+        self,
+        session: AsyncSession,
+        portfolio: StrategyPortfolio,
+        deps: ResolvedDependencies,
+    ) -> tuple[dict[str, Any], int]:
         members = list(await session.scalars(
             select(PortfolioMember)
             .where(PortfolioMember.portfolio_id == portfolio.id)
@@ -335,7 +348,9 @@ class PortfolioReplayService:
         }
 
     @staticmethod
-    def _verify_objective(portfolio, deps) -> int:
+    def _verify_objective(
+        portfolio: StrategyPortfolio, deps: ResolvedDependencies
+    ) -> int:
         """The baseline objective must still come out of the ENGINE.
 
         Re-derived from the pinned baseline inputs rather than trusted from the
@@ -356,7 +371,9 @@ class PortfolioReplayService:
         return 1
 
     @staticmethod
-    def _verify_invariants(portfolio, members) -> None:
+    def _verify_invariants(
+        portfolio: StrategyPortfolio, members: Sequence[PortfolioMember]
+    ) -> None:
         """I-1 telescoping and I-2 reconciliation, over the STORED rows."""
         total = sum(
             (m.incremental_benefit or Decimal(0) for m in members), Decimal(0)
@@ -474,7 +491,9 @@ class ScenarioReplayService:
         )
 
     @staticmethod
-    async def _sealed_spec(session: AsyncSession, scenario_id: uuid.UUID):
+    async def _sealed_spec(
+        session: AsyncSession, scenario_id: uuid.UUID
+    ) -> ScenarioSpec:
         """Rebuild the typed lever/assumption spec from the sealed rows.
 
         The spec is what the hash was taken over, so it is read back rather than
@@ -524,7 +543,7 @@ class ScenarioReplayService:
         )
 
 
-def _is_number(value) -> bool:
+def _is_number(value: object) -> bool:
     try:
         Decimal(str(value))
     except Exception:  # noqa: BLE001

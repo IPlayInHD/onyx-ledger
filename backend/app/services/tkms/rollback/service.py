@@ -118,10 +118,13 @@ class RollbackService:
         return record
 
     async def _current_published(self, target: TaxRuleVersion) -> TaxRuleVersion | None:
-        return await self.s.scalar(
+        # `AsyncSession.scalar` is typed `-> Any`; bound so the declared row type
+        # is what callers actually see.
+        published: TaxRuleVersion | None = await self.s.scalar(
             select(TaxRuleVersion).where(
                 TaxRuleVersion.tax_rule_id == target.tax_rule_id,
                 TaxRuleVersion.tax_year == target.tax_year,
                 TaxRuleVersion.status == PUBLISHED,
             )
         )
+        return published

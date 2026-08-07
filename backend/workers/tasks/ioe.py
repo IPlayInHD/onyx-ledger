@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import uuid
 
+from celery import Task
+
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.database.session import unit_of_work
@@ -45,7 +47,10 @@ ERROR_INVALID_PAYLOAD = "INVALID_PAYLOAD"
 
 def _backoff(attempt: int) -> int:
     """Exponential with a cap, so a broken dependency is not hammered."""
-    return min(2 ** attempt, RETRY_BACKOFF_CAP_SECONDS)
+    # `int ** int` is Any in typeshed (the exponent could be negative), which
+    # would leak out through this function's declared int return.
+    unbounded: int = 2 ** attempt
+    return min(unbounded, RETRY_BACKOFF_CAP_SECONDS)
 
 
 @celery_app.task(
@@ -55,7 +60,7 @@ def _backoff(attempt: int) -> int:
     acks_late=True,
 )
 def run_optimization(
-    self, user_id: str, analysis_id: str, idempotency_key: str | None = None
+    self: Task, user_id: str, analysis_id: str, idempotency_key: str | None = None
 ) -> str:
     """Generate an optimization run.
 
@@ -94,7 +99,7 @@ def run_optimization(
     max_retries=MAX_RETRIES,
     acks_late=True,
 )
-def invalidate_scenarios_for_analysis(self, analysis_id: str, reason_code: str) -> int:
+def invalidate_scenarios_for_analysis(self: Task, analysis_id: str, reason_code: str) -> int:
     """EVENT-DRIVEN freshness: a baseline moved.
 
     Marks every completed, currently-fresh scenario on that analysis stale. It
@@ -128,7 +133,7 @@ def invalidate_scenarios_for_analysis(self, analysis_id: str, reason_code: str) 
     max_retries=MAX_RETRIES,
     acks_late=True,
 )
-def invalidate_scenarios_for_tax_year(self, tax_year: int, reason_code: str) -> int:
+def invalidate_scenarios_for_tax_year(self: Task, tax_year: int, reason_code: str) -> int:
     """EVENT-DRIVEN freshness: a rule publication or reference-data change."""
     async def _run() -> int:
         async with unit_of_work(actor_type="system") as session:
@@ -157,7 +162,7 @@ def invalidate_scenarios_for_tax_year(self, tax_year: int, reason_code: str) -> 
     max_retries=MAX_RETRIES,
     acks_late=True,
 )
-def relay_freshness_outbox(self, batch_size: int = 50) -> int:
+def relay_freshness_outbox(self: Task, batch_size: int = 50) -> int:
     """Drain the transactional outbox — the NORMAL freshness path.
 
     Celery is transport only. The outbox table is the source of truth: a lost
@@ -194,7 +199,7 @@ def relay_freshness_outbox(self, batch_size: int = 50) -> int:
     bind=True,
     max_retries=2,
 )
-def sweep_scenario_freshness(self, limit: int = SWEEP_BATCH_SIZE) -> int:
+def sweep_scenario_freshness(self: Task, limit: int = SWEEP_BATCH_SIZE) -> int:
     """SCHEDULED fallback sweep.
 
     The safety net, not the primary mechanism: it catches events that were never
@@ -224,7 +229,7 @@ def sweep_scenario_freshness(self, limit: int = SWEEP_BATCH_SIZE) -> int:
     max_retries=2,
     acks_late=True,
 )
-def verify_sealed_integrity(self, batch_size: int | None = None) -> dict:
+def verify_sealed_integrity(self: Task, batch_size: int | None = None) -> dict:
     """SCHEDULED replay-integrity verification (closure entry 8C).
 
     Detection already existed; nothing invoked it. This is the invocation, and

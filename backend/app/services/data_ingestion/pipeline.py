@@ -54,7 +54,7 @@ def extract(payload: str, fmt: str) -> list[dict]:
 
 
 # ---- Validate + Transform: dict -> IngestRule -------------------------------
-def _to_decimal(v) -> Decimal | None:
+def _to_decimal(v: object) -> Decimal | None:
     if v in (None, ""):
         return None
     try:

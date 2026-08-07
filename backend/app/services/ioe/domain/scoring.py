@@ -52,7 +52,12 @@ NEGATIVE_DIRECTION = frozenset({
 # Normalization cap for economic value: $5,000 of comparable value scores 1.0.
 ECONOMIC_VALUE_CAP = Decimal("5000")
 
-_REVERSIBILITY_VALUE: dict[Reversibility, Decimal] = {
+# The rules layer may supply no reversibility at all. `None` is a real key here
+# rather than a lookup miss, so the neutral value is declared once beside the
+# graded ones instead of hiding in a `.get` default.
+_REVERSIBILITY_UNSTATED = Decimal("0.60")
+_REVERSIBILITY_VALUE: dict[Reversibility | None, Decimal] = {
+    None: _REVERSIBILITY_UNSTATED,
     Reversibility.REVERSIBLE: Decimal("1.00"),
     Reversibility.PARTIALLY_REVERSIBLE: Decimal("0.60"),
     Reversibility.IRREVERSIBLE: Decimal("0.30"),
@@ -166,7 +171,7 @@ def compute_score(
         ),
         ScoreFactor.REVERSIBILITY: (
             Decimal(0),
-            _REVERSIBILITY_VALUE.get(candidate.reversibility, Decimal("0.60")),
+            _REVERSIBILITY_VALUE.get(candidate.reversibility, _REVERSIBILITY_UNSTATED),
         ),
     }
 
@@ -204,22 +209,32 @@ def rank(
     in support but are tied at the DISPLAYED cap still order correctly, without
     the displayed number having to absorb the distinction.
     """
+    # The breakdown is carried alongside the candidate rather than re-read off
+    # `candidate.score`, whose declared type stays optional because a candidate
+    # is unscored until it reaches here. Sorting on the value just computed
+    # makes that non-optionality structural instead of assumed.
+    scored: list[tuple[OptimizationCandidate, ScoreBreakdown]] = []
     for candidate in candidates:
-        candidate.score = compute_score(
+        breakdown = compute_score(
             candidate, weights=weights, available_cash=available_cash
         )
+        candidate.score = breakdown
+        scored.append((candidate, breakdown))
 
-    ordered = sorted(
-        candidates,
-        key=lambda x: (
-            -x.score.overall,
-            -_adjusted_support(x),
-            -economic_value_raw(x),
-            x.opportunity_code,
-            x.rule_version_id or "",
-            x.candidate_key,
-        ),
-    )
+    ordered = [
+        candidate
+        for candidate, _ in sorted(
+            scored,
+            key=lambda pair: (
+                -pair[1].overall,
+                -_adjusted_support(pair[0]),
+                -economic_value_raw(pair[0]),
+                pair[0].opportunity_code,
+                pair[0].rule_version_id or "",
+                pair[0].candidate_key,
+            ),
+        )
+    ]
     for position, candidate in enumerate(ordered, start=1):
         candidate.rank = position
     return ordered

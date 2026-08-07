@@ -19,8 +19,9 @@ from app.core.config import get_settings
 from app.core.exceptions import Conflict, NotFound, ValidationError
 from app.database.models import ExtractedRule as ExtractedRuleRow
 from app.database.models import ImportJob, ParseResult, RawDocument
-from app.integrations.storage import get_object_storage
+from app.integrations.storage import LocalObjectStorage, get_object_storage
 from app.services.tkms.parsers import build_default_registry
+from app.services.tkms.parsers.base import BaseParser
 from app.services.tkms.parsers.registry import ParserRegistry
 
 
@@ -29,9 +30,9 @@ class ImportService:
         self,
         session: AsyncSession,
         *,
-        storage=None,
+        storage: LocalObjectStorage | None = None,
         registry: ParserRegistry | None = None,
-    ):
+    ) -> None:
         self.s = session
         self.settings = get_settings()
         self.storage = storage or get_object_storage()
@@ -177,6 +178,11 @@ class ImportService:
             return already
 
         parser = self._resolve_parser(job)
+        if pr.text_object_key is None:
+            # The object store returns empty bytes for a missing key, so passing
+            # None through would have staged a zero-rule extraction as a SUCCESS
+            # instead of reporting that the parsed text was never persisted.
+            raise ValidationError("Parse result has no stored text object to extract from")
         text_bytes = self.storage.get(self.settings.s3_bucket_legislation, pr.text_object_key)
         job.status = "parsing"
         try:
@@ -215,13 +221,15 @@ class ImportService:
         return job
 
     async def _latest_succeeded_parse(self, job_id: uuid.UUID) -> ParseResult | None:
-        return await self.s.scalar(
+        # Bound to a declared name: `AsyncSession.scalar` is typed `-> Any`.
+        parse_result: ParseResult | None = await self.s.scalar(
             select(ParseResult)
             .where(ParseResult.import_job_id == job_id, ParseResult.status == "succeeded")
             .order_by(ParseResult.created_at.desc())
         )
+        return parse_result
 
-    def _resolve_parser(self, job: ImportJob):
+    def _resolve_parser(self, job: ImportJob) -> BaseParser:
         if job.parser_name:
             return self.registry.resolve_by_name(job.parser_name, job.parser_version)
         source = "generic"

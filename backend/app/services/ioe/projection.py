@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import MultiYearProjection
 from app.services.ioe.domain.enums import EconomicEffectType
+from app.services.tax_engine.contracts import ProjectionAuthorization
 
 PROJECTION_METHODOLOGY_VERSION = "1.0.0"
 
@@ -68,7 +69,7 @@ class ProjectionDecision:
 
 
 def authorize(
-    projection,
+    projection: ProjectionAuthorization | None,
     *,
     requested_horizon: int | None = None,
     available_assumption_codes: frozenset[str] = frozenset(),
@@ -102,9 +103,17 @@ def authorize(
         )
 
     # The rule caps the horizon. A caller may ask for less, never more.
-    horizon = projection.maximum_horizon
-    if requested_horizon is not None:
-        horizon = min(requested_horizon, projection.maximum_horizon)
+    #
+    # `is_authorized` already required a positive `maximum_horizon`, but that is
+    # a property over the field rather than a narrowing of it, so the guarantee
+    # is restated here instead of assumed.
+    maximum = projection.maximum_horizon
+    if maximum is None:
+        return ProjectionDecision(
+            False, ProjectionStatus.NOT_GENERATED_NO_ELIGIBLE_CANDIDATES,
+            reason="the published rule declares no maximum projection horizon",
+        )
+    horizon = maximum if requested_horizon is None else min(requested_horizon, maximum)
     return ProjectionDecision(
         True, ProjectionStatus.GENERATED,
         horizon_years=horizon, method=projection.method,

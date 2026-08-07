@@ -25,7 +25,9 @@ def create_app() -> FastAPI:
     app.add_middleware(CorrelationIdMiddleware)
 
     @app.exception_handler(DomainError)
-    async def _domain_error_handler(request: Request, exc: DomainError):
+    async def _domain_error_handler(
+        request: Request, exc: DomainError
+    ) -> JSONResponse:
         # RFC-9457 application/problem+json
         return JSONResponse(
             status_code=exc.status_code,
@@ -79,8 +81,12 @@ def create_app() -> FastAPI:
     async def healthz() -> dict:
         return {"status": "ok"}
 
-    @app.get("/readyz", tags=["platform"])
-    async def readyz() -> dict:
+    # The return annotation admits both branches — a bare `dict` claimed a shape
+    # the 503 path never produces. `response_model=None` is required alongside
+    # it: FastAPI otherwise tries to build a Pydantic response model from the
+    # union and refuses `JSONResponse` as a field type.
+    @app.get("/readyz", tags=["platform"], response_model=None)
+    async def readyz() -> dict | JSONResponse:
         from sqlalchemy import text
 
         from app.database.session import engine

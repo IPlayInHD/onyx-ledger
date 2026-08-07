@@ -29,11 +29,13 @@ from app.services.tkms.domain.lifecycle import PUBLISHED, SUPERSEDED, RuleLifecy
 
 
 class PublicationService:
-    def __init__(self, session: AsyncSession, admin: AdminService | None = None):
+    def __init__(
+        self, session: AsyncSession, admin: AdminService | None = None
+    ) -> None:
         self.s = session
         self.admin = admin or AdminService(session)
 
-    async def _jurisdiction_of(self, version) -> str | None:
+    async def _jurisdiction_of(self, version: TaxRuleVersion) -> str | None:
         """The province a rule version applies to, or None for federal/global.
 
         FED is deliberately mapped to None: a federal rule applies everywhere,
@@ -137,7 +139,7 @@ class PublicationService:
             return report
         if version.import_job_id is None:
             return None
-        return await self.s.scalar(
+        latest: ValidationReport | None = await self.s.scalar(
             select(ValidationReport)
             .where(
                 ValidationReport.import_job_id == version.import_job_id,
@@ -145,6 +147,7 @@ class PublicationService:
             )
             .order_by(ValidationReport.created_at.desc())
         )
+        return latest
 
     async def _reindex(self, tax_year: int) -> None:
         """Best-effort AI re-embedding; never blocks or fails a publish."""

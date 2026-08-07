@@ -11,6 +11,7 @@ flagged there, so an incomplete draft can never publish.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -228,8 +229,7 @@ class ExtractionService:
         return code
 
 
-def _as_date(iso: str):
-    from datetime import date
+def _as_date(iso: str | date) -> date:
 
     if isinstance(iso, date):
         return iso

@@ -56,7 +56,7 @@ def diff_snapshots(
     return items, summary
 
 
-def _norm(value) -> str | None:
+def _norm(value: object) -> str | None:
     if value is None or value == "":
         return None
     return str(value)

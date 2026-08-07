@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import uuid
 from enum import StrEnum
+from typing import cast
 
+from sqlalchemy import Table
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -116,7 +118,9 @@ async def emit(
     # absorb the conflict keeps the caller's transaction untouched, which is the
     # whole point of the event sharing that transaction.
     inserted = await session.scalar(
-        pg_insert(FreshnessOutbox.__table__)
+        # `__table__` is declared as `FromClause` on the declarative base but
+        # is always a `Table`, which is what `insert()` needs.
+        pg_insert(cast("Table", FreshnessOutbox.__table__))
         .values(
             event_type=event.value,
             stale_reason_code=EVENT_STALE_REASON[event].value,

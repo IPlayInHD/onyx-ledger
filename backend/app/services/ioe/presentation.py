@@ -14,6 +14,7 @@ read time is a total that can disagree with the one that was verified.
 from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
+from typing import TYPE_CHECKING
 
 from app.database.models import (
     MultiYearProjection,
@@ -46,6 +47,9 @@ from app.schemas.ioe import (
     SupportScore,
 )
 
+if TYPE_CHECKING:   # import cycle: comparison_service imports this module
+    from app.services.ioe.scenario.comparison_service import LoadedComparison
+
 PRESENTATION_VERSION = "1.0.0"
 MONEY = Decimal("0.01")
 
@@ -68,7 +72,7 @@ def freshness_of(scenario: Scenario) -> FreshnessOut:
     )
 
 
-def integrity_of(row) -> IntegrityOut:
+def integrity_of(row: object) -> IntegrityOut:
     """Current reproducibility metadata for a sealed entity.
 
     Reads stored columns only — this never triggers a replay. Verifying on every
@@ -107,7 +111,7 @@ def integrity_of(row) -> IntegrityOut:
     )
 
 
-def support_of(row) -> SupportScore | None:
+def support_of(row: ScenarioResult | None) -> SupportScore | None:
     if row is None or row.display_support_score is None:
         return None
     return SupportScore(
@@ -265,7 +269,9 @@ def portfolio_detail(
     the headline comes from `portfolio_total_benefit` exactly as stored — the
     figure that passed the I-1/I-2 reconciliation when it was written.
     """
-    def concept(amount, effect_type: str, *, permanent: bool = True):
+    def concept(
+        amount: Decimal | None, effect_type: str, *, permanent: bool = True
+    ) -> MonetaryAmount | None:
         return money(
             amount, effect_type=effect_type,
             calculation_basis="engine_determined",
@@ -364,7 +370,9 @@ def projection_detail(
     horizon_years = len(rows)
     total = sum((r.projected_amount for r in rows), Decimal(0))
 
-    def projected(amount, effect_type, horizon):
+    def projected(
+        amount: Decimal | None, effect_type: str, horizon: int
+    ) -> MonetaryAmount | None:
         return money(
             amount, effect_type=effect_type,
             calculation_basis="projection_estimate",
@@ -407,9 +415,9 @@ def projection_detail(
 # ---------------------------------------------------------------------------
 # Comparison
 # ---------------------------------------------------------------------------
-def comparison_detail(loaded) -> ScenarioComparisonOut:
+def comparison_detail(loaded: LoadedComparison) -> ScenarioComparisonOut:
     """Map a completed comparison onto the response. Computes nothing."""
-    def side(row, result) -> ComparisonSideOut:
+    def side(row: Scenario, result: ScenarioResult) -> ComparisonSideOut:
         fresh = freshness_of(row)
         return ComparisonSideOut(
             scenario_id=row.id,
@@ -432,7 +440,9 @@ def comparison_detail(loaded) -> ScenarioComparisonOut:
     deltas = loaded.deltas
     tax_year = loaded.left_row.tax_year
 
-    def difference(amount, effect_type, *, permanent=True):
+    def difference(
+        amount: Decimal | None, effect_type: str, *, permanent: bool = True
+    ) -> MonetaryAmount | None:
         return money(
             amount, effect_type=effect_type, calculation_basis="scenario_estimate",
             evidence_status="user_attested", tax_year=tax_year,

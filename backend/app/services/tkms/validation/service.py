@@ -78,7 +78,11 @@ class ValidationService:
 
     # ---- persistence ---------------------------------------------------------
     async def _persist(
-        self, job: ImportJob | None, outcome: ValidationOutcome, *, target_version_id
+        self,
+        job: ImportJob | None,
+        outcome: ValidationOutcome,
+        *,
+        target_version_id: uuid.UUID | None,
     ) -> ValidationReport:
         report = ValidationReport(
             import_job_id=job.id if job else None,

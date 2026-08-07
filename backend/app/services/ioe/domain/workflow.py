@@ -37,7 +37,7 @@ _VISIBILITY_TRANSITIONS: dict[VisibilityStatus, frozenset[VisibilityStatus]] = {
 
 
 class IllegalTransition(ValueError):
-    def __init__(self, kind: str, from_state, to_state):
+    def __init__(self, kind: str, from_state: object, to_state: object) -> None:
         self.kind, self.from_state, self.to_state = kind, from_state, to_state
         super().__init__(f"Illegal {kind} transition: {from_state} → {to_state}")
 

@@ -32,10 +32,10 @@ import hashlib
 import json
 import unicodedata
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 CANONICAL_SERIALIZATION_VERSION = "1.1.0"
 
@@ -66,7 +66,7 @@ MAX_SIGNIFICANT_DIGITS = 38
 
 # Unicode: text is normalized to NFC so two byte-different but canonically
 # equivalent spellings (e.g. "é" as U+00E9 vs "e"+U+0301) hash identically.
-UNICODE_FORM = "NFC"
+UNICODE_FORM: Literal["NFC"] = "NFC"
 
 
 class CanonicalizationError(TypeError):
@@ -139,7 +139,9 @@ def quantity(value: Decimal | int | str | None) -> str | None:
     return None if value is None else _quantize(value, QUANTITY_SCALE, QUANTITY_MAX)
 
 
-def ordered(items: Sequence[Any], key=None) -> list:
+def ordered(
+    items: Sequence[Any], key: Callable[[Any], Any] | None = None
+) -> list[Any]:
     """Impose an explicit, stable order on a collection destined for a hash.
 
     Use this rather than relying on set or query ordering. With no key, items are

@@ -22,9 +22,10 @@ No surface may describe the result as optimal.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from app.services.ioe.domain import levers as lever_registry
 from app.services.ioe.domain.enums import (
@@ -42,7 +43,11 @@ from app.services.ioe.domain.models import (
     RecommendationRelationship,
     StrategyPortfolio,
 )
-from app.services.ioe.domain.savings import EPSILON_ACCEPT, objective_cost
+from app.services.ioe.domain.savings import (
+    EPSILON_ACCEPT,
+    SavingsBreakdown,
+    objective_cost,
+)
 
 PORTFOLIO_ASSEMBLY_VERSION = "1.0.0"
 ATTRIBUTION_METHOD_VERSION = "1.0.0"
@@ -310,7 +315,14 @@ def assemble(
             return False
         return True
 
-    def _trace(stage, candidate, objective_val, accepted, reason=None, order=None) -> None:
+    def _trace(
+        stage: str,
+        candidate: OptimizationCandidate | None,
+        objective_val: Decimal,
+        accepted: bool | None,
+        reason: str | None = None,
+        order: int | None = None,
+    ) -> None:
         state.trace.append(TraceStep(
             step_index=len(state.trace), stage=stage,
             candidate_key=candidate.candidate_key if candidate else None,
@@ -342,7 +354,9 @@ def assemble(
         ).quantize(MONEY, ROUND_HALF_UP)
         _trace("standalone", candidate, standalone_objective, None)
 
-    def try_admit(candidate) -> tuple[str, dict | None, Decimal | None]:
+    def try_admit(
+        candidate: OptimizationCandidate,
+    ) -> tuple[str, dict[str, Any] | None, Decimal | None]:
         """Returns (outcome, inputs, objective). 'hard_reject' means a constraint
         forbids it; 'no_improvement' means it did not pay off AT THIS POINT, and
         the caller defers rather than discards."""
@@ -410,7 +424,11 @@ def assemble(
         _trace("incremental_trial", candidate, trial_objective, True)
         return "accepted", trial_inputs, trial_objective
 
-    def accept(candidate, trial_inputs: dict, trial_objective: Decimal) -> None:
+    def accept(
+        candidate: OptimizationCandidate,
+        trial_inputs: dict[str, Any],
+        trial_objective: Decimal,
+    ) -> None:
         granted = ledger.try_allocate(_resource_requests(candidate)) or {}
         ledger.commit(granted)                  # conservation asserted inside
         state.allocations[candidate.candidate_key] = granted
@@ -431,6 +449,10 @@ def assemble(
     for candidate in ranked:
         outcome, trial_inputs, trial_objective = try_admit(candidate)
         if outcome == "accepted":
+            # `try_admit` returns the trial state only on "accepted"; the two
+            # are None together on every other branch. Asserting it here is
+            # what lets `accept` keep non-optional parameters.
+            assert trial_inputs is not None and trial_objective is not None
             accept(candidate, trial_inputs, trial_objective)
         elif outcome == "no_improvement":
             _reject(candidate, PortfolioMembership.DEFERRED_PENDING_COMBINATION,
@@ -448,6 +470,7 @@ def assemble(
             retests += 1
             outcome, trial_inputs, trial_objective = try_admit(candidate)
             if outcome == "accepted":
+                assert trial_inputs is not None and trial_objective is not None
                 deferred.remove(candidate)
                 accept(candidate, trial_inputs, trial_objective)
                 changed = True
@@ -538,7 +561,9 @@ def assemble(
     )
 
 
-def _decompose_selected(selected):
+def _decompose_selected(
+    selected: Sequence[OptimizationCandidate],
+) -> SavingsBreakdown:
     from app.services.ioe.domain.savings import decompose
 
     effects = tuple(e for x in selected for e in x.economic_effects)
@@ -589,7 +614,9 @@ def interaction_delta_for(candidate: OptimizationCandidate) -> Decimal | None:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-def _relationship_maps(relationships: list[RecommendationRelationship]):
+def _relationship_maps(
+    relationships: list[RecommendationRelationship],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     excludes: dict[str, set[str]] = {}
     requires: dict[str, set[str]] = {}
     for r in relationships:
@@ -601,7 +628,11 @@ def _relationship_maps(relationships: list[RecommendationRelationship]):
     return excludes, requires
 
 
-def _blocking_key(candidate, selected, excludes) -> str | None:
+def _blocking_key(
+    candidate: OptimizationCandidate,
+    selected: Sequence[OptimizationCandidate],
+    excludes: dict[str, set[str]],
+) -> str | None:
     """The selected candidate that forbids this one, or None."""
     blocked = excludes.get(candidate.candidate_key, set())
     for x in selected:
@@ -610,12 +641,20 @@ def _blocking_key(candidate, selected, excludes) -> str | None:
     return None
 
 
-def _dependencies_met(candidate, selected, requires) -> bool:
+def _dependencies_met(
+    candidate: OptimizationCandidate,
+    selected: Sequence[OptimizationCandidate],
+    requires: dict[str, set[str]],
+) -> bool:
     needed = requires.get(candidate.candidate_key, set())
     return not needed or needed.issubset({x.candidate_key for x in selected})
 
 
-def _first_missing_dependency(candidate, selected, requires) -> str | None:
+def _first_missing_dependency(
+    candidate: OptimizationCandidate,
+    selected: Sequence[OptimizationCandidate],
+    requires: dict[str, set[str]],
+) -> str | None:
     needed = requires.get(candidate.candidate_key, set())
     present = {x.candidate_key for x in selected}
     missing = sorted(needed - present)
@@ -630,7 +669,11 @@ def _resource_requests(candidate: OptimizationCandidate) -> dict[str, Decimal]:
     return {code: amount for code in candidate.shared_resource_codes}
 
 
-def _cash_available(candidate, selected, available_cash: Decimal | None) -> bool:
+def _cash_available(
+    candidate: OptimizationCandidate,
+    selected: Sequence[OptimizationCandidate],
+    available_cash: Decimal | None,
+) -> bool:
     if available_cash is None:
         return True
     spent = sum((x.liquidity_commitment() for x in selected), Decimal(0))
@@ -644,6 +687,11 @@ def _apply(
     allow-list, parameter bounds, jurisdiction, and tax year. Rule data never
     supplies a direct engine-field mutation path."""
     application = candidate.lever_application
+    if application is None:
+        # A candidate without a registered lever application cannot be applied
+        # to the engine at all; the caller filters these out, and reaching here
+        # would silently skip the mutation the portfolio believes it made.
+        raise ValueError("candidate has no registered lever application")
     return lever_registry.apply_lever(
         inputs, application.lever_code, dict(application.parameters),
         jurisdiction=cons.jurisdiction, tax_year=cons.tax_year,

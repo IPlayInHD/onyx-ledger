@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Coroutine
+from typing import Any, TypeVar
+
+from celery import Task
 
 from app.database.models import DeadLetter, ImportJob
 from app.database.session import unit_of_work
@@ -26,7 +30,15 @@ _MAX_RETRIES = {
 }
 
 
-def _run(coro):
+_T = TypeVar("_T")
+
+
+def _run(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Bridge Celery's sync task body to an async stage service.
+
+    Generic rather than untyped: each stage declares a return type, and without
+    the type variable every `return _run(_do())` below silently degraded to Any.
+    """
     return asyncio.run(coro)
 
 
@@ -43,7 +55,9 @@ async def _dead_letter(task_name: str, queue: str, job_id: str, error: str, atte
             job.error = f"{task_name}: {error}"[:2000]
 
 
-def _handle_failure(self, stage: str, queue: str, job_id: str, exc: Exception):
+def _handle_failure(
+    self: Task, stage: str, queue: str, job_id: str, exc: Exception
+) -> None:
     """Retry with exponential backoff; on exhaustion, dead-letter and stop."""
     if self.request.retries < _MAX_RETRIES[stage]:
         raise self.retry(exc=exc, countdown=2 ** self.request.retries)
@@ -52,8 +66,8 @@ def _handle_failure(self, stage: str, queue: str, job_id: str, exc: Exception):
 
 
 @celery_app.task(name="workers.tasks.tkms.parse", bind=True, max_retries=3)
-def parse(self, job_id: str) -> str:
-    async def _do():
+def parse(self: Task, job_id: str) -> str:
+    async def _do() -> str:
         async with unit_of_work(actor_type="admin") as s:
             await ImportService(s).parse(uuid.UUID(job_id))
         return job_id
@@ -67,8 +81,8 @@ def parse(self, job_id: str) -> str:
 
 
 @celery_app.task(name="workers.tasks.tkms.extract", bind=True, max_retries=3)
-def extract(self, job_id: str) -> str:
-    async def _do():
+def extract(self: Task, job_id: str) -> str:
+    async def _do() -> str:
         async with unit_of_work(actor_type="admin") as s:
             await ImportService(s).extract(uuid.UUID(job_id))
         return job_id
@@ -82,8 +96,8 @@ def extract(self, job_id: str) -> str:
 
 
 @celery_app.task(name="workers.tasks.tkms.promote", bind=True, max_retries=3)
-def promote(self, job_id: str) -> str:
-    async def _do():
+def promote(self: Task, job_id: str) -> str:
+    async def _do() -> str:
         async with unit_of_work(actor_type="admin") as s:
             await ExtractionService(s).promote(uuid.UUID(job_id))
         return job_id
@@ -97,8 +111,8 @@ def promote(self, job_id: str) -> str:
 
 
 @celery_app.task(name="workers.tasks.tkms.validate", bind=True, max_retries=2)
-def validate(self, job_id: str) -> str:
-    async def _do():
+def validate(self: Task, job_id: str) -> str:
+    async def _do() -> str:
         async with unit_of_work(actor_type="admin") as s:
             await ValidationService(s).validate_job(uuid.UUID(job_id))
         return job_id
@@ -112,8 +126,8 @@ def validate(self, job_id: str) -> str:
 
 
 @celery_app.task(name="workers.tasks.tkms.compare", bind=True, max_retries=2)
-def compare(self, job_id: str) -> str:
-    async def _do():
+def compare(self: Task, job_id: str) -> str:
+    async def _do() -> str:
         async with unit_of_work(actor_type="admin") as s:
             from sqlalchemy import select
 
@@ -134,8 +148,8 @@ def compare(self, job_id: str) -> str:
 
 
 @celery_app.task(name="workers.tasks.tkms.reindex", bind=True, max_retries=5)
-def reindex(self, tax_year: int) -> int:
-    async def _do():
+def reindex(self: Task, tax_year: int) -> int:
+    async def _do() -> int:
         async with unit_of_work(actor_type="admin") as s:
             from app.services.ai.retrieval import KnowledgeIndex
             return await KnowledgeIndex(s).reindex_published_rules(int(tax_year))

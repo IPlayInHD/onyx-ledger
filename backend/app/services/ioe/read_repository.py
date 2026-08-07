@@ -85,9 +85,12 @@ class IoeReadRepository:
         return scenario
 
     async def scenario_result(self, scenario_id: uuid.UUID) -> ScenarioResult | None:
-        return await self.s.scalar(
+        # Bound to a declared name: `AsyncSession.scalar` is typed `-> Any`, so
+        # returning it directly would erase this method's declared row type.
+        result: ScenarioResult | None = await self.s.scalar(
             select(ScenarioResult).where(ScenarioResult.scenario_id == scenario_id)
         )
+        return result
 
     async def scenario_levers(self, scenario_id: uuid.UUID) -> Sequence[ScenarioLever]:
         return list(await self.s.scalars(
@@ -152,9 +155,10 @@ class IoeReadRepository:
 
     # ----------------------------------------------------------- portfolio ---
     async def portfolio_for_run(self, run_id: uuid.UUID) -> StrategyPortfolio | None:
-        return await self.s.scalar(
+        portfolio: StrategyPortfolio | None = await self.s.scalar(
             select(StrategyPortfolio).where(StrategyPortfolio.run_id == run_id)
         )
+        return portfolio
 
     async def portfolio_members(
         self, portfolio_id: uuid.UUID
@@ -194,7 +198,9 @@ class IoeReadRepository:
         ))
 
     # ----------------------------------------------------------- integrity ---
-    async def integrity_target(self, entity_type, entity_id: uuid.UUID):
+    async def integrity_target(
+        self, entity_type: str, entity_id: uuid.UUID
+    ) -> OptimizationRun | Scenario | StrategyPortfolio | None:
         """The row carrying current integrity metadata, or None.
 
         Every lookup is by primary key and every one is RLS-protected: the

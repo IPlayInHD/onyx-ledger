@@ -158,6 +158,9 @@ class OpportunityNormalizationService:
             value = sources.get(source_key)
             if value is None:
                 return None
+            # `sources` is a Mapping[str, Decimal | str]; `.get` widens to
+            # object once a default is in play, so the narrowing is restated.
+            assert isinstance(value, (Decimal, str))
             resolved[name] = value
         return resolved or None
 

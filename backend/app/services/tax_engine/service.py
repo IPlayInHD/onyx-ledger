@@ -81,19 +81,25 @@ class TaxEngineService:
                 IncomeSource.deleted_at.is_(None),
             )
         ):
-            field = _INCOME_FIELD.get(itypes.get(row.income_type_id, ""), "other_income")
-            setattr(inp, field, getattr(inp, field) + row.amount)
+            income_field = _INCOME_FIELD.get(
+                itypes.get(row.income_type_id, ""), "other_income")
+            setattr(inp, income_field, getattr(inp, income_field) + row.amount)
 
         cats = {c.id: c.code for c in await self.s.scalars(select(ExpenseCategory))}
-        for row in await self.s.scalars(
+        # A distinct loop variable: reusing `row` made the expense rows look
+        # like income rows to a reader and to the type checker, which is how
+        # `expense_category_id` came to be read off an `IncomeSource`.
+        for expense in await self.s.scalars(
             select(ExpenseRecord).where(
                 ExpenseRecord.user_id == user_id, ExpenseRecord.tax_year == tax_year,
                 ExpenseRecord.deleted_at.is_(None),
             )
         ):
-            field = _EXPENSE_FIELD.get(cats.get(row.expense_category_id, ""))
-            if field:
-                setattr(inp, field, getattr(inp, field) + row.amount)
+            expense_field = _EXPENSE_FIELD.get(
+                cats.get(expense.expense_category_id, ""))
+            if expense_field:
+                setattr(inp, expense_field,
+                        getattr(inp, expense_field) + expense.amount)
         return inp
 
     def run(self, inp: TaxInput) -> TaxResult:

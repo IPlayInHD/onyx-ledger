@@ -404,7 +404,9 @@ class ScenarioService:
                     )
                 return keyed
 
-        return await session.scalar(
+        # Bound to a declared name: `AsyncSession.scalar` is typed `-> Any`, so
+        # returning it directly would erase this method's declared row type.
+        existing: Scenario | None = await session.scalar(
             select(Scenario).where(
                 Scenario.user_id == self.user_id,
                 Scenario.scenario_spec_hash == pinned.spec_hash,
@@ -412,6 +414,7 @@ class ScenarioService:
                 Scenario.visibility_status == "active",
             )
         )
+        return existing
 
     # ------------------------------------------------------------ pipeline ---
     async def simulate(
@@ -810,7 +813,9 @@ class ScenarioService:
             ))
         return outcome
 
-    async def _own_scenario(self, session: AsyncSession, scenario_id: uuid.UUID):
+    async def _own_scenario(
+        self, session: AsyncSession, scenario_id: uuid.UUID
+    ) -> Scenario:
         scenario = await session.get(Scenario, scenario_id)
         if scenario is None or scenario.user_id != self.user_id:
             raise NotFound("Scenario not found")

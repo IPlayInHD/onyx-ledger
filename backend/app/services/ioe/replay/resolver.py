@@ -30,9 +30,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.models import (
     AnalysisInputSnapshot,
     AnalysisRun,
+    OptimizationRun,
     RuleSnapshot,
     RunRuleSnapshot,
     RunRuleVersion,
+    Scenario,
 )
 from app.services.ioe.domain import assumptions as assumption_registry
 from app.services.ioe.domain import canonical as c
@@ -217,7 +219,7 @@ class ReplayDependencyResolver:
         ))
         return [r.tax_rule_version_id for r in rows]
 
-    async def for_optimization(self, run) -> ResolvedDependencies:
+    async def for_optimization(self, run: OptimizationRun) -> ResolvedDependencies:
         manifest = dict(run.version_manifest or {})
         if not manifest or not run.optimization_result_hash:
             raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
@@ -254,7 +256,7 @@ class ReplayDependencyResolver:
             checked_versions=checked,
         )
 
-    async def for_scenario(self, scenario) -> ResolvedDependencies:
+    async def for_scenario(self, scenario: Scenario) -> ResolvedDependencies:
         manifest = dict(scenario.version_manifest or {})
         if not manifest or not scenario.scenario_result_hash:
             raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)

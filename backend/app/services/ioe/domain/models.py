@@ -6,6 +6,11 @@ hash goes through an explicit scale helper.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.ioe.domain.savings import SavingsBreakdown
+
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -456,7 +461,11 @@ class StrategyPortfolio:
     objective_version: str = ""
     objective_delta: Decimal = Decimal(0)
     search_budget_exhausted: bool = False
-    savings: object | None = None          # SavingsBreakdown (per-concept totals)
+    # Per-concept totals. Annotated through TYPE_CHECKING rather than as
+    # `object`: `savings` is read attribute-by-attribute when a portfolio is
+    # persisted, and typing it as `object` meant every one of those reads was
+    # unchecked — 13 of this repository's type errors came from this line alone.
+    savings: SavingsBreakdown | None = None
     trace: tuple = ()                      # TraceStep[] — the step-by-step record
     exclusions: tuple = ()                 # ExclusionRecord[] — retained, not dropped
     deferred_count: int = 0
