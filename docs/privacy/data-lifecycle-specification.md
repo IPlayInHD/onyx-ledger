@@ -12,7 +12,13 @@ regenerated from `app/privacy/classification.py` by
 authority, and `tests/security/test_privacy_inventory.py` keeps it honest
 against the live schema.
 
-**This document is not legal advice and makes no compliance claim.**
+> **Entry 11A defines an engineering privacy/data-lifecycle architecture.
+> It does not certify legal compliance.**
+>
+> No claim is made about PIPEDA, the CPPA, provincial privacy legislation, or
+> CRA retention requirements. External privacy-counsel review remains required,
+> and every decision that depends on it is listed in §24 rather than resolved
+> here. This document is not legal advice.
 
 ---
 
@@ -871,6 +877,9 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 | **PD-8** | `ObjectStorage` port has no `delete` method; binaries are unreachable by any cascade | `IMPLEMENTATION_GAP` | HIGH |
 | **PD-9** | `audit.data_deletion_request` FK is `CASCADE`, so the deletion record dies with the account it must outlive | `IMPLEMENTATION_GAP` | MEDIUM |
 | **PD-10** | Object-store encryption, versioning, TLS and backup config absent from the repository | `DEPLOYMENT_CONFIGURATION_REQUIRED` | — |
+| **PD-12** | Celery serialized failed-task exceptions — statement and bound parameters included — into the Redis result backend | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in closeout (§29.2)** |
+| **PD-13** | The same exception text reaches the Celery worker's own log; sanitizing it is a logging concern, not a persistence one | `DEPLOYMENT_CONFIGURATION_REQUIRED` + 11B | MEDIUM |
+| **PD-14** | `server/` (Node/Netlify Blobs) is a second application storing emails, bcrypt hashes, profiles and documents, and was absent from the first inventory pass | `IMPLEMENTATION_GAP` | MEDIUM — see §29.1 |
 | **PD-11** | Future AI provider retention, training reuse, region, deletion API all unknown | `EXTERNAL_PROVIDER_REVIEW_REQUIRED` | — |
 
 ### PD-6 recommendation
@@ -900,6 +909,14 @@ same service. Doing them together avoids two migrations on one table.
 | Whether re-registration may reattach anything | `LEGAL_REVIEW_REQUIRED` |
 | Cooling-off period before deletion executes | `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
 | Encryption at rest, TLS enforcement, KMS | `DEPLOYMENT_REVIEW_REQUIRED` |
+| Whether any PostgreSQL environment ever held real registrations | `OPERATIONAL_REVIEW_REQUIRED` (§29.1) |
+| Whether the Netlify `server/` app is live, and with what data | `OPERATIONAL_REVIEW_REQUIRED` (§29.1) |
+| Redis persistence, eviction and snapshot behaviour | `DEPLOYMENT_REVIEW_REQUIRED` |
+| Celery worker log retention and sanitization | `DEPLOYMENT_REVIEW_REQUIRED` |
+| Account-deletion grace/cooling period | `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
+| Legal hold policy | `LEGAL_REVIEW_REQUIRED` |
+| Crypto-erasure policy | `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
+| User export scope | `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
 
 **No Canadian statutory period, CRA requirement or PIPEDA obligation is asserted
 anywhere in this document.**
@@ -926,27 +943,33 @@ implemented; none is built in 11A.**
 
 ---
 
-## 26. Entry 11B implementation plan (§61)
+## 26. Entry 11B implementation plan
 
-| Phase | Scope | Tables / services | Migration | Security model | Idempotency | Tests |
-|---|---|---|---|---|---|---|
-| **11B0** | **PD-4**: stop the audit log accumulating user rows; decide what an audit record contains | `audit.log_change`, `audit.audit_log` | yes (function + possibly columns) | keep `SECURITY DEFINER`, narrow payload | n/a | audit still proves who/what/when; no financial values persisted |
-| **11B1** | RLS on the **16** tenant-owned child tables (**PD-1**) — not the 7 `identity` or 4 `audit` tables, which cannot have it | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | mirror the `ioe` pattern from Entry 3B | n/a | cross-tenant read denied per table; login still works (RLS must not reach `identity`); existing suite unaffected |
-| **11B2** | Lifecycle state + deletion request orchestration | `audit.data_deletion_request` (fix `CASCADE`→`SET NULL`/no FK), new lifecycle worker | yes | privileged worker, `FOR UPDATE SKIP LOCKED` keyhole; **no broad `SECURITY DEFINER`** | phase checkpoints | state machine transitions, crash-resume |
-| **11B3** | Source deletion: profile, financial, documents | `finance.*`, `profile.*`, `wealth.*`, `docs.*`, `ObjectStorage.delete` (**PD-8**), `filename` column + opaque keys (**PD-2**) | yes | user-authorized, ownership-checked | delete-if-exists | source gone, sealed result unchanged, dependents stale, no orphaned object |
-| **11B4** | Derived / sealed artifact handling | `analysis.*`, `ioe.*`, `SOURCE_ERASED_BY_PRIVACY_LIFECYCLE` reason code | yes (enum/check) | privileged erasure path; ordinary immutability triggers untouched | idempotent | replay reports erasure, never `verified` |
-| **11B5** | AI + external deletion | `ai.*`, conversation delete endpoint, provider deletion hook | no | user-scoped | idempotent | conversation deleted; prompt-context retention shortest in the system |
-| **11B6** | Operational + audit retention | `freshness_outbox*`, `integrity_check`, `login_event` de-identification (**PD-3**) | possibly | scheduled worker | age-based | de-identification checklist passes in full |
-| **11B7** | Export + account-deletion endpoints (**PD-7**) | `audit.data_export_request`, new API | no | ordinary auth + ownership | resumable | export completeness; login denied immediately on request |
-| **11B8** | Backup deletion ledger integration | ledger retention, restore drill | no | operational | replayable | *deleted at T2, backup from T1 → user does not reappear* |
+Refined from the closeout findings. Ordered so that the two things which make
+everything else unsafe come first.
 
-**Ordering rationale.** 11B0 and 11B1 come first because everything after them
-writes into a store that currently accumulates user data without a deletion path,
-and because deleting data while the tenant boundary is incomplete is the wrong
-order to do two risky things in.
+| Phase | Scope | Tables / services | Migration | Worker privilege | Idempotency | Failure recovery | Tests | External dependency |
+|---|---|---|---|---|---|---|---|---|
+| **11B0** | **PD-4** — stop `audit.audit_log` accumulating whole user rows; decide what an audit record must contain | `audit.log_change`, `audit.audit_log` | yes (function, possibly columns) | `SECURITY DEFINER`, narrowed payload | n/a | n/a | audit still proves who/what/when; no financial value persisted; Entry 3A four-eyes tests unaffected | — |
+| **11B1** | **PD-1** — RLS on the 16 tenant-owned child tables | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | n/a | n/a | n/a | cross-tenant read denied per table; **login still works** (RLS must not reach `identity`); `NON_RLS` defect count drops to 0 | — |
+| **11B2** | Account lifecycle + deletion-request state machine | `audit.data_deletion_request` (**PD-9**: FK `CASCADE` → must outlive the account), new lifecycle state | yes | privileged worker, `FOR UPDATE SKIP LOCKED` keyhole; **no broad `SECURITY DEFINER`** | phase checkpoints | resume at checkpoint | state transitions; crash mid-phase resumes; `ACCESS_DISABLED` entered first | grace period `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
+| **11B3** | Source deletion + correction | `finance.*`, `profile.*`, `wealth.*` | possibly | user-authorized, ownership-checked | delete-if-exists | idempotent retry | source gone, sealed result byte-identical, dependents stale | — |
+| **11B4** | Document / object / extraction deletion | `docs.*`, `ObjectStorage.delete` (**PD-8**), `filename` column + opaque keys (**PD-2**) | yes | ownership-checked | purge-if-exists | orphan sweep | binary gone, fields gone, confirmed facts survive, provenance link marked, no orphaned object | object versioning `DEPLOYMENT_REVIEW_REQUIRED` |
+| **11B5** | Sealed-snapshot erasure semantics | `analysis.*`, `ioe.*`, new `SOURCE_ERASED_BY_PRIVACY_LIFECYCLE` reason | yes (enum/check) | privileged erasure path; **ordinary immutability triggers untouched** | idempotent | resumable | replay reports erasure, never `verified` | erasure exceptions `LEGAL_REVIEW_REQUIRED` |
+| **11B6** | AI conversation + external provider lifecycle | `ai.*`, conversation delete endpoint, provider deletion hook | no | user-scoped | idempotent | retry | conversation deleted; `ai_prompt_context` gets the shortest retention in the system | `EXTERNAL_PROVIDER_REVIEW_REQUIRED` |
+| **11B7** | Operational / audit retention | `freshness_outbox*`, `integrity_check`, admission (already done) | possibly | scheduled worker | age-based | next run | de-identification checklist passes in full | windows `LEGAL_REVIEW_REQUIRED` |
+| **11B8** | Data export (**PD-7**) | `audit.data_export_request`, new API | no | ordinary auth + ownership | resumable | resume | export completeness; no other tenant, no secrets | scope `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
+| **11B9** | Deletion worker hardening + `server/` reconciliation (**PD-14**) | lifecycle worker; Netlify Blobs store | no | privileged | idempotent | resumable | races in §10 covered; both applications' stores reconciled | `OPERATIONAL_REVIEW_REQUIRED` |
+| **11B10** | Backup tombstone contract | deletion ledger retention, restore drill | no | operational | replayable | — | **deleted at T2, backup from T1 → user does not reappear** | backup entry must exist |
+| **11B11** | End-to-end privacy verification | all of the above | no | — | — | — | the six invariants in §28 | — |
 
-**Dependencies outside engineering:** 11B4 and 11B6 need the retention decisions
-(§24); 11B5 needs the provider review; 11B8 needs the backup entry to exist.
+**Ordering rationale.** 11B0 and 11B1 lead because everything after them writes
+into a store that accumulates user data with no deletion path (PD-4), across a
+tenant boundary that is incomplete (PD-1). Deleting data while both are true is
+the wrong order to do two risky things in.
+
+**PD-6 and PD-3 are deliberately absent.** They belong to a separate
+authentication/security hardening entry (§29.7).
 
 ---
 
@@ -1016,7 +1039,227 @@ deleted user re-registers with the same address
 
 ---
 
-## 29. What Entry 11A changed in the running system
+## 29. Closeout findings (conformance pass)
+
+### 29.1 Deployment state, and a second application (§1)
+
+The audit so far covered `backend/` — the FastAPI + PostgreSQL system. **That is
+not what this repository deploys.**
+
+| Application | Storage | Deployment artifact |
+|---|---|---|
+| `backend/` (Python, PostgreSQL) | 148 tables, object storage, Redis | `backend/deploy/docker-compose.yml`, self-labelled **"Local dev stack"**, `POSTGRES_HOST_AUTH_METHOD: trust`, `ONYX_JWT_SECRET: dev-secret-change-me`, MinIO with a dev password |
+| `server/` (Node/Express) | **Netlify Blobs** | root `netlify.toml` + `NETLIFY.md` — the actual deploy target |
+
+`NETLIFY.md` states the deployed system persists "accounts/audits in Netlify
+Blobs (auto-provisioned — **no database to set up**)". So the deployed
+application does not use PostgreSQL at all, and `audit.audit_log` — the table
+carrying the credential defect — **does not exist in any deployed environment**.
+
+**`server/` is a storage surface this specification previously omitted, and that
+was a gap.** What it stores, from `server/store.js`:
+
+| Field | Class |
+|---|---|
+| `email` | `DIRECT_IDENTIFIER` |
+| `name` | `DIRECT_IDENTIFIER` |
+| `passwordHash` (bcrypt) | `AUTHENTICATION_SECURITY` |
+| `profile` (province, year, marital status) | `TAX_PROFILE_DATA` |
+| `documents[]` | `DOCUMENT_EXTRACTED_DATA` |
+| `audit` | `DERIVED_TAX_RESULT` |
+
+It has a `FileStore` (local `server/data/db.json`) and a `BlobStore` (Netlify
+Blobs). The local file is **gitignored and not tracked** — verified with
+`git check-ignore` and `git ls-files`. Safe aggregates of the local copy: **7
+users, 1 email domain, all created inside an 8-minute window**, bcrypt hashes —
+a demo session, not a user base.
+
+Notably, `server/store.js` already exposes `deleteDocument`, which is more
+deletion capability than the Python backend has (§23, PD-7).
+
+**Classification for the PostgreSQL credential defect:**
+
+```
+NO_REAL_PRODUCTION_DATA_EXISTS   (for backend/ PostgreSQL)
+```
+
+Evidence: the only PostgreSQL deployment artifact is self-described as a local
+dev stack with trust authentication and committed dev secrets; the deployed
+application uses a different datastore entirely and says so; there is no
+infra-as-code, no managed-database configuration, and no secret management
+anywhere in the repository.
+
+**Residual, stated honestly:** a repository cannot prove the absence of a
+deployment someone made by hand. One operator confirmation closes this —
+`OPERATIONAL_REVIEW_REQUIRED`, and `scripts/audit_credential_scan.py` answers it
+against any environment in seconds without an operator having to trust this
+document.
+
+**`server/` deployment state:** `UNKNOWN_DEPLOYMENT_STATE`. `NETLIFY.md` reads
+as instructions for connecting the repository rather than a record that it was
+connected. If it *is* live, its store holds real emails and bcrypt hashes and
+falls under the same lifecycle contract — an `OPERATIONAL_REVIEW_REQUIRED` item
+carried into 11B.
+
+### 29.2 Celery failure metadata (§11) — PD-12, fixed
+
+Payloads were audited; the failure path was not. Redis is the result backend, and
+Celery serializes a failed task's exception into it — `exc_message` is
+`str(exception)` verbatim. SQLAlchemy renders a `DBAPIError` as the statement
+*plus its bound parameters*, so a database error during a financial write would
+write the amount, the source name and the SQL into Redis. Every task re-raises
+via `self.retry(exc=exc)` or lets the original escape at retry exhaustion, so
+the path was live.
+
+Verified by serializing a synthetic SQLAlchemy-shaped error through Celery's own
+`prepare_exception`: all four synthetic markers appeared in the payload.
+
+**Fixed by removing the surface**, because nothing in the repository reads a task
+result — there is no `AsyncResult`, no `.get()`, no `.ready()`:
+
+| Setting | Value | Why |
+|---|---|---|
+| `task_ignore_result` | `True` | no result written, so no exception payload |
+| `task_store_errors_even_if_ignored` | `False` | the one setting that would put it back |
+| `result_expires` | 24 h, explicit | was the framework default — a bound arrived at by accident |
+| `result_extended` | unset (False) | would persist args/kwargs, including two tasks' `user_id` |
+
+**Still open:** the same exception reaches the **Celery worker's own log**. That
+is a log-sanitization question, not a persistence one, and it is
+`DEPLOYMENT_REVIEW_REQUIRED` plus an 11B item — recorded as PD-13.
+
+### 29.3 Final Celery result matrix (§9, §12)
+
+| Task | Queue | Args | Result | Sensitive? | Retention |
+|---|---|---|---|---|---|
+| `analysis.run_analysis` | `analysis` | `user_id, tax_year` | analysis UUID | no | not stored |
+| `ioe.run_optimization` | `ioe` | identifiers | run UUID | no | not stored |
+| `ioe.invalidate_scenarios_for_analysis` | `ioe_freshness` | `analysis_id, reason_code` | count | no | not stored |
+| `ioe.invalidate_scenarios_for_tax_year` | `ioe_freshness` | `tax_year, reason_code` | count | no | not stored |
+| `ioe.relay_freshness_outbox` | `ioe_freshness` | `batch_size` | count | no | not stored |
+| `ioe.sweep_scenario_freshness` | `ioe_freshness` | `limit` | count | no | not stored |
+| `ioe.verify_sealed_integrity` | `ioe_integrity` | `batch_size` | counts | no | not stored |
+| `tkms.parse/extract/promote/validate/compare` | `tkms_*` | `job_id` | `job_id` | no | not stored |
+| `tkms.reindex` | `tkms_index` | `tax_year` | count | no | not stored |
+| `maintenance.*` | `maintenance` | none | counts | no | not stored |
+
+Failure metadata: **not stored** (§29.2). Redis persistence, eviction and
+snapshotting remain `DEPLOYMENT_REVIEW_REQUIRED` — nothing in this repository
+configures them.
+
+### 29.4 Non-RLS classification — final (§7)
+
+All **100** non-RLS tables carry a closed reason and an access model in
+`app/privacy/classification.py:NON_RLS`, enforced against the live catalogue by
+`tests/security/test_privacy_inventory.py`.
+
+| Reason | Tables |
+|---|---|
+| `GLOBAL_REFERENCE_OR_REGISTRY` | 50 — `ref`, `rules`, `tax_kb`, `tkms` |
+| `PRIVACY_DEFECT_REQUIRES_REMEDIATION` | **16** — PD-1 |
+| `WORKER_AUDIT_STATE` | 9 — `audit.*`, `freshness_outbox_audit` |
+| `OPERATOR_ADMIN_STATE` | 7 — `admin.*` (staff, not customers) |
+| `GLOBAL_SYSTEM_STATE` | 7 — versions, weights, assumptions, plan, embeddings |
+| `CROSS_TENANT_OPERATIONAL_STATE` | 7 — `identity.*` |
+| `PINNED_SYSTEM_EVIDENCE` | 2 — rule snapshots |
+| `PSEUDONYMOUS_OPERATIONAL_STATE` | 2 — `admission.*` |
+
+```
+unexplained privacy-relevant non-RLS tables = 0
+```
+
+Every exception is justified or named as a defect. **No table is asserted to be
+"safe" without a table-level reason.**
+
+The `identity` exception is the load-bearing one: authentication reads
+`user_account` *before* `app.user_id` exists — `unit_of_work` deliberately
+leaves the GUC unset for anonymous sessions — so an RLS policy keyed on it would
+deny the login lookup outright.
+
+### 29.5 Admission re-check (§8)
+
+`PSEUDONYMOUS_OPERATIONAL_STATE`, confirmed against the columns *and* the data:
+no email, username, financial value or document content; `AUTH_SUBJECT` and `IP`
+scopes are HMAC-SHA256 digests under a dedicated secret; `PUBLIC` revoked;
+`onyx_app_rw` CRUD and `onyx_app_ro` SELECT only; purged hourly (2 h counters,
+24 h leases). A test now asserts no `scope_id` matches an email or a dotted-quad
+shape, so the digest discipline is checked against stored rows rather than
+assumed.
+
+### 29.6 `deleted_at` — an affordance, not a capability (§13)
+
+```
+IMPLEMENTATION_AFFORDANCE
+```
+
+Every read path already filters on it; **nothing anywhere writes it**. Present
+on `identity.user_account`, `docs.document`, `finance.income_source`,
+`finance.expense_record` (and their partitions), and `admin.admin_user`. Read
+sites: `AuthService` (twice), `AdminService`, `FinancialService` (twice),
+`TaxEngineService` (twice), the document list.
+
+This is **not** an existing deletion capability, and 11B must not reach for it
+reflexively — each table gets its own decision between soft delete, hard delete,
+supersession, de-identification and retention.
+
+### 29.7 Failed login-event rollback (§14)
+
+```
+SECURITY_AUDIT_DEFECT  (PD-6)
+```
+
+`AuthService` adds the `login_event` row and then raises, so the row rolls back
+with the request's transaction: **failed authentication attempts are not durably
+audited.** No privacy risk — it retains *less* data, not more — so under §14's
+rule it is not corrected opportunistically here.
+
+**Owner: a dedicated authentication/security hardening entry**, not 11B. It sits
+next to PD-3 (`login_event` retains `email_tried` and `ip_address` after the FK
+is nulled), which touches the same table and the same service — doing them
+together avoids two migrations on one table, and neither is a data-lifecycle
+concern.
+
+### 29.8 Full storage-surface inventory (§16)
+
+| Surface | Live user data | Derived | Direct id | Financial | Document | Retention in repo | Deletion exists |
+|---|---|---|---|---|---|---|---|
+| PostgreSQL (`backend/`) | yes | yes | yes (3 tables) | yes | metadata | partial | no (PD-7) |
+| Object storage | yes | — | in the key (PD-2) | — | **yes** | no | **no method** (PD-8) |
+| Netlify Blobs (`server/`) | **yes** | yes | **yes** | — | yes | no | `deleteDocument` only |
+| Local `server/data/db.json` | dev only | — | yes | — | yes | n/a | n/a — gitignored |
+| Celery broker (Redis) | identifiers | — | no | no | no | broker-controlled | n/a |
+| Celery result backend | **disabled** | — | no | no | no | 24 h explicit | n/a |
+| AI provider path | **none exists** | — | — | — | — | n/a | n/a |
+| Application logs | `user_id`, paths | — | no | no | no | no | no |
+| Metrics | codes only | — | no | no | no | in-process | n/a |
+| `audit.audit_log` | **yes, whole rows** | yes | yes | yes | — | none | **no** (PD-4) |
+| pgvector | **no** — legislation only | — | no | no | no | n/a | n/a |
+| Admission | pseudonymous | — | no | no | no | **yes, 2 h/24 h** | automatic |
+| Backups | not implemented | — | — | — | — | — | — |
+| Exports | not implemented | — | — | — | — | — | — |
+| Temporary files | **none exist** | — | — | — | — | — | — |
+
+No known current storage surface is absent from this table.
+
+### 29.9 Password-hash classification (§6)
+
+```
+Argon2 hash ≠ plaintext password
+Argon2 hash  = authentication-sensitive credential material
+```
+
+A hash is not a password, and treating it as harmless is the error that produced
+PD-4a. It is offline-attackable, it is a credential equivalent for anyone who
+obtains it, and it must appear **only** in `identity.user_credential`.
+
+Prohibited in: audit payloads (fixed, 0046 + scrub), logs, queue payloads,
+**Celery result metadata** (fixed, §29.2), metrics, error text, analytics. The
+same rule covers `refresh_token_hash`, `token_hash` and `mfa_secret`, which is
+why the redaction list names all of them rather than only the one that leaked.
+
+---
+
+## 30. What Entry 11A changed in the running system
 
 Almost nothing, deliberately.
 
@@ -1025,5 +1268,22 @@ Almost nothing, deliberately.
 | `audit.log_change` redacts named credential columns (migration `0046`) | the audit log is append-only and unreachable by deletion, so a secret written into it can *never* be removed — deferring meant permanently accumulating Argon2 hashes |
 | `app/privacy/classification.py` + inventory guard | the specification is only true if something keeps it true |
 | Snapshot minimization assertion | prevents an identifying field drifting into sealed evidence between now and 11B |
+| Celery result storage disabled (`task_ignore_result`) | a failing task was writing SQL statements and bound parameters into Redis; deferring meant continuing to leak financial values on every database error |
+| Non-RLS justification registry + enforcement | "every exception is reviewed" is only worth saying if something checks it |
+| `scripts/audit_credential_scan.py` | converts "we believe there is no historical exposure" into "we checked, and here is the count" — for any environment, in seconds |
 
 Everything else in this document is a specification.
+
+**Backup restore invariant (§19), restated as the acceptance criterion the
+future backup/PITR entry inherits:**
+
+```
+user deleted at T2
+restore backup from T1  (T1 < T2)
+  → every deletion-ledger entry with completed_at > T1 is replayed
+  → the deleted user's data is not reactivated
+  → the service does not accept traffic until reconciliation completes
+```
+
+This is mandatory, not advisory: a restore that silently resurrects a deleted
+account undoes every guarantee in this document in one operation.
