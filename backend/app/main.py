@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.exceptions import DomainError
 from app.core.logging import configure_logging, correlation_id, get_logger
 from app.core.middleware import CorrelationIdMiddleware
+from app.services.admission import AdmissionRejected
 
 settings = get_settings()
 configure_logging(settings.debug)
@@ -29,16 +30,31 @@ def create_app() -> FastAPI:
         request: Request, exc: DomainError
     ) -> JSONResponse:
         # RFC-9457 application/problem+json
+        body: dict[str, object] = {
+            "type": exc.error_type,
+            "title": exc.title,
+            "status": exc.status_code,
+            "detail": exc.detail,
+            "correlation_id": correlation_id.get(),
+        }
+        headers: dict[str, str] = {}
+
+        if isinstance(exc, AdmissionRejected):
+            # A rejected caller gets a closed operation code, a closed reason
+            # code, and when to come back. Deliberately NOT: queue depth, worker
+            # counts, how much of the limit is left, or anything about another
+            # principal's activity — each of those turns a rejection into a
+            # reconnaissance signal.
+            body["operation_code"] = exc.operation.value
+            body["error_code"] = exc.reason.value
+            body["retry_after_seconds"] = exc.retry_after_seconds
+            headers["Retry-After"] = str(exc.retry_after_seconds)
+
         return JSONResponse(
             status_code=exc.status_code,
             media_type="application/problem+json",
-            content={
-                "type": exc.error_type,
-                "title": exc.title,
-                "status": exc.status_code,
-                "detail": exc.detail,
-                "correlation_id": correlation_id.get(),
-            },
+            content=body,
+            headers=headers or None,
         )
 
     @app.on_event("startup")

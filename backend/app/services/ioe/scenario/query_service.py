@@ -20,6 +20,8 @@ from app.core.exceptions import Conflict
 from app.database.models import AnalysisRun
 from app.database.session import unit_of_work
 from app.schemas.ioe import ScenarioCreateRequest, ScenarioDetailOut
+from app.services.admission import OperationClass, admission_guard
+from app.services.admission.guard import owned_dedupe_key, user_scope
 from app.services.ioe import presentation
 from app.services.ioe.domain.scenario import ScenarioSpec, ScenarioSpecError
 from app.services.ioe.read_repository import IoeReadRepository
@@ -41,8 +43,19 @@ class ScenarioQueryService:
         The schema has already refused unknown fields; `ScenarioSpec.parse` then
         applies the domain rules — registered codes, declared parameters,
         applicable jurisdiction and tax year. Only a spec that survives both
-        reaches the service.
+        reaches the service. Lever and assumption counts are bounded at 25 each
+        by BOTH the schema and the domain parser, so a variant explosion is
+        refused before any of this runs.
+
+        Admission-controlled: a scenario is real engine work, and the surface
+        most likely to be driven from a UI slider.
         """
+        async with admission_guard(
+            OperationClass.SCENARIO_RUN, scope_id=user_scope(self.user_id)
+        ):
+            return await self._create(body)
+
+    async def _create(self, body: ScenarioCreateRequest) -> ScenarioDetailOut:
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             repo = IoeReadRepository(session, self.user_id)
             analysis = await self._analysis(session, body.analysis_id)
@@ -86,9 +99,24 @@ class ScenarioQueryService:
             )
 
     async def refresh(self, scenario_id: uuid.UUID) -> ScenarioDetailOut:
-        """Re-run the specification; the result is a NEW scenario."""
-        outcome = await ScenarioService(self.user_id).refresh(scenario_id)
-        return await self.detail(outcome.scenario_id)
+        """Re-run the specification; the result is a NEW scenario.
+
+        Costs the same as a create, so it is admitted under the same class. The
+        dedupe key is the SOURCE scenario, so repeated refresh clicks resolve to
+        the one already running rather than producing a chain of new scenarios.
+        """
+        async with admission_guard(
+            OperationClass.SCENARIO_RUN,
+            scope_id=user_scope(self.user_id),
+            dedupe_key=owned_dedupe_key(self.user_id, "refresh", str(scenario_id)),
+        ) as ticket:
+            if ticket.duplicate_of_active:
+                raise Conflict(
+                    "a refresh of this scenario is already running; "
+                    "wait for it to finish"
+                )
+            outcome = await ScenarioService(self.user_id).refresh(scenario_id)
+            return await self.detail(outcome.scenario_id)
 
     @staticmethod
     async def _analysis(

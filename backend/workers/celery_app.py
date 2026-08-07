@@ -90,5 +90,56 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(month_of_year="1", day_of_month="2", hour="5", minute="0"),
     },
 }
+# `acks_late` + a prefetch of 1 is the backpressure baseline: a worker holds one
+# message at a time, so a slow task cannot sit on a batch of others, and a
+# crashed worker's message returns to the queue instead of being lost.
 celery_app.conf.task_acks_late = True
 celery_app.conf.worker_prefetch_multiplier = 1
+
+# ---------------------------------------------------------------------------
+# Execution budgets (Entry 10).
+#
+# Without these a single pathological input runs forever, holding a worker slot,
+# a database connection and — now — an admission lease. The admission lease
+# expires on its own, but the worker slot does not, so the queue drains slower
+# and slower while looking healthy.
+#
+# TWO limits per task, and the pair matters:
+#   soft — raises SoftTimeLimitExceeded INSIDE the task, so the `async with`
+#          blocks unwind, the transaction ROLLS BACK, and the admission lease is
+#          released through the ordinary path.
+#   hard — SIGKILLs a task that ignored the soft limit. Abrupt: no rollback runs
+#          in-process, which is why it is set well above the soft limit and why
+#          the database's own transaction abort, not application code, is what
+#          guarantees no partial write survives.
+#
+# Global defaults are deliberately generous; the expensive classes are pinned
+# individually below to the slowest run each has been measured at, with room.
+# ---------------------------------------------------------------------------
+celery_app.conf.task_soft_time_limit = 300
+celery_app.conf.task_time_limit = 360
+
+celery_app.conf.task_annotations = {
+    # A full optimization: pinned snapshot, candidate normalization, scored
+    # ranking, portfolio assembly with a bounded budget of up to 200 engine runs.
+    "workers.tasks.ioe.run_optimization": {
+        "soft_time_limit": 600, "time_limit": 660,
+    },
+    # Replay re-executes a sealed calculation; the scheduler already bounds each
+    # RECORD, this bounds the batch.
+    "workers.tasks.ioe.verify_sealed_integrity": {
+        "soft_time_limit": 600, "time_limit": 660,
+    },
+    # Freshness work is small and frequent. A short budget here is protective:
+    # a stuck relay is worse than a failed one, because the outbox keeps filling.
+    "workers.tasks.ioe.relay_freshness_outbox": {
+        "soft_time_limit": 120, "time_limit": 150,
+    },
+    "workers.tasks.ioe.sweep_scenario_freshness": {
+        "soft_time_limit": 120, "time_limit": 150,
+    },
+    # Legislation ingestion parses whole documents.
+    "workers.tasks.tkms.parse": {"soft_time_limit": 900, "time_limit": 960},
+    "workers.tasks.tkms.extract": {"soft_time_limit": 900, "time_limit": 960},
+    "workers.tasks.tkms.reindex": {"soft_time_limit": 1800, "time_limit": 1860},
+}

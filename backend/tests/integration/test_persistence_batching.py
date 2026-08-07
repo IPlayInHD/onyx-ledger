@@ -61,7 +61,22 @@ async def _dispose_engine():
 
 
 class _Counter:
-    """Statements sent to the driver, split the way the gate asks for them."""
+    """Statements sent to the driver, split the way the gate asks for them.
+
+    Admission-control statements are excluded. This test measures ONE thing —
+    that IOE evidence persistence costs O(tables) rather than O(rows) — and the
+    admission guard's writes are a fixed handful per run regardless of candidate
+    count, on a different schema, in their own transactions. Counting them would
+    let an unrelated constant drift the budget for the invariant that actually
+    matters, and `test_statement_count_does_not_grow_with_candidate_count`
+    remains the assertion that no row loop survived.
+
+    The exclusion is BY SCHEMA and nothing else: every statement against an IOE
+    or analysis table is still counted, so a row loop cannot hide behind it.
+    """
+
+    #: Statements touching this schema are infrastructure, not evidence.
+    _EXCLUDED_SCHEMA = "admission."
 
     def __init__(self) -> None:
         self.total = 0
@@ -69,9 +84,13 @@ class _Counter:
         self.writes = 0
         self.other = 0
         self.by_table: dict[str, int] = {}
+        self.admission = 0
 
     def record(self, statement: str) -> None:
         body = " ".join(statement.split())
+        if self._EXCLUDED_SCHEMA in body.lower():
+            self.admission += 1
+            return
         verb = body.split(" ", 1)[0].upper()
         self.total += 1
         if verb == "SELECT":

@@ -26,6 +26,8 @@ from app.schemas.ioe import (
     ScenarioSummaryOut,
     StrategyPortfolioOut,
 )
+from app.services.admission import OperationClass, admission_guard
+from app.services.admission.guard import user_scope
 from app.services.ioe import presentation
 from app.services.ioe.domain.integrity import EntityType
 from app.services.ioe.projection_query import ProjectionQueryService
@@ -241,9 +243,20 @@ async def verify_integrity(
     entity_id: uuid.UUID,
     user_id: uuid.UUID = Depends(current_user_id),
 ) -> IntegrityCheckOut:
-    result = await IntegrityVerificationService(user_id).verify(
-        _entity_type(entity_type), entity_id
-    )
+    # A manual replay re-executes a sealed calculation end to end. The service
+    # already refuses a second verification of the SAME entity; admission bounds
+    # how many DIFFERENT entities one caller can replay at once.
+    #
+    # Ownership is resolved inside the service, which raises NotFound for an
+    # entity the caller may not see. Admission runs first and is deliberately
+    # keyed on the CALLER and the operation class only — never on the entity —
+    # so a rejection cannot confirm that some other tenant's entity exists.
+    async with admission_guard(
+        OperationClass.INTEGRITY_VERIFY, scope_id=user_scope(user_id)
+    ):
+        result = await IntegrityVerificationService(user_id).verify(
+            _entity_type(entity_type), entity_id
+        )
     return IntegrityCheckOut(
         check_id=result.check_id,
         entity_type=result.entity_type,

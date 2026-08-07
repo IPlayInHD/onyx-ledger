@@ -65,6 +65,8 @@ from app.database.models import (
     ScoreComponent as ScoreComponentRow,
 )
 from app.database.session import unit_of_work
+from app.services.admission import OperationClass, admission_guard
+from app.services.admission.guard import owned_dedupe_key, user_scope
 from app.services.ioe.domain import assumptions as assumption_registry
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import confidence as support
@@ -312,6 +314,38 @@ class OptimizationOrchestrator:
 
     # ------------------------------------------------------------ pipeline ---
     async def generate(
+        self,
+        analysis_id: uuid.UUID,
+        *,
+        idempotency_key: str | None = None,
+        user_constraints: dict | None = None,
+        assumptions: list[dict] | None = None,
+    ) -> OptimizationOutcome:
+        """Admission-controlled. Guarded HERE rather than at an endpoint because
+        the only production trigger today is the Celery task, and a limit that
+        lives on a route protects nothing a worker does."""
+        async with admission_guard(
+            OperationClass.OPTIMIZATION_RUN,
+            scope_id=user_scope(self.user_id),
+            # Keyed on the ANALYSIS, not on a client-supplied string: a retry
+            # storm for the same analysis must resolve to the run already in
+            # flight. Owner-prefixed, so no key can reach another account.
+            dedupe_key=owned_dedupe_key(self.user_id, "optimization", str(analysis_id)),
+        ):
+            # No branch on `duplicate_of_active` is needed: TX-1's existing
+            # spec-hash resolution already finds a run in pending/running/
+            # completed for this specification and returns it instead of
+            # starting a second engine run. The dedupe key's job here is
+            # narrower — stop a retry storm from consuming a second LEASE while
+            # that resolution happens.
+            return await self._generate(
+                analysis_id,
+                idempotency_key=idempotency_key,
+                user_constraints=user_constraints,
+                assumptions=assumptions,
+            )
+
+    async def _generate(
         self,
         analysis_id: uuid.UUID,
         *,

@@ -7,9 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user_id, db_authed
-from app.core.exceptions import NotFound
+from app.core.exceptions import Conflict, NotFound
 from app.database.models import AnalysisRun, Recommendation
 from app.schemas import AnalysisOut, AnalysisRequest, RecommendationOut
+from app.services.admission import OperationClass, admission_guard
+from app.services.admission.guard import owned_dedupe_key, user_scope
 from app.services.analysis.service import AnalysisService
 
 router = APIRouter(tags=["analysis"])
@@ -21,8 +23,26 @@ async def run_analysis(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> AnalysisOut:
-    run = await AnalysisService(session).run(user_id, body.tax_year)
-    return AnalysisOut.model_validate(run)
+    """Run a full analysis. Admission-controlled: this is a synchronous engine
+    run plus a rules evaluation plus a frozen snapshot, and a double-click has
+    nothing to add while the first one is still going."""
+    async with admission_guard(
+        OperationClass.ANALYSIS_RUN,
+        scope_id=user_scope(user_id),
+        # One active analysis per (user, tax year). The key is owner-prefixed,
+        # so it can never collide with another account's.
+        dedupe_key=owned_dedupe_key(user_id, "analysis", str(body.tax_year)),
+    ) as ticket:
+        if ticket.duplicate_of_active:
+            # Deterministic rather than silently running a second identical
+            # analysis: the first one is still writing the rows this one would
+            # duplicate.
+            raise Conflict(
+                "an analysis for this tax year is already running; "
+                "wait for it to finish"
+            )
+        run = await AnalysisService(session).run(user_id, body.tax_year)
+        return AnalysisOut.model_validate(run)
 
 
 @router.get("/analysis", response_model=list[AnalysisOut])

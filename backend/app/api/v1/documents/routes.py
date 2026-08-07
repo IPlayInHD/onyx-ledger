@@ -3,28 +3,44 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user_id, db_authed
+from app.core.exceptions import ValidationError
 from app.database.models import Document, ExtractionField
+from app.services.admission import OperationClass, admission_guard
+from app.services.admission.guard import owned_dedupe_key, user_scope
+from app.services.admission.limits import (
+    ALLOWED_DOCUMENT_MIME_TYPES,
+    MAX_DOCUMENT_BYTES,
+    MAX_EXTRACTION_FIELDS,
+    MAX_EXTRACTION_TEXT_BYTES,
+    MAX_FILENAME_LENGTH,
+)
 from app.services.document_processing.service import DocumentService
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 class UploadRequest(BaseModel):
-    document_type_code: str
-    filename: str
-    mime_type: str | None = None
-    tax_year: int | None = None
+    """Bounded at the schema, so an oversized field is refused by the parser
+    before a handler ever builds a string out of it."""
+
+    document_type_code: str = Field(max_length=64)
+    filename: str = Field(max_length=MAX_FILENAME_LENGTH)
+    mime_type: str | None = Field(default=None, max_length=255)
+    tax_year: int | None = Field(default=None, ge=1900, le=2200)
+    #: Declared size, used to refuse an oversized upload BEFORE a presigned URL
+    #: is issued. It is a claim, not proof — see the note on the handler.
+    byte_size: int | None = Field(default=None, ge=0)
 
 
 class ProcessRequest(BaseModel):
     # dev/demo: pass structured `fields` or OCR `text`. Production: a worker OCRs
     # the object in storage and calls the same service.
-    text: str | None = None
+    text: str | None = Field(default=None, max_length=MAX_EXTRACTION_TEXT_BYTES)
     fields: dict | None = None
 
 
@@ -38,10 +54,39 @@ async def create_upload(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> dict:
-    doc, presigned = await DocumentService(session).create_upload(
-        user_id, body.document_type_code, body.filename, body.mime_type, body.tax_year
-    )
-    return {"document_id": str(doc.id), "status": doc.status, "upload_url": presigned}
+    """Register a document and hand back a presigned upload URL.
+
+    The bytes never pass through this process — they go straight to object
+    storage — so the size check here is on the DECLARED size and is an early
+    refusal, not the enforcement point. A client that under-declares still gets
+    a URL; the enforcement that matters is the presigned policy's own content-
+    length limit at the storage boundary, which is where the bytes actually
+    arrive. Refusing here saves the round trip and is honest about which of the
+    two is authoritative.
+    """
+    if body.mime_type and body.mime_type.split(";")[0].strip().lower() \
+            not in ALLOWED_DOCUMENT_MIME_TYPES:
+        # An allow-list: a deny-list admits every format nobody thought of.
+        raise ValidationError(
+            f"unsupported content type; allowed: "
+            f"{', '.join(sorted(ALLOWED_DOCUMENT_MIME_TYPES))}"
+        )
+    if body.byte_size is not None and body.byte_size > MAX_DOCUMENT_BYTES:
+        raise ValidationError(
+            f"document exceeds the {MAX_DOCUMENT_BYTES} byte maximum"
+        )
+
+    async with admission_guard(
+        OperationClass.DOCUMENT_UPLOAD, scope_id=user_scope(user_id)
+    ):
+        doc, presigned = await DocumentService(session).create_upload(
+            user_id, body.document_type_code, body.filename,
+            body.mime_type, body.tax_year,
+        )
+        return {
+            "document_id": str(doc.id), "status": doc.status,
+            "upload_url": presigned,
+        }
 
 
 @router.post("/{document_id}/process")
@@ -50,7 +95,25 @@ async def process(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> dict:
-    ex = await DocumentService(session).process(document_id, text=body.text, fields=body.fields)
+    """Extract fields from an uploaded document.
+
+    Uploading and PROCESSING are separate costs, and this is the expensive one:
+    it is the classic path for turning one cheap request into minutes of CPU.
+    Bounded concurrency, and a dedupe key on the document so re-processing the
+    same immutable document cannot create unlimited work.
+    """
+    if body.fields is not None and len(body.fields) > MAX_EXTRACTION_FIELDS:
+        raise ValidationError(
+            f"at most {MAX_EXTRACTION_FIELDS} extraction fields per request"
+        )
+
+    async with admission_guard(
+        OperationClass.DOCUMENT_PROCESS,
+        scope_id=user_scope(user_id),
+        dedupe_key=owned_dedupe_key(user_id, "process", str(document_id)),
+    ):
+        ex = await DocumentService(session).process(
+            document_id, text=body.text, fields=body.fields)
     fields = await session.scalars(
         select(ExtractionField).where(ExtractionField.extraction_id == ex.id)
     )
