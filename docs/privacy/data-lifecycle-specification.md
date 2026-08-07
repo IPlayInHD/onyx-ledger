@@ -28,7 +28,7 @@ recomputed from `pg_catalog` on every test run, so it cannot silently go stale.
 | Total tables in the schema | 148 |
 | **User-derived** (FK-reachable from a person) | **75** |
 | Not user-derived (legislation, reference, rules, TKMS, admission) | 73 |
-| User-derived tables **without** RLS enabled+forced | **27** |
+| User-derived tables **without** RLS enabled+forced | **27** (16 of them a real gap — §18) |
 
 The derivation has one blind spot, and it is important: **`audit.audit_log` has
 no foreign key to `identity.user_account`**, so FK reachability does not find it
@@ -761,6 +761,18 @@ is inconsistent:
 | `ai` | 0 | 3 — including messages and financial prompt context |
 | `billing` | 0 | 1 |
 
+**Eleven of the 27 legitimately cannot have RLS, and saying "27" would overstate
+the gap.** The precise scope:
+
+| Group | Tables | Should have RLS? |
+|---|---|---|
+| `identity.*` (7) | `user_account`, `user_credential`, `auth_session`, `login_event`, `mfa_method`, `password_reset_token`, `email_verification_token` | **No.** Authentication happens *before* `app.user_id` is set — `unit_of_work` deliberately leaves the GUC unset for anonymous sessions — so a policy keyed on it would deny the login lookup. Protected by grants and the service layer. |
+| `audit.*` (4) | `consent_log`, `security_event`, `data_deletion_request`, `data_export_request` | **No**, by the same argument the admission schema makes for itself: they are read by privileged paths that must see across tenants. Protected by grants. |
+| **Everything else (16)** | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | **Yes.** Tenant-owned child rows reached through a parent — exactly the shape Entry 3B gave RLS in `ioe`. |
+
+So **PD-1's real scope is 16 tables**, and it still includes the frozen
+snapshot, extraction fields, AI messages and AI prompt context.
+
 **This is not a demonstrated leak.** Every service scopes through the parent, and
 no API path reaches these tables unscoped. It *is* the absence of the boundary the
 repository elsewhere treats as load-bearing — "RLS is the tenant-correctness
@@ -850,7 +862,7 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 |---|---|---|---|
 | **PD-4a** | `audit.log_change` wrote the Argon2 password hash into the append-only `audit.audit_log` on every registration | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in 11A** |
 | **PD-4** | `audit.audit_log` holds whole copies of financial/profile rows, has no user FK, is append-only, and account deletion *adds* to it | `PRIVACY_DEFECT_NOW` | **HIGH — 11B** |
-| **PD-1** | 27 user-derived tables have no RLS, including the frozen snapshot, extraction fields, AI messages and AI prompt context | `IMPLEMENTATION_GAP` | HIGH |
+| **PD-1** | 16 tenant-owned child tables have no RLS, including the frozen snapshot, extraction fields, AI messages and AI prompt context. (27 user-derived tables lack RLS in total; 11 of those — `identity` and `audit` — correctly cannot have it.) | `IMPLEMENTATION_GAP` | HIGH |
 | **PD-2** | Document object keys embed the user-supplied filename; no `filename` column exists | `IMPLEMENTATION_GAP` | MEDIUM |
 | **PD-3** | The four `SET NULL` tables do not de-identify: `login_event` keeps `email_tried` and `ip_address`; `recommendation_status_event` keeps a free-text note | `IMPLEMENTATION_GAP` | MEDIUM |
 | **PD-5** | TKMS persists raw `str(e)` in `import_job.error`, `parse_result.error`, `dead_letter.error` (legislation path, not user data) | `IMPLEMENTATION_GAP` | LOW |
@@ -919,7 +931,7 @@ implemented; none is built in 11A.**
 | Phase | Scope | Tables / services | Migration | Security model | Idempotency | Tests |
 |---|---|---|---|---|---|---|
 | **11B0** | **PD-4**: stop the audit log accumulating user rows; decide what an audit record contains | `audit.log_change`, `audit.audit_log` | yes (function + possibly columns) | keep `SECURITY DEFINER`, narrow payload | n/a | audit still proves who/what/when; no financial values persisted |
-| **11B1** | RLS on the 27 uncovered child tables (**PD-1**) | `analysis`, `docs`, `wealth`, `ai`, `billing` children | yes (policies) | mirror the `ioe` pattern from Entry 3B | n/a | cross-tenant read denied per table; existing suite unaffected |
+| **11B1** | RLS on the **16** tenant-owned child tables (**PD-1**) — not the 7 `identity` or 4 `audit` tables, which cannot have it | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | mirror the `ioe` pattern from Entry 3B | n/a | cross-tenant read denied per table; login still works (RLS must not reach `identity`); existing suite unaffected |
 | **11B2** | Lifecycle state + deletion request orchestration | `audit.data_deletion_request` (fix `CASCADE`→`SET NULL`/no FK), new lifecycle worker | yes | privileged worker, `FOR UPDATE SKIP LOCKED` keyhole; **no broad `SECURITY DEFINER`** | phase checkpoints | state machine transitions, crash-resume |
 | **11B3** | Source deletion: profile, financial, documents | `finance.*`, `profile.*`, `wealth.*`, `docs.*`, `ObjectStorage.delete` (**PD-8**), `filename` column + opaque keys (**PD-2**) | yes | user-authorized, ownership-checked | delete-if-exists | source gone, sealed result unchanged, dependents stale, no orphaned object |
 | **11B4** | Derived / sealed artifact handling | `analysis.*`, `ioe.*`, `SOURCE_ERASED_BY_PRIVACY_LIFECYCLE` reason code | yes (enum/check) | privileged erasure path; ordinary immutability triggers untouched | idempotent | replay reports erasure, never `verified` |
