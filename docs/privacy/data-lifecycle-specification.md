@@ -162,15 +162,28 @@ Mechanism per class, chosen against what the tables already support:
 
 | Data class | Mechanism | Already present? |
 |---|---|---|
-| Documents | `docs.document.deleted_at` soft delete, then object purge | **column exists, unused** |
-| Financial source | hard delete within the tax-year partition | partitions exist |
+| Documents | `docs.document.deleted_at` soft delete, then object purge | **column exists, and every read already filters on it** |
+| Financial source | soft delete, or hard delete within the tax-year partition | `deleted_at` on `income_source`/`expense_record`, already filtered |
 | Sealed evidence | supersession pointer / custom erasure workflow | self-FKs exist on `ioe.scenario`, `ioe.optimization_run` |
 | Account | deletion ledger row | **`audit.data_deletion_request` exists, unused** |
 | Audit/security | de-identification in place | FKs already `SET NULL` |
 | Operational | purge by age | `AdmissionService.purge` exists (Entry 10) |
 
-Three of these already have their affordance built and unused. Entry 11B should
-use them rather than invent parallel mechanisms.
+**Soft delete is half-built, and it is the useful half.** `deleted_at` exists on
+`identity.user_account`, `docs.document`, `finance.income_source` and
+`finance.expense_record`, and **every read path already filters on it** —
+authentication, the financial service, the tax-engine input loader, the document
+list. Nothing anywhere writes it.
+
+That is a much better starting position than an unused column: the hard part
+(making every query respect the flag, including the one that feeds the tax
+engine) is already done and already under test. Entry 11B's soft-delete phase is
+mostly a matter of setting the timestamp and purging behind it — and the
+`uq_user_account_email_active` unique index is already partial on
+`deleted_at IS NULL`, so a soft-deleted account frees its address for
+re-registration without any further change (§10).
+
+Entry 11B should use these affordances rather than invent parallel mechanisms.
 
 ---
 
