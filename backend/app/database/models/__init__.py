@@ -14,6 +14,10 @@ from app.database.models.admin import (  # noqa: F401
     RuleChangeRequest,
     RulePublication,
 )
+from app.database.models.admission import (  # noqa: F401
+    Lease,
+    RateCounter,
+)
 from app.database.models.ai import (  # noqa: F401
     AiConversation,
     AiExplanation,

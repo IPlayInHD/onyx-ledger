@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -53,9 +53,42 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = 15 * 60
     refresh_token_ttl_seconds: int = 30 * 24 * 3600
 
-    # --- rate limiting ---
+    # --- admission control (Entry 10) ---
+    # These OVERRIDE the compiled defaults in
+    # app/services/admission/policy.py, which is where each number is justified.
+    # Every one is validated at startup: a negative or zero limit is a
+    # configuration error, not a limit that silently never triggers or one that
+    # refuses everything.
+    #
+    # `admission_enabled` exists for one purpose — turning the whole mechanism
+    # off during an incident without a deploy. It is not a per-environment
+    # convenience, and leaving it false in production removes every protection
+    # in this entry at once.
+    admission_enabled: bool = True
+
     rate_limit_auth_per_minute: int = 10
-    rate_limit_analysis_per_minute: int = 30
+    rate_limit_analysis_per_minute: int = 10
+    rate_limit_optimization_per_minute: int = 6
+    rate_limit_scenario_per_minute: int = 20
+
+    max_active_analyses_per_user: int = 1
+    max_active_optimizations_per_user: int = 2
+    max_active_scenarios_per_user: int = 3
+    max_active_document_processing_per_user: int = 2
+
+    # Platform-wide ceilings. Deliberately not readable by ordinary callers:
+    # a tenant learning the global cap learns how much traffic it takes to
+    # deny service to everyone else.
+    global_max_active_optimizations: int = 50
+    global_max_active_scenarios: int = 100
+    global_max_active_analyses: int = 200
+    global_max_active_document_processing: int = 40
+
+    #: How long an admitted job may hold its slot before the lease lapses and
+    #: the quota returns on its own. Must exceed the slowest legitimate run of
+    #: the operation, or a long job would have its slot reclaimed while it is
+    #: still working.
+    admission_lease_seconds: int = 900
 
     # --- object storage ---
     s3_endpoint_url: str | None = None
@@ -65,6 +98,53 @@ class Settings(BaseSettings):
     # --- ai ---
     llm_provider: str = "anthropic"
     llm_model: str = "claude-opus-4-8"
+
+    @field_validator(
+        "rate_limit_auth_per_minute",
+        "rate_limit_analysis_per_minute",
+        "rate_limit_optimization_per_minute",
+        "rate_limit_scenario_per_minute",
+        "max_active_analyses_per_user",
+        "max_active_optimizations_per_user",
+        "max_active_scenarios_per_user",
+        "max_active_document_processing_per_user",
+        "global_max_active_optimizations",
+        "global_max_active_scenarios",
+        "global_max_active_analyses",
+        "global_max_active_document_processing",
+        "admission_lease_seconds",
+    )
+    @classmethod
+    def _positive(cls, value: int, info: ValidationInfo) -> int:
+        """A limit of zero would admit nothing, and a negative one is
+        meaningless. Both are startup failures rather than a service that
+        refuses every request or one that silently never limits."""
+        if value <= 0:
+            raise ValueError(
+                f"{info.field_name} must be a positive integer (got {value}); "
+                "to disable a control, change the policy registry, not the limit"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _per_user_within_global(self) -> Settings:
+        """A per-user cap above the platform cap could never be reached, which
+        makes it a limit that looks enforced and is not."""
+        pairs = (
+            ("max_active_optimizations_per_user", "global_max_active_optimizations"),
+            ("max_active_scenarios_per_user", "global_max_active_scenarios"),
+            ("max_active_analyses_per_user", "global_max_active_analyses"),
+            ("max_active_document_processing_per_user",
+             "global_max_active_document_processing"),
+        )
+        for per_user, global_cap in pairs:
+            if getattr(self, per_user) > getattr(self, global_cap):
+                raise ValueError(
+                    f"{per_user} ({getattr(self, per_user)}) exceeds "
+                    f"{global_cap} ({getattr(self, global_cap)}), so the "
+                    "per-user limit could never be reached"
+                )
+        return self
 
     @property
     def is_production(self) -> bool:

@@ -49,6 +49,26 @@
       "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
     },
     {
+      "key": "modify_default|admission|lease|id",
+      "kind": "modify_default",
+      "schema": "admission",
+      "table": "lease",
+      "object": "id",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|admission|rate_counter|request_count",
+      "kind": "modify_default",
+      "schema": "admission",
+      "table": "rate_counter",
+      "object": "request_count",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
       "key": "modify_default|analysis|analysis_line_item|sort_order",
       "kind": "modify_default",
       "schema": "analysis",
@@ -4509,6 +4529,56 @@
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
     },
     {
+      "key": "remove_constraint|admission|lease|ck_admission_lease_release_reason",
+      "kind": "remove_constraint",
+      "schema": "admission",
+      "table": "lease",
+      "object": "ck_admission_lease_release_reason",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|admission|lease|ck_admission_lease_scope",
+      "kind": "remove_constraint",
+      "schema": "admission",
+      "table": "lease",
+      "object": "ck_admission_lease_scope",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|admission|lease|ck_admission_lease_window",
+      "kind": "remove_constraint",
+      "schema": "admission",
+      "table": "lease",
+      "object": "ck_admission_lease_window",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|admission|rate_counter|ck_admission_rate_counter_count",
+      "kind": "remove_constraint",
+      "schema": "admission",
+      "table": "rate_counter",
+      "object": "ck_admission_rate_counter_count",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|admission|rate_counter|ck_admission_rate_counter_scope",
+      "kind": "remove_constraint",
+      "schema": "admission",
+      "table": "rate_counter",
+      "object": "ck_admission_rate_counter_scope",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
       "key": "remove_constraint|ai|ai_message_citation|ai_message_citation_check",
       "kind": "remove_constraint",
       "schema": "ai",
@@ -7344,6 +7414,46 @@
       "schema": "admin",
       "table": "rule_publication",
       "object": "ix_rule_publication_version",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|admission|lease|ix_admission_lease_dedupe",
+      "kind": "remove_index",
+      "schema": "admission",
+      "table": "lease",
+      "object": "ix_admission_lease_dedupe",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|admission|lease|ix_admission_lease_expiry",
+      "kind": "remove_index",
+      "schema": "admission",
+      "table": "lease",
+      "object": "ix_admission_lease_expiry",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|admission|lease|ix_admission_lease_live",
+      "kind": "remove_index",
+      "schema": "admission",
+      "table": "lease",
+      "object": "ix_admission_lease_live",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|admission|rate_counter|ix_admission_rate_counter_window",
+      "kind": "remove_index",
+      "schema": "admission",
+      "table": "rate_counter",
+      "object": "ix_admission_rate_counter_window",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
