@@ -662,17 +662,21 @@ provisioning and install steps and comparable on the rest).
 | `check_schema_drift_on_fresh_db.sh` | 6s |
 | `prove_schema_drift_gate.sh` (6 injections) | 53s |
 | `prove_gates_fail.sh` (6 injections) | 141s |
-| security suite (fresh DB) | 13s |
-| `prove_security_gate.sh` (3 injections) | 48s |
-| full suite (fresh DB, 730 tests) | 242s |
+| security suite (fresh DB) | 10s |
+| `prove_security_gate.sh` (3 injections) | 43s |
+| determinism (fresh DB) | 14s |
+| `release_gate.sh --full`, end to end | 11m 6s |
+| full suite (fresh DB, 734 tests) | 302s |
 | `pollution_regression.sh` | ~20 min |
 
 **CI critical path**, with the five jobs running in parallel: the `tests` job
-dominates at roughly **6 minutes** (provision PostgreSQL + install from lock +
-242s of suite). `static` finishes in about 2 minutes, gated by
-`check_lock.sh`. Nothing was removed to make this shorter — `check_lock.sh` is
-the slowest static step and it is also the one that stops a silent dependency
-drift, so it stays.
+dominates at roughly **7 minutes** (provision PostgreSQL + install from lock +
+302s of suite). `static` finishes in about 2 minutes, gated by `check_lock.sh`;
+`migrations` in about 2 minutes, gated by the drift injection proof. Nothing was
+removed to make this shorter — `check_lock.sh` is the slowest static step and it
+is also the one that stops a silent dependency drift, so it stays.
+
+`release_gate.sh --full` runs the same work sequentially in **11m 6s**.
 
 `pollution_regression.sh` is deliberately not on the critical path; see §12.
 
