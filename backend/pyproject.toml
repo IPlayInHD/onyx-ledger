@@ -2,7 +2,10 @@
 name = "onyx-ledger-backend"
 version = "0.1.0"
 description = "Onyx Ledger — AI-powered Canadian tax optimization SaaS backend"
-requires-python = ">=3.11"
+# ONE supported runtime. A range let a developer, CI, and production each
+# resolve a different interpreter, which is the same class of problem the
+# dependency lock exists to close. scripts/check_python.sh enforces it.
+requires-python = "==3.11.*"
 dependencies = [
     "fastapi>=0.141",
     "uvicorn[standard]>=0.30",
@@ -41,6 +44,11 @@ dev = [
 # test asserts that every importable top-level package in the repository is
 # covered by one of them, so a new package cannot appear outside the gate.
 protected_scope = ["app", "workers"]
+
+# The supported interpreter. Checked by scripts/check_python.sh, by the CI
+# workflow's setup-python version, and by tests/unit/test_quality_gate_policy.py.
+python_version = "3.11"
+python_patch = "3.11.15"
 
 # Overrides permitted to relax the strict mypy configuration. Anything else is a
 # policy violation and the test fails. `ignore_errors` is never permitted.
