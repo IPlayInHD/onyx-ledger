@@ -105,6 +105,42 @@ celery_app.conf.task_acks_late = True
 celery_app.conf.worker_prefetch_multiplier = 1
 
 # ---------------------------------------------------------------------------
+# RESULT BACKEND PRIVACY (Entry 11A)
+#
+# Redis is both the broker and the result backend, so on FAILURE Celery writes
+# the exception into Redis: `exc_type`, `exc_module`, and `exc_message` — the
+# last being `str(exception)` verbatim.
+#
+# That is the leak. Every task re-raises through `self.retry(exc=exc)` or lets
+# the original exception escape once retries are exhausted, and SQLAlchemy's
+# `DBAPIError.__str__` renders as
+#
+#     (asyncpg...) ... [SQL: INSERT INTO finance.income_source ...]
+#                      [parameters: ('...', '874321.19', 'Acme Payroll ...')]
+#
+# so a database error during a financial write puts the amount, the source name
+# and the statement into a store with a one-day TTL and no tenant boundary.
+# Verified by serializing a synthetic error through Celery's own
+# `prepare_exception`; see tests/security/test_celery_result_privacy.py.
+#
+# Nothing in this repository reads a task result — there is no `AsyncResult`,
+# no `.get()`, no `.ready()` anywhere — so the whole stored-result surface is
+# cost without benefit. Turning it off removes the payload rather than trying to
+# sanitize every exception that could ever reach the boundary.
+#
+# Failure information is NOT lost: structured logs carry closed error codes, and
+# the TKMS pipeline dead-letters to `tkms.dead_letter` with a bounded payload.
+# ---------------------------------------------------------------------------
+celery_app.conf.task_ignore_result = True
+# Explicit rather than relying on the default: with results ignored, this is the
+# single setting that would put exception payloads back into Redis.
+celery_app.conf.task_store_errors_even_if_ignored = False
+# Also explicit. It was previously the framework default (1 day) — a reasonable
+# bound arrived at by accident. Any task that opts back into results is capped
+# here, and the number is now a decision someone can point at.
+celery_app.conf.result_expires = timedelta(hours=24)
+
+# ---------------------------------------------------------------------------
 # Execution budgets (Entry 10).
 #
 # Without these a single pathological input runs forever, holding a worker slot,

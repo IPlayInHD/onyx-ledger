@@ -18,6 +18,7 @@ import psycopg2
 import pytest
 
 from app.privacy import LIFECYCLE, DeletionAction, PrivacyClass, SourceKind
+from app.privacy.classification import NON_RLS
 from tests.conftest import owner_dsn
 
 #: Schemas that hold no user-derived data by design: published legislation,
@@ -211,4 +212,135 @@ def test_the_frozen_snapshot_carries_no_identifier_or_free_text():
     assert not leaked, (
         f"identifying or free-text fields are sealed into every snapshot: "
         f"{leaked}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Every non-RLS table has a reviewed justification (§7)
+# ---------------------------------------------------------------------------
+def _non_rls_tables() -> set[str]:
+    tables, _ = _catalogue()
+    conn = psycopg2.connect(owner_dsn())
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.relnamespace::regnamespace::text || '.' || c.relname
+              FROM pg_class c
+             WHERE c.relkind IN ('r', 'p') AND NOT c.relrowsecurity
+               AND c.relnamespace::regnamespace::text
+                   NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+        """)
+        return {row[0] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def test_every_non_rls_table_has_an_explicit_justification():
+    """The statement this entry wants to be able to make is:
+
+        every non-RLS table has an explicit reviewed privacy/security
+        justification
+
+    which is only worth saying if something checks it. A table that appears
+    without RLS and without an entry fails here rather than being absorbed.
+    """
+    actual = _non_rls_tables()
+    assert actual, "no non-RLS tables found — the query is wrong"
+
+    unjustified = sorted(actual - set(NON_RLS))
+    assert not unjustified, (
+        "these tables have no row-level security and no recorded reason:\n  "
+        + "\n  ".join(unjustified)
+        + "\nClassify each in app/privacy/classification.py:NON_RLS."
+    )
+
+
+def test_the_non_rls_registry_describes_no_table_that_gained_rls():
+    """A stale exception claims a hole that has since been closed — which would
+    make the defect count wrong in the safe direction, and the justification
+    count wrong in the misleading one."""
+    actual = _non_rls_tables()
+    stale = sorted(set(NON_RLS) - actual)
+    assert not stale, (
+        f"these tables now HAVE RLS but are still listed as exceptions: {stale}"
+    )
+
+
+def test_the_recorded_defects_are_exactly_the_known_gap():
+    """PD-1 is a bounded, named set. If it grows, someone added a tenant-owned
+    table without RLS; if it shrinks, 11B1 made progress. Either way it should
+    be a deliberate edit rather than a drift."""
+    defects = sorted(t for t, e in NON_RLS.items() if e.is_defect)
+    assert len(defects) == 16, (
+        f"the PD-1 set changed to {len(defects)} tables: {defects}"
+    )
+    # None of them may be in a schema whose whole point is that it holds no
+    # tenant data — that would mean the classification is wrong, not the count.
+    for table in defects:
+        assert not table.startswith(("ref.", "rules.", "tax_kb.", "tkms.", "admin.")), (
+            f"{table} is classed as a tenant-data defect but lives in a "
+            "non-tenant schema"
+        )
+
+
+@pytest.mark.parametrize("table,entry", sorted(NON_RLS.items()))
+def test_every_non_rls_entry_is_coherent(table, entry):
+    assert entry.note.strip(), f"{table}: no reason given"
+    assert entry.access_model.strip(), f"{table}: no access model given"
+
+    if entry.direct_identifier:
+        assert entry.user_derived, (
+            f"{table}: holds a direct identifier but is not marked user-derived"
+        )
+    if entry.is_defect:
+        assert entry.user_derived, (
+            f"{table}: classed as a privacy defect but holds no user data — "
+            "the classification, not the table, is wrong"
+        )
+    else:
+        assert "PD-1" not in entry.note, (
+            f"{table}: cites PD-1 without being classified as a defect"
+        )
+
+
+def test_the_admission_schema_carries_no_identifying_material():
+    """§8 — Entry 10's global tables, re-checked from the privacy side.
+
+    They are deliberately non-RLS because a policy keyed on `app.user_id` would
+    make the platform-wide capacity count return only the caller's rows. That
+    argument only holds if the tables carry nothing worth protecting with RLS.
+    """
+    conn = psycopg2.connect(owner_dsn())
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod)
+              FROM pg_class c
+              JOIN pg_attribute a ON a.attrelid = c.oid
+             WHERE c.relnamespace::regnamespace::text = 'admission'
+               AND a.attnum > 0 AND NOT a.attisdropped
+        """)
+        columns = cur.fetchall()
+
+        # No plaintext identifier may ever be stored: assert on the DATA, not
+        # only on the column names.
+        cur.execute("""
+            SELECT count(*) FROM admission.rate_counter
+             WHERE scope_id LIKE '%@%' OR scope_id ~ '^[0-9]{1,3}(\\.[0-9]{1,3}){3}$'
+        """)
+        plaintext = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+    assert columns, "no admission columns found"
+    forbidden = {"email", "username", "amount", "value", "content", "text",
+                 "document", "filename", "notes"}
+    named = sorted(
+        f"{table}.{column}" for table, column, _ in columns
+        if column.lower() in forbidden
+    )
+    assert not named, f"admission carries identifying/financial columns: {named}"
+    assert plaintext == 0, (
+        "a plaintext email address or IP reached admission.rate_counter; the "
+        "pre-authentication scopes must store a keyed digest only"
     )

@@ -501,10 +501,212 @@ if len(LIFECYCLE) != len(_ENTRIES):  # pragma: no cover - construction invariant
     raise RuntimeError("duplicate table in the privacy lifecycle registry")
 
 
+class NonRlsReason(StrEnum):
+    """Why a table has no row-level security.
+
+    Every table without RLS must name one. "It seemed fine" is not a category,
+    and neither is silence: the point of a closed set is that an unexplained
+    exception cannot exist, because there is nowhere to put it.
+    """
+
+    GLOBAL_REFERENCE_OR_REGISTRY = "GLOBAL_REFERENCE_OR_REGISTRY"
+    """Published or reference data, identical for every user. Provinces,
+    brackets, legislation, rule definitions."""
+
+    GLOBAL_SYSTEM_STATE = "GLOBAL_SYSTEM_STATE"
+    """Platform configuration and version state. Not about a person."""
+
+    OPERATOR_ADMIN_STATE = "OPERATOR_ADMIN_STATE"
+    """Operator accounts, roles and governance. Personal data about STAFF, not
+    about customers — governed by the admin/four-eyes model."""
+
+    CROSS_TENANT_OPERATIONAL_STATE = "CROSS_TENANT_OPERATIONAL_STATE"
+    """A policy keyed on `app.user_id` would BREAK the function. Global capacity
+    counting must see every row; authentication must read the account before any
+    user is known."""
+
+    PINNED_SYSTEM_EVIDENCE = "PINNED_SYSTEM_EVIDENCE"
+    """Immutable snapshots of the RULES a run was pinned to — shared across
+    users by construction, carrying no tenant data."""
+
+    WORKER_AUDIT_STATE = "WORKER_AUDIT_STATE"
+    """Worker claim/transition records. Codes, tokens and timings; read by
+    privileged operational paths that must see across tenants."""
+
+    PSEUDONYMOUS_OPERATIONAL_STATE = "PSEUDONYMOUS_OPERATIONAL_STATE"
+    """Counters and leases keyed on an internal UUID or a keyed digest. No
+    direct identifier, no financial value, no free text."""
+
+    PRIVACY_DEFECT_REQUIRES_REMEDIATION = "PRIVACY_DEFECT_REQUIRES_REMEDIATION"
+    """Tenant-owned data that SHOULD have RLS and does not. Not a
+    justification — a defect with a name."""
+
+
+@dataclass(frozen=True)
+class NonRlsTable:
+    """One table without RLS, and the reason it is allowed to be."""
+
+    table: str
+    reason: NonRlsReason
+    user_derived: bool
+    direct_identifier: bool
+    pseudonymous_identifier: bool
+    access_model: str
+    note: str
+
+    @property
+    def is_defect(self) -> bool:
+        return self.reason is NonRlsReason.PRIVACY_DEFECT_REQUIRES_REMEDIATION
+
+
+N = NonRlsReason
+
+
+def _n(table: str, reason: NonRlsReason, access: str, note: str, *,
+       ud: bool = False, direct: bool = False, pseudo: bool = False) -> NonRlsTable:
+    return NonRlsTable(table=table, reason=reason, user_derived=ud,
+                       direct_identifier=direct, pseudonymous_identifier=pseudo,
+                       access_model=access, note=note)
+
+
+_GRANTS_RW = "onyx_app_rw CRUD; onyx_app_ro SELECT; PUBLIC revoked"
+_GRANTS_RO = "read-only to the application; written by migrations/operators"
+_ADMIN_ONLY = "admin plane only; admin JWT + require_permission"
+_OWNER_ONLY = "owner/migration role only; runtime roles have no direct access"
+
+_NON_RLS: tuple[NonRlsTable, ...] = (
+    # --- published / reference data: identical for every user -----------------
+    *(_n(f"ref.{t}", N.GLOBAL_REFERENCE_OR_REGISTRY, _GRANTS_RO,
+         "Reference code table. No tenant data of any kind.")
+      for t in ("account_registered_type", "asset_category", "condition_operator",
+                "currency", "document_type", "employment_type", "expense_category",
+                "housing_status", "income_type", "jurisdiction", "liability_category",
+                "marital_status", "province", "residency_status", "rule_category",
+                "tax_year", "verification_status")),
+    *(_n(f"rules.{t}", N.GLOBAL_REFERENCE_OR_REGISTRY, _GRANTS_RO,
+         "Rule-engine definition. Authored by operators, identical for all users.")
+      for t in ("calc_constant", "calc_formula", "calc_formula_input",
+                "condition_value_set", "condition_value_set_item", "fact_definition",
+                "rule_action", "rule_condition", "rule_condition_group",
+                "rule_deadline", "rule_dependency", "rule_outcome",
+                "rule_required_document", "rule_shared_resource")),
+    *(_n(f"tax_kb.{t}", N.GLOBAL_REFERENCE_OR_REGISTRY, _GRANTS_RO,
+         "Published Canadian tax knowledge. Public law, not personal data.")
+      for t in ("benefit_parameter", "benefit_program", "contribution_limit",
+                "gov_source", "legislation_reference", "tax_bracket",
+                "tax_bracket_set", "tax_rule", "tax_rule_version")),
+    *(_n(f"tkms.{t}", N.GLOBAL_REFERENCE_OR_REGISTRY, _ADMIN_ONLY,
+         "Legislation ingestion pipeline. Government documents and operator "
+         "workflow; no customer data reaches it.")
+      for t in ("change_item", "change_report", "dead_letter", "extracted_rule",
+                "import_job", "parse_result", "raw_document", "rollback_record",
+                "validation_finding", "validation_report")),
+
+    # --- operator plane -------------------------------------------------------
+    *(_n(f"admin.{t}", N.OPERATOR_ADMIN_STATE, _ADMIN_ONLY,
+         "Operator identity and governance. Staff personal data, governed by "
+         "the admin/four-eyes model rather than by tenant RLS.")
+      for t in ("admin_user", "admin_user_role", "permission", "role",
+                "role_permission", "rule_change_request", "rule_publication")),
+
+    # --- system state ---------------------------------------------------------
+    _n("ioe.active_calculation_version", N.GLOBAL_SYSTEM_STATE, _GRANTS_RW,
+       "Which engine/rule versions are active platform-wide."),
+    _n("ioe.weight_config", N.GLOBAL_SYSTEM_STATE, _GRANTS_RO,
+       "Scoring weights. Proprietary configuration, not tenant data."),
+    _n("ioe.assumption", N.GLOBAL_SYSTEM_STATE, _GRANTS_RO,
+       "Named planning assumptions shared by every scenario."),
+    _n("ioe.assumption_set", N.GLOBAL_SYSTEM_STATE, _GRANTS_RO,
+       "Versioned collections of the above."),
+    _n("billing.plan", N.GLOBAL_SYSTEM_STATE, _GRANTS_RO,
+       "Product catalogue. No customer data."),
+    _n("ai.knowledge_embedding", N.GLOBAL_SYSTEM_STATE, _GRANTS_RW,
+       "pgvector index over PUBLISHED RULE VERSIONS only. Written exclusively "
+       "with source_type='rule_version'; no user document, conversation or "
+       "financial value is ever embedded. Verified in Entry 11A."),
+    _n("ai.ai_explanation", N.GLOBAL_SYSTEM_STATE, _ADMIN_ONLY,
+       "Operator-authored plain-language rule explanations, reviewed by an "
+       "admin. Attached to rule versions, not to users."),
+
+    # --- pinned evidence about RULES, not about people ------------------------
+    _n("ioe.rule_snapshot", N.PINNED_SYSTEM_EVIDENCE, _GRANTS_RW,
+       "Immutable manifest of the rule versions in force. Shared by every run "
+       "that pinned it; carries no tenant column."),
+    _n("ioe.rule_snapshot_artifact", N.PINNED_SYSTEM_EVIDENCE, _GRANTS_RW,
+       "Content-addressed artifact of the above."),
+
+    # --- worker/operational ---------------------------------------------------
+    _n("ioe.freshness_outbox_audit", N.WORKER_AUDIT_STATE, _GRANTS_RW,
+       "Worker claim transitions: event id, worker id, claim token, closed "
+       "error code. No user column, no values.", pseudo=True),
+    _n("admission.rate_counter", N.PSEUDONYMOUS_OPERATIONAL_STATE, _GRANTS_RW,
+       "Fixed-window counters. RLS would BREAK global capacity accounting — a "
+       "policy keyed on app.user_id makes the platform-wide count return only "
+       "the caller's rows, so the limiter stops limiting exactly when the "
+       "platform is busiest. scope_id is an internal UUID or an HMAC-SHA256 "
+       "digest under a dedicated secret; never a plaintext address. Purged "
+       "hourly (2h counters / 24h leases).", pseudo=True),
+    _n("admission.lease", N.PSEUDONYMOUS_OPERATIONAL_STATE, _GRANTS_RW,
+       "In-flight operation slots. Same argument and same key discipline as "
+       "rate_counter.", pseudo=True),
+
+    # --- cross-tenant by necessity -------------------------------------------
+    *(_n(f"identity.{t}", N.CROSS_TENANT_OPERATIONAL_STATE, _GRANTS_RW,
+         "Authentication reads these BEFORE app.user_id is set — unit_of_work "
+         "deliberately leaves the GUC unset for anonymous sessions — so a "
+         "policy keyed on it would deny the login lookup outright. Protected "
+         "by grants and by the service layer.", ud=True, pseudo=True)
+      for t in ("auth_session", "email_verification_token", "mfa_method",
+                "password_reset_token", "user_credential")),
+    _n("identity.user_account", N.CROSS_TENANT_OPERATIONAL_STATE, _GRANTS_RW,
+       "Same pre-authentication argument. Holds the email address — the "
+       "product's one unavoidable direct identifier.", ud=True, direct=True),
+    _n("identity.login_event", N.CROSS_TENANT_OPERATIONAL_STATE, _GRANTS_RW,
+       "Written during authentication, before a principal exists. Retains "
+       "email_tried and ip_address after the user FK is nulled — see PD-3.",
+       ud=True, direct=True, pseudo=True),
+    *(_n(f"audit.{t}", N.WORKER_AUDIT_STATE, _OWNER_ONLY,
+         "Security/governance record read by privileged paths that must see "
+         "across tenants. onyx_app_rw has no SELECT; the audit trigger writes "
+         "through SECURITY DEFINER.", ud=True, pseudo=True)
+      for t in ("consent_log", "data_deletion_request", "data_export_request",
+                "security_event")),
+    *(_n(f"audit.{t}", N.WORKER_AUDIT_STATE, _OWNER_ONLY,
+         "Append-only change log. Reachable only by the owner role — but it "
+         "holds whole copies of user rows, which is PD-4 and is an 11B0 "
+         "workstream. The RLS exception itself is justified; the CONTENT is "
+         "not.", ud=True, direct=True, pseudo=True)
+      for t in ("audit_log", "audit_log_2025m01", "audit_log_2025m02",
+                "audit_log_default")),
+
+    # --- the actual defects ---------------------------------------------------
+    *(_n(t, N.PRIVACY_DEFECT_REQUIRES_REMEDIATION, _GRANTS_RW,
+         "Tenant-owned child row reached through an RLS-protected parent. The "
+         "ioe schema gave exactly this shape RLS in Entry 3B; these did not "
+         "follow. PD-1, scheduled for 11B1.", ud=True)
+      for t in ("analysis.analysis_assumption", "analysis.analysis_input_snapshot",
+                "analysis.analysis_line_item", "analysis.reconciliation_check",
+                "docs.document_extraction", "docs.document_link",
+                "docs.extraction_field", "wealth.asset_valuation",
+                "wealth.liability_balance", "wealth.registered_account_detail",
+                "ai.ai_message", "ai.ai_message_citation", "ai.ai_prompt_context",
+                "billing.invoice", "ioe.run_rule_snapshot",
+                "reco.recommendation_status_event")),
+)
+
+NON_RLS: dict[str, NonRlsTable] = {entry.table: entry for entry in _NON_RLS}
+
+if len(NON_RLS) != len(_NON_RLS):  # pragma: no cover - construction invariant
+    raise RuntimeError("duplicate table in the non-RLS justification registry")
+
+
 __all__ = [
     "LIFECYCLE",
+    "NON_RLS",
     "DeletionAction",
     "LifecycleState",
+    "NonRlsReason",
+    "NonRlsTable",
     "PrivacyClass",
     "RetentionClass",
     "SourceKind",
