@@ -270,20 +270,34 @@ redesigned here:
 | `maintenance`, `notify` | housekeeping | everything |
 
 **Heavy user optimization traffic cannot starve freshness or integrity work**:
-they are different queues consumed by different workers. This is *queue*
-isolation, and it is only as real as the deployment — if an operator runs one
-worker subscribed to all queues, the isolation is nominal. That is a deployment
-requirement, and it is stated here because the code cannot enforce it.
+they are different queues consumed by different workers.
+
+Precisely half of that is guaranteed here. **Routing is code-enforced** — every
+registered task matches an explicit route, asserted by
+`tests/unit/test_admission_wiring.py`, so a new task cannot silently fall to the
+default queue and start competing with everything else. **Capacity is not**: how
+many workers subscribe to each queue is a `-Q` flag and a concurrency setting in
+a deployment no file in this repository owns. One worker subscribed to all
+queues makes the separation nominal. Both halves are stated because claiming
+"expensive work is isolated" without the second one would be half true.
 
 `task_acks_late = True` and `worker_prefetch_multiplier = 1` were already set:
 a worker holds one message at a time, so a slow task cannot sit on a batch, and
 a crashed worker's message returns to the queue.
 
-**Queue-depth admission is NOT implemented.** The global concurrency cap serves
-the same purpose from the other side — it bounds work *in flight* rather than
-work *queued* — and reading broker depth per request would either be an
-expensive scan or a second, ungoverned source of truth. Stated as a limitation
-in §26 rather than claimed.
+**Queue-depth admission is NOT implemented, and nothing today needs it.**
+Nothing in `app/` publishes to the broker: the only `.delay()` calls in the
+repository are worker-to-worker stage chaining inside `workers/tasks/tkms.py`,
+reached only after an operator-triggered import has already passed `IMPORT_RUN`
+admission at the API. There is therefore no user-reachable enqueue path whose
+depth could be refused, and the invariant "admission rejected ⇒ zero new
+expensive task published" holds by construction rather than by each enqueue site
+remembering to check first.
+
+That premise is a fact about the code, so it is asserted rather than trusted:
+`tests/unit/test_admission_wiring.py` fails if a module in the request path
+starts publishing, which is the moment to put a guard in front of it.
+`QUEUE_CAPACITY` is reserved on exactly that basis (§27).
 
 ---
 
@@ -316,26 +330,43 @@ Named in `app/services/admission/limits.py`, never as literals at call sites.
 
 | Limit | Value | Enforced |
 |---|---|---|
-| `MAX_DOCUMENT_BYTES` | 25 MB | declared size, refused before a presigned URL is issued |
+| `MAX_DOCUMENT_BYTES` | 25 MB | **the store**, against the bytes that arrive; the declared size is an extra early refusal |
 | `MAX_DOCUMENTS_PER_REQUEST` | 1 | one upload describes one document |
 | `MAX_FILENAME_LENGTH` | 255 | Pydantic `max_length` |
 | `ALLOWED_DOCUMENT_MIME_TYPES` | 7 types | **allow-list** — a deny-list admits every format nobody thought of |
-| `MAX_EXTRACTION_TEXT_BYTES` | 1 MB | Pydantic |
+| `MAX_EXTRACTION_TEXT_BYTES` | 1 MB | handler validator, on the **encoded** length |
 | `MAX_EXTRACTION_FIELDS` | 200 | handler |
-| `MAX_IMPORT_BYTES` / `MAX_IMPORT_ROWS` | 50 MB / 10 000 | named; see §26 |
+| `MAX_IMPORT_BYTES` / `MAX_IMPORT_ROWS` | 50 MB / 10 000 | encoded payload at the handler; row count in `ImportService.extract` |
 | `MAX_SCENARIO_LEVERS` / `_ASSUMPTIONS` | 25 / 25 | **pre-existing**, enforced at the schema *and* the domain parser |
 
 **A request can be tiny in bytes and enormous in work** — a hundred scenario
 levers is a few hundred bytes and a combinatorial assembly problem. Size bounds
 and complexity bounds are different things and both are listed.
 
-**Honest limit on the document size check:** the bytes never pass through this
-process (they go straight to object storage via a presigned URL), so the size
-check here is on the *declared* size and is an early refusal, not the
-enforcement point. A client that under-declares still gets a URL. The
-enforcement that matters is the presigned policy's own content-length limit at
-the storage boundary. Both are stated in the handler docstring rather than
-implying the API check is authoritative.
+**Where the document bound actually lives.** The bytes never pass through this
+process — they go straight to object storage via a presigned URL — so the
+`byte_size` in the request body is a *claim*, and Phase 1 treated that claim as
+the bound. It is not one: a caller who wants to store 30 MB under a 25 MB limit
+simply declares 1 MB.
+
+So the ceiling is part of the storage port. `presign_put` takes `max_bytes`
+(required, with no default, so a call site that forgets it does not quietly
+compile) and the store refuses the object that actually arrives; in S3 that is a
+POST policy `content-length-range` condition, which S3 enforces itself. The
+authorized ceiling is the *tighter* of the platform maximum and the
+declaration, so under-declaring buys the caller nothing. The declared-size check
+stays as a cheap early refusal for the honest client, and is described as that
+rather than as enforcement.
+
+`MAX_EXTRACTION_TEXT_BYTES` had the mirror-image problem: it was enforced by
+Pydantic `max_length`, which counts *characters*, so a bound named in bytes
+admitted four megabytes of UTF-8. It is now checked on the encoded length.
+
+Two bounds are not one bound: `MAX_IMPORT_BYTES` caps the payload, and
+`MAX_IMPORT_ROWS` caps what the payload *expands into* — enforced in
+`ImportService.extract`, where the staged-row count is first known and before a
+single row is written. A compact document can produce an enormous ruleset, and
+it is the staged rows that fill the review queue.
 
 ---
 
@@ -369,7 +400,9 @@ Closed reason enumeration: `USER_RATE_LIMIT` · `TENANT_RATE_LIMIT` ·
 `QUEUE_CAPACITY` · `PAYLOAD_TOO_LARGE` · `TOO_MANY_ITEMS` ·
 `DUPLICATE_ACTIVE_OPERATION` · `OPERATION_COMPLEXITY_LIMIT` ·
 `ADMISSION_STORE_UNAVAILABLE`.
-(`TENANT_*` and `QUEUE_CAPACITY` are defined and currently unused — see §26.)
+(`TENANT_*`, `QUEUE_CAPACITY` and the size/complexity codes are defined and
+currently unraised; each carries a recorded reason in `UNUSED_REJECTION_REASONS`
+and a test enforces that the record stays true — see §25 and §27.)
 
 ---
 
@@ -481,15 +514,24 @@ global cap learns how much traffic it takes to deny service to everyone else.
 ## 22. Migration
 
 ```
-revision:   0044_admission_control
+revision:   0044_admission_control, then 0045_admission_preauth_scopes
 tables:     admission.rate_counter, admission.lease
 indexes:    4 (2 partial, on live leases and live dedupe keys)
 constraints: PK + 4 CHECK
 RLS:        deliberately none — see §17
 grants:     onyx_app_rw (CRUD), onyx_app_ro (SELECT); PUBLIC revoked
-retention:  sweep_expired() marks lapsed leases; no automatic deletion yet (§26)
+retention:  sweep_expired() marks lapsed leases; purge() deletes in bounded
+            batches on an hourly beat — 2h for counters, 24h for released
+            leases
 downgrade:  the SQL baseline is torn down as a unit at 0001_foundation
 ```
+
+0045 widens ONE `CHECK` on `admission.rate_counter` to admit the two
+pre-authentication scope types. `admission.lease` keeps the narrow constraint on
+purpose: `AUTH_ATTEMPT` declares no concurrency, so a pre-authentication lease
+should be impossible, and leaving the constraint narrow makes that an enforced
+invariant rather than a comment. Every existing row satisfies the wider
+predicate, so the validation scan cannot fail.
 
 Additive only: one new schema, two new tables. No existing table, column,
 constraint, trigger, policy, or grant is touched, so it cannot affect any sealed
@@ -505,14 +547,17 @@ per-admission cost.
 
 | Path | SQL operations | p50 | p95 |
 |---|---|---|---|
-| Cheap read (rate check only) | **1** (conditional UPSERT) | **2.13ms** | 2.64ms |
+| Cheap read (rate check only) | **1** (conditional UPSERT) | **3.36ms** | 4.90ms |
 | Expensive admission, uncontended | 4 (rate, dedupe, 2× lock+count+insert) | ~8ms | — |
-| Expensive admission, 100-way contention on one scope | same | 571ms | 728ms |
+| Lease acquisition, 100-way contention on one scope | lock+count+insert | 137ms | 237ms |
+| Lease acquisition, 500-way contention on one scope | lock+count+insert | 511ms | 839ms |
 
-The contended figure is the advisory lock serializing exactly what must be
-serialized: 100 requests for 2 slots. 98 of them are *rejections*, which is the
-cheap outcome — and a real principal never generates that shape. Contention is
-per `(scope, operation)`, so it does not spread.
+The contended figures are the advisory lock serializing exactly what must be
+serialized: 500 requests for 2 slots. 498 of them are *rejections*, which is the
+cheap outcome — and a real principal never generates that shape, because the
+rate check refuses it long before the lock does. Contention is per
+`(scope, operation)`, so it does not spread. §26 has the full comparison against
+`pg_try_advisory_xact_lock`, including why it was not adopted.
 
 ### Load simulation (`scripts/load_admission.py`)
 
@@ -522,6 +567,8 @@ per `(scope, operation)`, so it does not spread.
 50 identical retries of one logical optimization jobs started=1  DUPLICATES = 0
 mixed: 1 noisy (200 attempts) vs 10 quiet        noisy=3 (cap 3), quiet admitted 10/10
                                                                       OVERSHOOT = 0
+100 contenders on ONE scope, blocking vs try     admitted=2 both      OVERSHOOT = 0
+500 contenders on ONE scope, blocking vs try     admitted=2 both      OVERSHOOT = 0
 ```
 
 The mixed workload is the anti-monopoly property directly: a principal making 200
@@ -538,56 +585,152 @@ admitted.
 | `tests/integration/test_admission_api.py` | 8 | 429 + `Retry-After`, body has no leak, concurrent analyses, MIME/size/filename/complexity refusals |
 | `tests/integration/test_admission_failure_modes.py` | 7 | store down (open *and* closed), stale lease, malformed policy, malformed settings, failing body releases |
 | `tests/security/test_admission_isolation.py` | 7 | no financial columns, no PUBLIC grant, no SECURITY DEFINER, cross-principal isolation, rejection leak, global-scope forgery |
+| `tests/integration/test_admission_auth.py` | 8 | the credential surface: per-identity and per-address limits, refusal **before** Argon2, no account-existence disclosure, both counters charged, forwarded headers ignored, no address stored in the clear, spelling folded |
+| `tests/integration/test_admission_document_bounds.py` | 5 | the lying declaration (1 MB declared / 30 MB sent / 25 MB limit), tighter-of-two ceiling, undeclared upload bounded, byte-accurate text bound, 20 retries against one in-flight extraction |
+| `tests/security/test_admission_preauth.py` | 11 | authorization before admission, pre-auth scope cannot hold a lease, domain separation, digest depends on the secret, production refuses the dev default, purge keeps live windows and drops dead ones |
+| `tests/unit/test_admission_wiring.py` | 16 | **no database**: every class wired or explicitly reserved, every reason raised or reserved, nothing in `app/` publishes to the broker, every task explicitly routed |
 
 Clock is **injected, never slept** — a window-expiry test built on `sleep(60)` is
 a minute of CI per assertion and flakes on a slow runner. Concurrency tests use
 genuinely separate transactions via `asyncio.gather`; a sequential loop would
 pass against a completely broken implementation.
 
-**CI**: the 38 deterministic tests are blocking, in the `security` job.
+**CI**: all 78 deterministic tests are blocking — the database ones in the
+`security` job, the source-reading wiring ledger in the fast `lint` job, where it
+needs no PostgreSQL and fails in under a second.
 **Release-level only**: `scripts/load_admission.py` (§23) and the pollution
 regression — CI does not pay for them on every push.
 
 ---
 
-## 25. Known limitations
+## 25. Wiring audit (Phase 2 §1)
+
+Every `OperationClass` was re-checked against the repository as it actually
+stands — routers mounted, handlers reachable, services doing work — and given
+exactly one classification. Enum membership was not treated as evidence of
+anything.
+
+| Class | Production surface found | Classification | Where it is guarded |
+|---|---|---|---|
+| `AUTH_ATTEMPT` | `POST /auth/login`, `/auth/register`, `/auth/refresh`, `POST /admin/auth/login` — all mounted; `AuthService.authenticate` runs an Argon2id verification per attempt | REACHABLE_REQUIRES_ADMISSION | `admit_auth_attempt`, before the user lookup |
+| `IMPORT_RUN` | `POST /tkms/imports`, `/tkms/imports/{id}/reparse`, `/admin/ingestion/jobs` — run the full parse→extract→promote→validate→compare pipeline inline | REACHABLE_REQUIRES_ADMISSION | `admission_guard`, scoped to the acting operator |
+| `ADMIN_RULE_PUBLISH` | `POST /tkms/versions/{id}/publish` (publishes + reindexes), `POST /admin/rules/{id}/publish` | REACHABLE_REQUIRES_ADMISSION | `admission_guard`, outside the service call so a refusal precedes activation |
+| `AI_EXPLAIN` | `POST /ai/ask`, `POST /ai/conversations/{id}/messages` — mounted, backed by `AiService.ask`: pgvector retrieval, a lazy full reindex of the year on first use, and a provider call | REACHABLE_REQUIRES_ADMISSION | `admission_guard` on both |
+| `NORMAL_WRITE` | `POST /financials/income`, `/financials/expenses`, `/documents/{id}/confirm`, `/ai/conversations` — each an unbounded row creator | REACHABLE_REQUIRES_ADMISSION | `admission_guard` on the four |
+| `CHEAP_READ` | Many `GET` endpoints, all bounded indexed RLS-scoped reads | REACHABLE_ADMISSION_NOT_NEEDED | Deliberately unguarded — see below |
+
+`AI_EXPLAIN` was expected to come out RESERVED_FUTURE_CAPABILITY and did not.
+The router is mounted, the handler is reachable today, and the work behind it is
+real database work regardless of the LLM adapter being a deterministic offline
+template — a first ask for a year triggers a full reindex of that year's
+published rules. Guarding a reachable endpoint is not implementing the AI
+capability, and nothing about the AI feature itself was touched.
+
+`CHEAP_READ` is the one class left unguarded, and the reason is that guarding it
+would cost more than it saves: an admission-store round trip added to the
+cheapest operations in the system means the limiter becomes a meaningful share
+of the load it exists to protect against, and its own store saturates first.
+Read-abuse belongs at ingress, which sees the request before a worker is woken.
+The policy stays as the declared template for that layer.
+
+**This table is enforced, not just written down.** `UNWIRED_BY_DESIGN` in
+`app/services/admission/policy.py` carries the same verdicts, and
+`tests/unit/test_admission_wiring.py` fails the build if a class is neither
+guarded in `app/` nor listed there with a reason — and fails equally if a listed
+class turns out to have a call site after all. The same discipline covers
+`RejectionReason` through `UNUSED_REJECTION_REASONS`.
+
+## 26. Lock contention, measured (Phase 2 §7)
+
+The concurrency check takes a blocking `pg_advisory_xact_lock` per
+(scope, operation). The question was whether that can exhaust the connection
+pool under contention, and whether `pg_try_advisory_xact_lock` would be better.
+Both were measured, on one machine against one PostgreSQL, with every contender
+on a SINGLE scope — the worst case the design can produce, since real traffic
+spreads across principals.
+
+| Contenders | Mode | Admitted (cap 2) | Overshoot | p50 | p95 | max | Peak backends | Errors |
+|---|---|---|---|---|---|---|---|---|
+| 100 | blocking (production) | 2 | **0** | 137 ms | 237 ms | 245 ms | 31 | 0 |
+| 100 | try-lock | 2 | 0 | 100 ms | 151 ms | 157 ms | 29 | 0 |
+| 500 | blocking (production) | 2 | **0** | 511 ms | 839 ms | 878 ms | 30 | 0 |
+| 500 | try-lock | 2 | 0 | 288 ms | 441 ms | 458 ms | 30 | 0 |
+
+**Pool exhaustion did not occur and cannot easily occur.** Peak backends topped
+out at 30, which is the pool ceiling itself (`db_pool_size` 10 +
+`db_max_overflow` 20). The pool caps concurrency *before* the lock does: at most
+30 waiters queue on the lock at once and the rest wait in SQLAlchemy's queue,
+whose timeout (30 s default) was never approached — the entire 500-contender run
+finished in 1.0 s. A pool timeout would surface as a `SQLAlchemyError`, which
+every expensive class treats as FAIL_CLOSED, so the failure mode would be
+spurious refusals rather than overshoot; it is roughly 30× away.
+
+**The blocking lock is kept, and the measurement is why.** Try-lock is about
+twice as fast and answers the wrong question: 467 of the 500 contenders got a
+lock-miss, and a contender that could not take the lock has learned nothing
+about whether it is under its limit, so the only safe answer is to refuse. That
+is a **93% spurious-refusal rate** — callers with quota to spare, turned away
+because someone else held a lock — versus a half-second wait. Retrying instead
+of refusing just reintroduces the waiting with extra round trips.
+
+Note also that in production nobody reaches the lock 500 times: the rate check
+runs first, and `OPTIMIZATION_RUN` allows 8 attempts per minute. The measurement
+called `_acquire_lease` directly to isolate the lock.
+
+Reproduce with `python scripts/load_admission.py`.
+
+## 27. Known limitations
 
 Real, not hedging:
 
 1. **Anti-monopoly caps, not fair scheduling.** A principal at its cap cannot
    take more, but nothing serves a starved principal *first* when capacity frees.
    First-come-first-served within the caps.
-2. **No queue-depth admission.** The global concurrency cap bounds work in
-   flight, not work queued. `QUEUE_CAPACITY` is defined and unused.
+2. **No queue-depth admission**, and none is needed today: nothing in `app/`
+   publishes to the broker, so there is no user-reachable enqueue path whose
+   depth could be refused. `QUEUE_CAPACITY` is reserved with that premise
+   asserted by a test, so it cannot quietly become false.
 3. **`TENANT_*` reason codes are unused** because the tenant *is* the user in
    this product (§3). They exist so a future organization tier does not need a
    new enumeration.
-4. **Document size is checked on the declared value.** The authoritative
-   enforcement is the storage tier's content-length policy (§15).
-5. **Metrics have no exporter and there is no alerting** (§19).
-6. **Worker queue isolation is a deployment property.** One worker subscribed to
-   all queues makes it nominal; the code cannot enforce the deployment.
-7. **`MAX_IMPORT_BYTES` / `MAX_IMPORT_ROWS` are named but not yet enforced** at
-   the TKMS import handler — the class and policy exist, the byte/row check does
-   not. The existing checksum dedupe and the four-eyes gate still apply.
-8. **No automatic retention deletion** for admission rows; `sweep_expired()`
-   marks, it does not purge.
-9. **Fixed window, not sliding.** A caller can spend two allowances across a
+4. **Metrics have no exporter and there is no alerting** (§19).
+5. **Worker queue isolation is half a guarantee.** Which queue a task lands on
+   is code-enforced and asserted (`tests/unit/test_admission_wiring.py`); how
+   many workers consume each queue is a deployment property — a `-Q` flag and a
+   concurrency setting — that no file in this repository decides. One worker
+   subscribed to all queues makes the separation nominal.
+6. **Fixed window, not sliding.** A caller can spend two allowances across a
    window boundary; `burst` assumes that shape.
-10. **AI, admin-publish, and import paths are classified but not yet wired** to
-    `admission_guard` — see §26.
+7. **The source-address scope degrades behind a load balancer.** `client_ip`
+   reads the ASGI transport peer and refuses to trust `X-Forwarded-For`, so
+   behind a proxy that does not use PROXY protocol every request appears to come
+   from the balancer and the address scope collapses to one bucket. That fails
+   toward over-throttling one shared bucket rather than toward no throttling;
+   the per-identity scope is unaffected. Trusting the header requires a
+   configured list of trusted hops, which does not exist yet.
+8. **Per-identity throttling is a lockout vector.** Someone who knows an
+   address can spend its allowance and have the owner refused for the rest of
+   the minute. The window is one minute, the alternative leaves the account open
+   to sustained guessing from a rotating address pool, and the trade is made
+   knowingly.
+9. **Failed logins record nothing.** `AuthService` adds a `login_event` row and
+   then raises, so the row rolls back with the request's transaction. Noticed
+   while writing the ordering test, and left alone: it is authentication
+   behaviour, not admission behaviour, and changing it in this entry would be
+   scope creep. Flagged here so it is not lost.
 
-## 26. Remaining risks
+## 28. Remaining risks
 
-- The classes wired to `admission_guard` are: `ANALYSIS_RUN`,
-  `OPTIMIZATION_RUN`, `SCENARIO_RUN`, `DOCUMENT_UPLOAD`, `DOCUMENT_PROCESS`,
-  `INTEGRITY_VERIFY`. **`AUTH_ATTEMPT`, `IMPORT_RUN`, `ADMIN_RULE_PUBLISH`,
-  `AI_EXPLAIN`, `CHEAP_READ` and `NORMAL_WRITE` have policies but no call site
-  yet.** The mechanism, policy, and tests exist; the wiring is a follow-up. This
-  is stated rather than implied by the presence of a policy.
-- `AUTH_ATTEMPT` is the most significant of those: credential-testing remains
-  unthrottled at the application layer. It needs an IP-scoped dimension for
-  unauthenticated attempts, which the current `ScopeType` set does not model.
-- Advisory-lock contention is per scope and bounded, but a pathological client
-  can still make its *own* admissions slow (measured 571ms p50 at 100-way).
-  It affects only that principal.
+- Every class with a reachable production surface is guarded (§25). The one
+  unguarded class is `CHEAP_READ`, deliberately and with a recorded reason.
+- The two pre-authentication scopes are the only admission keys an
+  unauthenticated caller influences. Neither is stored in the clear, neither can
+  hold a lease (the database refuses it), and neither can be chosen by the
+  caller — the address comes from the transport and the identity is folded and
+  keyed. `tests/security/test_admission_preauth.py` asserts each of those.
+- Advisory-lock contention is per scope and bounded (§26). A pathological client
+  can still make its *own* admissions slow; it affects only that principal.
+- Admission-table growth is now partly attacker-controlled through the
+  `AUTH_SUBJECT` scope, and the mitigation is an hourly bounded purge. A
+  deployment that never runs Beat keeps the counters forever — costing disk, not
+  correctness, since admission already ignores closed windows.

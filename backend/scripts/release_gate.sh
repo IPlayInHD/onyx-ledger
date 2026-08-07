@@ -65,8 +65,12 @@ run "schema drift proof"    ./scripts/prove_schema_drift_gate.sh
 run "admission control"     ./scripts/run_backend_tests.sh \
                               tests/integration/test_admission_control.py \
                               tests/integration/test_admission_api.py \
+                              tests/integration/test_admission_auth.py \
+                              tests/integration/test_admission_document_bounds.py \
                               tests/integration/test_admission_failure_modes.py \
-                              tests/security/test_admission_isolation.py -q
+                              tests/security/test_admission_isolation.py \
+                              tests/security/test_admission_preauth.py \
+                              tests/unit/test_admission_wiring.py -q
 run "security invariants"   ./scripts/run_backend_tests.sh tests/security -q
 run "security gate proof"   ./scripts/prove_security_gate.sh
 run "determinism"           ./scripts/run_backend_tests.sh \

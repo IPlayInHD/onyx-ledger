@@ -32,9 +32,10 @@ class RateCounter(Base):
     scope_id: Mapped[str] = mapped_column(
         Text, primary_key=True,
         comment=(
-            "Principal identity as text: a user or admin UUID, or the literal "
-            "scope name for GLOBAL. Text rather than uuid because the same "
-            "table serves non-UUID scopes."
+            "Principal identity as text: a user or admin UUID, the literal "
+            "scope name for GLOBAL, or a keyed HMAC digest for the "
+            "pre-authentication IP and AUTH_SUBJECT scopes. Never a plaintext "
+            "email address or source address."
         ),
     )
     operation_code: Mapped[str] = mapped_column(Text, primary_key=True)

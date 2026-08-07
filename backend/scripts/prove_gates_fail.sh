@@ -34,6 +34,28 @@ for f in "${TOUCHED[@]}"; do
   cp "$f" "$WORK/snapshot/$f"
 done
 
+# CPython decides a cached .pyc is still valid by comparing the source's mtime
+# (WHOLE SECONDS) and size. Every injection here is a small edit, several are
+# byte-for-byte the same length as the original, and inject-run-restore takes
+# well under a second — so the restored source can land on the same mtime and
+# the same size as the injected one, and the interpreter happily reuses
+# bytecode compiled from the DEFECT.
+#
+# That is how this script reported "gate still failing after revert" while the
+# working tree was verifiably byte-identical to its snapshot. The more dangerous
+# direction is the same mechanism reversed: a stale GOOD .pyc masking an
+# injected defect and the proof reporting that a gate caught something it never
+# saw.
+#
+# So: never write bytecode during the proof, and drop any that exists after each
+# restore.
+export PYTHONDONTWRITEBYTECODE=1
+
+invalidate_bytecode() {
+  find . -name "__pycache__" -type d -prune -not -path "*/.venv/*" \
+    -exec rm -rf {} + 2>/dev/null || true
+}
+
 # $1 label   $2 file to modify   $3 python snippet injecting the defect   $4 gate command
 prove() {
   local label="$1" target="$2" inject="$3"; shift 3
@@ -53,6 +75,7 @@ prove() {
   fi
 
   cp "$WORK/backup" "$target"
+  invalidate_bytecode
   if ! "$@" > /dev/null 2>&1; then
     echo "  FAIL  ${label} — gate still failing after revert"
     FAIL=$((FAIL + 1))
