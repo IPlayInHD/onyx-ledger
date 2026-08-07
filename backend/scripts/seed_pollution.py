@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import Any, cast
 
-from sqlalchemy import select, text
+from sqlalchemy import CursorResult, select, text
 
 from app.database.models import UserAccount
 from app.database.session import unit_of_work
@@ -72,36 +73,65 @@ async def _tenants() -> list[uuid.UUID]:
         return [*existing, *made]
 
 
+# Events that name a user. The rest are registry/rule-wide and carry no user_id.
+USER_SCOPED = ("analysis", "baseline", "financial", "profile", "document")
+
+
 async def _events(tenants: list[uuid.UUID]) -> int:
+    """Write the events the way production does — under the right tenant context.
+
+    `ioe.freshness_outbox` carries `WITH CHECK (user_id IS NULL OR user_id =
+    ref.current_app_user())`, so a user-scoped event can only be written by a
+    transaction whose `app.user_id` is that user. Seeding them from one admin
+    transaction is refused by RLS, and correctly so: the policy is the thing
+    that stops a producer attributing an event to somebody else. The seeder
+    therefore opens a unit of work per tenant, exactly as the real producers do.
+    """
     written = 0
+
+    # Registry- and rule-wide events: no user_id, so no tenant context needed.
     async with unit_of_work(actor_type="admin") as session:
         for index, event in enumerate(EVENTS):
+            if event.value.startswith(USER_SCOPED):
+                continue
             for year in YEARS:
                 jurisdiction = JURISDICTIONS[index % len(JURISDICTIONS)]
-                user_id = tenants[index % len(tenants)]
-                # A unique dedupe key per row: the point is volume and variety,
-                # not to exercise the collision path (the suite already does).
-                ok = await emit(
-                    session, event,
-                    user_id=user_id if event.value.startswith(("analysis", "baseline",
-                                                               "financial", "profile",
-                                                               "document")) else None,
-                    tax_year=year,
-                    jurisdiction=jurisdiction,
+                written += int(await emit(
+                    session, event, tax_year=year, jurisdiction=jurisdiction,
                     dedupe_key=f"pollution:{event.value}:{year}:{jurisdiction}:{uuid.uuid4().hex[:8]}",
-                )
-                written += int(ok)
+                ))
+
+    # User-scoped events, one transaction per tenant so RLS sees the right actor.
+    for tenant_index, user_id in enumerate(tenants):
+        async with unit_of_work(user_id=user_id, actor_type="user") as session:
+            for index, event in enumerate(EVENTS):
+                if not event.value.startswith(USER_SCOPED):
+                    continue
+                for year in YEARS:
+                    jurisdiction = JURISDICTIONS[
+                        (index + tenant_index) % len(JURISDICTIONS)]
+                    written += int(await emit(
+                        session, event, user_id=user_id, tax_year=year,
+                        jurisdiction=jurisdiction,
+                        dedupe_key=(f"pollution:{event.value}:{year}:{jurisdiction}"
+                                    f":{uuid.uuid4().hex[:8]}"),
+                    ))
     return written
 
 
-async def _spread_claim_states() -> None:
+async def _spread_claim_states() -> int:
     """Leave rows in every claim state, not just `pending`.
 
     A scheduler or relay that implicitly assumed an empty queue passes on a
     fresh database and fails here.
+
+    Runs under an admin transaction with no `app.user_id`, so RLS makes the
+    user-scoped rows invisible and only the registry-wide ones are touched.
+    That is the policy working, not a bug — the returned count says how many
+    rows actually moved rather than assuming they all did.
     """
     async with unit_of_work(actor_type="admin") as session:
-        await session.execute(text("""
+        result = await session.execute(text("""
             WITH ranked AS (
               SELECT id, row_number() OVER (ORDER BY created_at) AS rn
               FROM ioe.freshness_outbox
@@ -119,12 +149,13 @@ async def _spread_claim_states() -> None:
               FROM ranked
              WHERE o.id = ranked.id
         """))
+        return int(cast("CursorResult[Any]", result).rowcount or 0)
 
 
 async def main() -> None:
     tenants = await _tenants()
     written = await _events(tenants)
-    await _spread_claim_states()
+    moved = await _spread_claim_states()
 
     async with unit_of_work(actor_type="admin") as session:
         reasons = await session.scalar(
@@ -132,7 +163,8 @@ async def main() -> None:
         rows = await session.scalar(text("SELECT count(*) FROM ioe.freshness_outbox"))
 
     print(f"   tenants: {len(tenants)}   events written: {written}   "
-          f"outbox rows: {rows}   distinct stale reasons: {reasons}")
+          f"claim states moved: {moved}")
+    print(f"   outbox rows: {rows}   distinct stale reasons: {reasons}")
     print(f"   stale reasons defined by the domain: {len(list(StaleReason))}")
 
     from app.database.session import engine

@@ -590,13 +590,95 @@ distinguished from "passes when it runs first":
 `test_frozen_scenario_baseline` (Item 3B), `test_scenario_integrity_closeout`.
 
 **Decision: this is a release-level check, not per-commit.** It costs roughly
-three full-suite runs (~12 minutes). CI runs the fresh-database suite on every
+three full-suite runs (~20 minutes). CI runs the fresh-database suite on every
 push; this runs before a release and after any change to freshness, replay, or
 scheduling.
 
+### Fixture scale reached
+
+```
+identity.user_account        300      ioe.freshness_outbox        376
+analysis.analysis_run        279      ioe.integrity_check         633
+ioe.optimization_run         119      distinct stale_reason_code   12
+ioe.scenario                 127      tax_kb.tax_rule_version     848
+ioe.strategy_portfolio       110
+```
+
+### A harness defect this found
+
+The first run reported one failure —
+`test_one_users_change_never_stales_another_users_result` — with
+`asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table
+optimization_run`, and the same suites passed in the reversed order.
+
+That is not a product defect and not an order dependency. **PostgreSQL roles are
+cluster-wide, not per-database.** `scripts/prove_security_gate.sh` was
+provisioning its disposable database by dropping and recreating `onyx_test` —
+the same role `run_backend_tests.sh` uses — and I had it running concurrently.
+Grants are held by OID, so recreating the role left the pollution run's already
+authenticated pooled connections holding a role OID with no privileges, and the
+next statement failed with a permission error that looked like an RLS defect.
+
+The diagnosis was confirmed by reproducing it deliberately: a second run failed
+at a *different* test, the one that happened to be executing when the role was
+recreated. A stable product defect does not move.
+
+Three things changed as a result:
+
+- **`run_backend_tests.sh` no longer drops the role.** It creates `onyx_test`
+  only if absent and re-grants `onyx_app_rw`. Dropping and recreating a
+  cluster-wide role on every run was the hazard itself; idempotent creation
+  removes it rather than documenting it.
+- `prove_security_gate.sh` provisions its own role, `onyx_secproof`, also
+  idempotently, and drops only its database on the way out.
+- `run_backend_tests.sh` now treats its arguments as *replacing* the default
+  target rather than adding to it. `pytest tests/ "$@"` meant
+  `run_backend_tests.sh tests/security` ran the entire suite — the targeted CI
+  security and determinism stages were silently duplicating the full-suite job
+  and reporting misleading durations. Measured before and after: **298s → 13s**.
+
+This is the same class of mistake as the earlier `onyx_super` privilege
+misdiagnosis: a result read under the wrong identity and believed too quickly.
+The difference is that this time the harness was fixed so the wrong identity
+cannot arise.
+
 ---
 
-## 13. Limitations and remaining risks
+## 13. Cost
+
+Measured locally on PostgreSQL 16 (a CI runner will be slower on the
+provisioning and install steps and comparable on the rest).
+
+| Stage | Duration |
+|---|---|
+| `check_python.sh` | <1s |
+| `ruff check app workers scripts tests` | <1s |
+| protected mypy (warm cache) | <1s |
+| protected mypy (cold cache) | 15s |
+| quality-gate policy + revision hygiene tests | 1s |
+| `check_lock.sh` (recompiles both locks) | 79s |
+| `prove_clean_install.sh` | 25s |
+| `check_migrations.sh` (upgrade head → downgrade base) | 6s |
+| `check_schema_drift_on_fresh_db.sh` | 6s |
+| `prove_schema_drift_gate.sh` (6 injections) | 53s |
+| `prove_gates_fail.sh` (6 injections) | 141s |
+| security suite (fresh DB) | 13s |
+| `prove_security_gate.sh` (3 injections) | 48s |
+| full suite (fresh DB, 730 tests) | 242s |
+| `pollution_regression.sh` | ~20 min |
+
+**CI critical path**, with the five jobs running in parallel: the `tests` job
+dominates at roughly **6 minutes** (provision PostgreSQL + install from lock +
+242s of suite). `static` finishes in about 2 minutes, gated by
+`check_lock.sh`. Nothing was removed to make this shorter — `check_lock.sh` is
+the slowest static step and it is also the one that stops a silent dependency
+drift, so it stays.
+
+`pollution_regression.sh` is deliberately not on the critical path; see §12.
+
+---
+
+## 14. Limitations and remaining risks
 
 **In this entry's scope, and honest about it:**
 
@@ -613,6 +695,10 @@ scheduling.
 - The CI workflow has not executed on GitHub — this repository had no `.github`
   directory before this change. Every step was run locally against a real
   PostgreSQL 16 with pgvector; the first push will be its first real execution.
+- Two database jobs sharing one PostgreSQL cluster still share its role
+  namespace. The drop-and-recreate hazard is gone, but a future script that
+  drops a cluster-wide role would reintroduce it. In CI each job provisions its
+  own cluster, so the exposure is local-only.
 
 **Outside this entry's scope** (unchanged, and not release-blocking for it):
 rate/admission limiting, privacy and data-lifecycle implementation, backup/PITR

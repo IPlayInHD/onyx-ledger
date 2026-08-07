@@ -19,23 +19,39 @@ DB="onyx_sec_proof"
 BASE="postgres://${SUPER}@/postgres?host=${PGHOST}&port=${PGPORT}"
 CONN="postgres://${SUPER}@/${DB}?host=${PGHOST}&port=${PGPORT}"
 
-export ONYX_DATABASE_URL="postgresql+asyncpg://onyx_test:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
+# A role name of its own. PostgreSQL roles are CLUSTER-wide, so reusing
+# `onyx_test` here would drop and recreate the role a concurrently running
+# run_backend_tests.sh is authenticated as — grants are held by OID, so that
+# other run's pooled connections would start failing with "permission denied"
+# for reasons that have nothing to do with the code under test.
+SUITE_ROLE=onyx_secproof
+export ONYX_DATABASE_URL="postgresql+asyncpg://${SUITE_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
 export ONYX_JWT_SECRET="${ONYX_JWT_SECRET:-security-gate-proof-secret-32-bytes-x}"
 
+# The database goes; the role stays. Dropping a cluster-wide role on the way out
+# would invalidate a concurrent job authenticated as it.
 cleanup() { psql "$BASE" -q -c "DROP DATABASE IF EXISTS ${DB};" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 echo "== provisioning a disposable database =="
 psql "$BASE" -q -c "DROP DATABASE IF EXISTS ${DB};" -c "CREATE DATABASE ${DB};"
 DATABASE_URL="$CONN" ./scripts/apply_schema.sh > /dev/null
-psql "$CONN" -q -c "DROP ROLE IF EXISTS onyx_test;" \
-  -c "CREATE ROLE onyx_test LOGIN PASSWORD 'test' IN ROLE onyx_app_rw;"
+psql "$CONN" -q -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${SUITE_ROLE}') THEN
+    CREATE ROLE ${SUITE_ROLE} LOGIN PASSWORD 'test' IN ROLE onyx_app_rw;
+  END IF;
+END
+\$\$;
+GRANT onyx_app_rw TO ${SUITE_ROLE};
+SQL
 
-# The suite connects as onyx_test, a member of onyx_app_rw — NOT as a superuser.
+# The suite connects as ${SUITE_ROLE}, a member of onyx_app_rw — NOT as a superuser.
 # A superuser bypasses row-level security outright, so these assertions would
 # pass against a database with every policy removed. Running them under the
 # runtime identity is the whole point.
-echo "   suite identity: onyx_test (member of onyx_app_rw), provisioned by ${SUPER}"
+echo "   suite identity: ${SUITE_ROLE} (member of onyx_app_rw), provisioned by ${SUPER}"
 
 SUITE=(python -m pytest tests/security -q -p no:cacheprovider)
 
