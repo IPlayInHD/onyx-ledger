@@ -144,6 +144,18 @@ jobs:
           pip install --require-hashes -r requirements-dev.lock.txt
           pip install --no-deps -e .
 
+      - name: Admission control (rate, concurrency, idempotency, failure modes)
+        # Deterministic only: injected clock, no sleeps, no load test. The
+        # ~20-minute load simulation stays a release-level check
+        # (scripts/load_admission.py), so every push is not paying for it.
+        run: |
+          ./scripts/run_backend_tests.sh \
+            tests/integration/test_admission_control.py \
+            tests/integration/test_admission_api.py \
+            tests/integration/test_admission_failure_modes.py \
+            tests/security/test_admission_isolation.py -q
+        env: { PGHOST: /var/run/postgresql, PGPORT: "5432", PGSUPER: onyx_migrator }
+
       - name: RLS, privilege, and partition invariants
         # A separate, explicitly named stage: these assert ENABLE/FORCE RLS,
         # USING and WITH CHECK clauses, partition and future-partition security,

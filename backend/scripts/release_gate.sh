@@ -62,6 +62,11 @@ run "migration smoke"       ./scripts/check_migrations.sh
 run "revision hygiene"      python -m pytest tests/unit/test_migration_hygiene.py -q
 run "schema drift"          ./scripts/check_schema_drift_on_fresh_db.sh
 run "schema drift proof"    ./scripts/prove_schema_drift_gate.sh
+run "admission control"     ./scripts/run_backend_tests.sh \
+                              tests/integration/test_admission_control.py \
+                              tests/integration/test_admission_api.py \
+                              tests/integration/test_admission_failure_modes.py \
+                              tests/security/test_admission_isolation.py -q
 run "security invariants"   ./scripts/run_backend_tests.sh tests/security -q
 run "security gate proof"   ./scripts/prove_security_gate.sh
 run "determinism"           ./scripts/run_backend_tests.sh \
