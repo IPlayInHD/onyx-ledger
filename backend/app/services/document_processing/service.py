@@ -25,6 +25,7 @@ from app.database.models import (
     IncomeType,
 )
 from app.integrations.storage import get_object_storage
+from app.services.admission.limits import MAX_DOCUMENT_BYTES
 from app.services.document_processing.ocr import FIELD_FACT, FIELD_TARGET, extract_fields
 from app.services.ioe.freshness_producers import (
     on_document_status_changed,
@@ -43,7 +44,16 @@ class DocumentService:
     async def create_upload(
         self, user_id: uuid.UUID, doc_type_code: str, filename: str,
         mime_type: str | None = None, tax_year: int | None = None,
+        declared_bytes: int | None = None,
     ) -> tuple[Document, str]:
+        """Register a document and authorize ONE bounded upload.
+
+        The authorization carries the TIGHTER of the platform maximum and
+        whatever the client said it was about to send. Honouring the
+        declaration is free and strictly better: a client that says 1 MB and
+        then sends 5 MB is refused even though 5 MB is under the platform
+        limit, and a client that lies downward gains nothing by it.
+        """
         dtype = await self.s.scalar(select(DocumentType).where(DocumentType.code == doc_type_code))
         if not dtype:
             raise ValidationError(f"Unknown document type '{doc_type_code}'")
@@ -55,7 +65,10 @@ class DocumentService:
         )
         self.s.add(doc)
         await self.s.flush()
-        presigned = self.storage.presign_put(bucket, key, mime_type or "application/octet-stream")
+        presigned = self.storage.presign_put(
+            bucket, key, mime_type or "application/octet-stream",
+            max_bytes=min(declared_bytes or MAX_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES),
+        )
         return doc, presigned
 
     async def process(

@@ -3,12 +3,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user_id, db_authed
-from app.core.exceptions import ValidationError
+from app.core.exceptions import Conflict, ValidationError
 from app.database.models import Document, ExtractionField
 from app.services.admission import OperationClass, admission_guard
 from app.services.admission.guard import owned_dedupe_key, user_scope
@@ -43,6 +43,22 @@ class ProcessRequest(BaseModel):
     text: str | None = Field(default=None, max_length=MAX_EXTRACTION_TEXT_BYTES)
     fields: dict | None = None
 
+    @field_validator("text")
+    @classmethod
+    def _text_within_byte_bound(cls, value: str | None) -> str | None:
+        """`max_length` counts CHARACTERS; the bound is named in bytes.
+
+        A megabyte-long limit expressed as a character count admits four
+        megabytes of UTF-8, and the regex extraction that runs over it scales
+        with the encoded size. Checked here as well as declared above, so the
+        name and the enforcement agree.
+        """
+        if value is not None and len(value.encode("utf-8")) > MAX_EXTRACTION_TEXT_BYTES:
+            raise ValueError(
+                f"extraction text exceeds the {MAX_EXTRACTION_TEXT_BYTES} byte maximum"
+            )
+        return value
+
 
 class ConfirmRequest(BaseModel):
     tax_year: int
@@ -56,13 +72,20 @@ async def create_upload(
 ) -> dict:
     """Register a document and hand back a presigned upload URL.
 
+    TWO size checks, and only the second one is a bound.
+
     The bytes never pass through this process — they go straight to object
-    storage — so the size check here is on the DECLARED size and is an early
-    refusal, not the enforcement point. A client that under-declares still gets
-    a URL; the enforcement that matters is the presigned policy's own content-
-    length limit at the storage boundary, which is where the bytes actually
-    arrive. Refusing here saves the round trip and is honest about which of the
-    two is authoritative.
+    storage — so the check here is on the DECLARED size. It is an early, cheap
+    refusal that catches an honest client and saves a round trip. It is NOT
+    enforcement: a caller that wants to store 30 MB under a 25 MB limit simply
+    declares 1 MB.
+
+    Enforcement is the ceiling attached to the presigned authorization itself,
+    which the store applies to the bytes that actually arrive
+    (`ObjectStorage.presign_put(..., max_bytes=...)`; in S3 that is a POST
+    policy `content-length-range` condition). The declaration is honoured too,
+    where it is tighter — a client that says 1 MB and sends 5 MB is refused
+    even though 5 MB is under the platform limit.
     """
     if body.mime_type and body.mime_type.split(";")[0].strip().lower() \
             not in ALLOWED_DOCUMENT_MIME_TYPES:
@@ -81,7 +104,7 @@ async def create_upload(
     ):
         doc, presigned = await DocumentService(session).create_upload(
             user_id, body.document_type_code, body.filename,
-            body.mime_type, body.tax_year,
+            body.mime_type, body.tax_year, declared_bytes=body.byte_size,
         )
         return {
             "document_id": str(doc.id), "status": doc.status,
@@ -111,7 +134,17 @@ async def process(
         OperationClass.DOCUMENT_PROCESS,
         scope_id=user_scope(user_id),
         dedupe_key=owned_dedupe_key(user_id, "process", str(document_id)),
-    ):
+    ) as ticket:
+        if ticket.duplicate_of_active:
+            # The dedupe key found an extraction already in flight for this
+            # document. Phase 1 computed the key and then ran the body anyway,
+            # which made it decorative: twenty retries against one document
+            # produced twenty concurrent extractions and twenty rows, and the
+            # last one to finish silently won.
+            raise Conflict(
+                "an extraction for this document is already running; "
+                "wait for it to finish"
+            )
         ex = await DocumentService(session).process(
             document_id, text=body.text, fields=body.fields)
     fields = await session.scalars(
