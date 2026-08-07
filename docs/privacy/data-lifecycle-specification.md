@@ -595,9 +595,31 @@ low privacy risk, but it is raw exception text and is recorded as **PD-5**.
 
 **No queue carries a financial value, a document, document text, or a snapshot.**
 The design is identifier-oriented throughout. `user_id` on two tasks is the
-minimum needed to do the work. Broker retention remains
-`DEPLOYMENT_CONFIGURATION_REQUIRED` (Redis persistence and eviction are not
-configured in this repository).
+minimum needed to do the work.
+
+**Task RESULTS are a second Redis store, and the first draft of this matrix
+missed it.** `celery_app` sets `backend=settings.redis_url`, so every task's
+return value is persisted:
+
+| Task | Result stored in Redis |
+|---|---|
+| `analysis.run_analysis` | `str(run.id)` — an analysis UUID |
+| `ioe.run_optimization` | `str(outcome.run_id)` — a run UUID |
+| `ioe.verify_sealed_integrity` | counts only |
+| `ioe.invalidate_*`, `sweep_*`, `relay_*` | integer counts |
+| `tkms.*` | `job_id` |
+| `maintenance.purge_admission_history` | counts |
+
+Identifiers and counts, no financial values and no free text — the discipline
+holds on the result side too, and `workers/tasks/ioe.py` says so explicitly
+("it is a Celery result stored in Redis, so nothing identifying may travel in
+it"). Classification: `PSEUDONYMOUS_IDENTIFIER` and `OPERATIONAL_TELEMETRY`.
+
+`result_expires` is **not configured**, so Celery's default of 86 400 s applies —
+a bounded one-day retention that happens to be reasonable, but it is a default
+rather than a decision. Broker and result-backend persistence, eviction and
+retention are `DEPLOYMENT_CONFIGURATION_REQUIRED`, and Entry 11B should set
+`result_expires` explicitly so the value is a choice.
 
 **Metrics (§35).** Admission metric keys are `OPERATION:REASON` codes; integrity
 metrics are counters and per-reason counts. **No user id, document id, hash,
@@ -921,7 +943,7 @@ order to do two risky things in.
 | # | Question | Answer |
 |---|---|---|
 | 1 | What user-derived data is stored? | 75 tables, 13 schemas; classes in §2 |
-| 2 | Where? | PostgreSQL (75 tables), object storage (document + legislation binaries), Redis broker (identifiers only), logs (codes + `user_id`). No cache, no analytics, no temp files. |
+| 2 | Where? | PostgreSQL (75 tables), object storage (document + legislation binaries), Redis as broker **and result backend** (identifiers and counts only, ~1 day default), logs (codes + `user_id`). No cache, no analytics, no temp files. |
 | 3 | What source data is mutable? | profile, financial, wealth, documents, preferences, AI conversations |
 | 4 | What derived data is immutable? | 21 tables carry `SEALED_EVIDENCE`, 20 are marked immutable; immutable under *ordinary* operations (§12) |
 | 5 | What sealed data is needed for replay? | the 27-field snapshot, rule-version manifests, spec/result hashes |
