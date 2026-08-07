@@ -1,0 +1,226 @@
+name: backend quality gate
+
+# Every job here is blocking. There is no `continue-on-error`, no `|| true`, and
+# no error-count baseline anywhere in this file — a gate that can be satisfied by
+# a number rather than by zero is a gate that drifts.
+#
+# The jobs mirror scripts/release_gate.sh so a developer can reproduce any
+# failure locally with one command.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Least privilege: nothing here writes to the repository, comments, or publishes.
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # One supported runtime, declared once in pyproject.toml. Kept in sync by
+  # scripts/check_python.sh, which every job that installs dependencies runs.
+  PYTHON_VERSION: "3.11.15"
+  # CI-only. Not a production secret, never reused outside this workflow, and
+  # long enough to satisfy the settings validator.
+  ONYX_JWT_SECRET: ci-only-jwt-secret-at-least-32-bytes
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  # ── static gates: no database, so they answer fastest ──────────────────────
+  static:
+    name: lint + protected types + lock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          # The cache key includes the interpreter (via setup-python), the OS
+          # (via the runner image), and the lock hashes below. A stale cache
+          # therefore cannot supply a different resolution than the lock names —
+          # and the lock-consistency step below runs regardless of cache hits.
+          cache-dependency-path: |
+            backend/requirements.lock.txt
+            backend/requirements-dev.lock.txt
+
+      - name: Refuse an unsupported interpreter
+        run: ./scripts/check_python.sh
+
+      - name: Install from the lock only
+        # --require-hashes: every artifact is verified against the committed
+        # hash, so a compromised or re-uploaded package cannot be substituted.
+        # The declaration is deliberately NOT consulted here.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock.txt
+          pip install --no-deps -e .
+
+      - name: Dependency lock consistency
+        # Fails when pyproject.toml resolves to something the committed locks do
+        # not describe — i.e. someone changed a dependency and did not relock.
+        run: |
+          pip install pip-tools
+          ./scripts/check_lock.sh
+
+      - name: Ruff
+        run: ruff check app workers scripts tests
+
+      - name: Protected mypy (zero errors)
+        run: ./scripts/check_types.sh
+
+      - name: Quality-gate policy
+        # Proves the protected scope still covers every application package and
+        # that no override disabled checking to reach zero.
+        run: pytest tests/unit/test_quality_gate_policy.py -q
+
+  # ── database gates ────────────────────────────────────────────────────────
+  # Each job provisions its OWN PostgreSQL from scratch. Nothing is shared, and
+  # nothing survives the job, so a passing run cannot depend on state some
+  # earlier run left behind.
+  migrations:
+    name: migrations + schema drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock.txt
+
+      - name: Provision PostgreSQL 16 + pgvector
+        run: ./scripts/ci_provision_postgres.sh
+
+      - name: Install from the lock only
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock.txt
+          pip install --no-deps -e .
+
+      - name: Migration smoke (upgrade head → downgrade base)
+        run: ./scripts/check_migrations.sh
+        env: { PGHOST: /var/run/postgresql, PGPORT: "5432", PGSUPER: onyx_migrator }
+
+      - name: Revision hygiene (single head, unique ids, all import)
+        run: pytest tests/unit/test_migration_hygiene.py -q
+
+      - name: Schema drift on a freshly migrated database
+        run: ./scripts/check_schema_drift_on_fresh_db.sh
+        env: { PGHOST: /var/run/postgresql, PGPORT: "5432", PGSUPER: onyx_migrator }
+
+      - name: Prove the drift gate rejects injected defects
+        run: ./scripts/prove_schema_drift_gate.sh
+        env: { PGHOST: /var/run/postgresql, PGPORT: "5432", PGSUPER: onyx_migrator }
+
+  security:
+    name: security invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock.txt
+
+      - name: Provision PostgreSQL 16 + pgvector
+        run: ./scripts/ci_provision_postgres.sh
+
+      - name: Install from the lock only
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock.txt
+          pip install --no-deps -e .
+
+      - name: RLS, privilege, and partition invariants
+        # A separate, explicitly named stage: these assert ENABLE/FORCE RLS,
+        # USING and WITH CHECK clauses, partition and future-partition security,
+        # cross-tenant denial, deny-by-default when the tenant GUC is unset,
+        # SECURITY DEFINER ownership and fixed search_path, PUBLIC EXECUTE
+        # revocation, and NOLOGIN workers with minimal grants.
+        #
+        # The suite connects as `onyx_test` (a member of onyx_app_rw) — the
+        # runtime identity — not as a superuser. A superuser bypasses RLS
+        # entirely, which is how an earlier privilege investigation reached a
+        # false conclusion; provisioning as onyx_migrator and testing as
+        # onyx_app_rw is what keeps that from recurring.
+        run: ./scripts/run_backend_tests.sh tests/security -q
+        env: { PGHOST: /var/run/postgresql, PGPORT: "5432", PGSUPER: onyx_migrator }
+
+  determinism:
+    name: determinism (canonicalization + replay)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock.txt
+
+      - name: Provision PostgreSQL 16 + pgvector
+        run: ./scripts/ci_provision_postgres.sh
+
+      - name: Install from the lock only
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock.txt
+          pip install --no-deps -e .
+
+      - name: Canonical serialization, sealed hashes, golden replay
+        run: |
+          ./scripts/run_backend_tests.sh \
+            tests/unit/ioe \
+            tests/integration/test_integrity_api_and_determinism.py \
+            tests/integration/test_golden_replay.py -q
+        env: { PGHOST: /var/run/postgresql, PGPORT: "5432", PGSUPER: onyx_migrator }
+
+  tests:
+    name: full suite (fresh database)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock.txt
+
+      - name: Provision PostgreSQL 16 + pgvector
+        run: ./scripts/ci_provision_postgres.sh
+
+      - name: Install from the lock only
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock.txt
+          pip install --no-deps -e .
+
+      - name: Report the resolved runtime
+        # Build provenance: what this run actually used, without touching .git
+        # or any user data.
+        run: |
+          echo "commit:  ${GITHUB_SHA}"
+          echo "python:  $(python -c 'import sys; print(sys.version.split()[0])')"
+          python - <<'EOF'
+          import importlib.metadata as md
+          for dist in ("sqlalchemy", "alembic", "fastapi", "pydantic", "asyncpg",
+                       "psycopg2-binary", "celery", "pgvector", "mypy", "ruff", "pytest"):
+              print(f"{dist:16s} {md.version(dist)}")
+          EOF
+          PYTHONPATH=. alembic heads
+
+      - name: Full suite on a database created for this run
+        # run_backend_tests.sh drops and recreates the database, applies the
+        # schema, and creates the runtime login role. Zero failures required;
+        # no expected-count is hard-coded anywhere.
+        run: ./scripts/run_backend_tests.sh
+        env: { PGHOST: /var/run/postgresql, PGPORT: "5432", PGSUPER: onyx_migrator }

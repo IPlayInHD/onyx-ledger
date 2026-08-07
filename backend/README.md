@@ -24,11 +24,37 @@ on top of the validated [`backend/db`](./db) schema. Clean Architecture + DDD:
 Scaffolded (ports + routes, returning 501): documents/OCR pipeline, ingestion +
 four-eyes publishing, admin RBAC.
 
-## Run the tests (against real PostgreSQL)
+## Developer setup
+
+**Python 3.11 only.** One supported runtime, declared in `pyproject.toml`
+(`requires-python = "==3.11.*"`) and in `.python-version` (`3.11.15`).
+`scripts/check_python.sh` refuses anything else — determinism of the dependency
+resolution, of canonical serialization, and of the sealed hashes is measured on
+3.11 and nowhere else.
+
+Install **from the lock**, not from the declaration:
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e .[dev]
+pip install --require-hashes -r requirements-dev.lock.txt   # exact, hash-verified
+pip install --no-deps -e .                                  # the package itself
+```
+
+`--require-hashes` verifies every artifact, including transitive dependencies,
+against `requirements-dev.lock.txt`. `--no-deps` stops the editable install
+resolving anything behind the lock's back. CI and production use the same two
+commands, so all three environments resolve identically.
+
+Changed a dependency in `pyproject.toml`?
+
+```bash
+./scripts/lock_dependencies.sh      # regenerate; commit the locks with pyproject.toml
+./scripts/check_lock.sh             # what CI runs — fails if they disagree
+```
+
+## Run the tests (against real PostgreSQL)
+
+```bash
 # start Postgres 16 + pgvector, then:
 bash scripts/run_backend_tests.sh          # provisions DB, applies schema, runs pytest
 ```
@@ -36,6 +62,37 @@ bash scripts/run_backend_tests.sh          # provisions DB, applies schema, runs
 `tests/` covers: unit (tax engine golden cases, formula/condition/AI guardrail),
 integration (register→profile→income→analysis→recommendations end to end), and
 security (RLS cross-user isolation, refresh-token reuse detection).
+
+The suite connects as `onyx_test`, a login member of `onyx_app_rw` — **not** as
+a superuser. A superuser bypasses row-level security entirely, so security
+assertions run as one prove nothing.
+
+## Quality gates
+
+```bash
+./scripts/release_gate.sh --fast    # runtime pin, lock, Ruff, protected mypy   (~1 min)
+./scripts/release_gate.sh --full    # + fresh-DB suite, security, migrations, schema drift
+```
+
+`--full` mirrors the blocking CI jobs in
+`.github/workflows/backend-quality-gate.yml`, so a failure is reproducible
+locally. Individually:
+
+| Command | Gate |
+|---|---|
+| `ruff check app workers scripts tests` | lint |
+| `./scripts/check_types.sh` | **protected mypy — zero errors, whole application** |
+| `./scripts/check_lock.sh` | dependency lock matches `pyproject.toml` |
+| `./scripts/check_migrations.sh` | upgrade head → downgrade base |
+| `./scripts/check_schema_drift_on_fresh_db.sh` | schema drift vs. governed policy |
+| `./scripts/prove_gates_fail.sh` | proves each gate rejects an injected defect |
+| `./scripts/prove_security_gate.sh` | proves the security suite catches a removed RLS invariant |
+| `./scripts/prove_clean_install.sh` | proves the lock alone rebuilds a working environment |
+| `./scripts/pollution_regression.sh` | release-level: sensitive suites on a database with history |
+
+See
+[`docs/architecture/production-engineering-quality-gate.md`](../docs/architecture/production-engineering-quality-gate.md)
+and [`docs/architecture/mypy-debt-register.md`](../docs/architecture/mypy-debt-register.md).
 
 ## Run locally (Docker)
 
