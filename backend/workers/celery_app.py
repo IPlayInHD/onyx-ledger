@@ -55,6 +55,14 @@ celery_app.conf.beat_schedule = {
         "task": "workers.tasks.maintenance.check_data_updates",
         "schedule": crontab(hour="3", minute="0"),
     },
+    # Bounds the growth of admission.rate_counter, whose cardinality is partly
+    # attacker-controlled now that the login surface is throttled per claimed
+    # identity. Hourly: the retention horizon is two hours, so a missed run has
+    # room to be picked up by the next one.
+    "admission-history-purge": {
+        "task": "workers.tasks.maintenance.purge_admission_history",
+        "schedule": crontab(minute="40"),
+    },
     "monthly-analytics-roll": {
         "task": "workers.tasks.maintenance.roll_monthly_analytics",
         "schedule": crontab(day_of_month="1", hour="4", minute="0"),

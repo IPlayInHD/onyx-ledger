@@ -424,8 +424,78 @@ def policy_for(operation: OperationClass) -> AdmissionPolicy:
     return POLICIES[operation]
 
 
+# ---------------------------------------------------------------------------
+# WIRING LEDGER
+#
+# Every member of `OperationClass` is either guarded at a real call site or
+# listed here with the reason it is not. A class may not be silently absent
+# from both, and `tests/unit/test_admission_wiring.py` fails if one is.
+#
+# This exists because the opposite failure is the easy one to miss. A policy
+# with no call site LOOKS like protection in review, reads as a limit in the
+# registry, and bounds nothing — Entry 10 Phase 1 shipped six of them. Requiring
+# an explicit entry here turns "nobody wired it" into a visible, reviewable
+# claim rather than an omission.
+#
+# It is NOT a licence to close by enum count in the other direction either: an
+# entry is a statement that the class has no reachable production surface today,
+# and adding one for a class that does have a surface is the same defect wearing
+# a comment.
+# ---------------------------------------------------------------------------
+UNWIRED_BY_DESIGN: dict[OperationClass, str] = {
+    OperationClass.CHEAP_READ: (
+        "REACHABLE_ADMISSION_NOT_NEEDED. Every GET in the API is a bounded, "
+        "indexed, RLS-scoped read with no amplification: one request costs one "
+        "or two index lookups and returns a bounded page. Guarding each one "
+        "would add a round trip to the admission store to the cheapest "
+        "operations in the system — the limiter would become a meaningful "
+        "share of the load it exists to protect against, and its own store "
+        "would be the first thing to saturate. Read-abuse belongs at the "
+        "ingress/CDN layer, which sees the request before a worker is woken at "
+        "all. The policy stays as the DECLARED template for that layer and for "
+        "any future read that stops being cheap; it is not pretending to be "
+        "enforced here."
+    ),
+}
+
+
+UNUSED_REJECTION_REASONS: dict[RejectionReason, str] = {
+    RejectionReason.TENANT_RATE_LIMIT: (
+        "The user IS the tenant in this product (see the module docstring), so "
+        "USER_RATE_LIMIT already is the tenant limit. Kept as a distinct code "
+        "so that adding an organization tier does not have to reinterpret an "
+        "existing one in flight."
+    ),
+    RejectionReason.TENANT_CONCURRENCY_LIMIT: (
+        "Same reason as TENANT_RATE_LIMIT."
+    ),
+    RejectionReason.QUEUE_CAPACITY: (
+        "RESERVED. Nothing in `app/` publishes a Celery task: the only "
+        "`.delay()` calls in the repository are worker-to-worker stage "
+        "chaining inside `workers/tasks/tkms.py`, reached only after an "
+        "operator-triggered import has already passed IMPORT_RUN admission at "
+        "the API. There is therefore no user-reachable enqueue path whose "
+        "broker depth could be refused, and a code that no caller can receive "
+        "would be a claim of protection that does not exist. "
+        "`tests/unit/test_admission_wiring.py` asserts the premise, so this "
+        "reservation cannot quietly become false."
+    ),
+    RejectionReason.PAYLOAD_TOO_LARGE: (
+        "Size and complexity bounds are refused as ValidationError (422) by "
+        "the schema or the handler, before admission is consulted at all — a "
+        "payload that is too large is malformed, not throttled, and telling "
+        "the caller to retry after 60 seconds would be wrong. Kept for a future "
+        "surface that streams rather than declares."
+    ),
+    RejectionReason.TOO_MANY_ITEMS: ("Same reason as PAYLOAD_TOO_LARGE."),
+    RejectionReason.OPERATION_COMPLEXITY_LIMIT: ("Same reason as PAYLOAD_TOO_LARGE."),
+}
+
+
 __all__ = [
     "POLICIES",
+    "UNUSED_REJECTION_REASONS",
+    "UNWIRED_BY_DESIGN",
     "AdmissionPolicy",
     "OperationClass",
     "RejectionReason",

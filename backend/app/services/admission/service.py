@@ -72,6 +72,16 @@ ADMISSION_POLICY_VERSION = "1.0.0"
 # collide with it: it is not a UUID.
 GLOBAL_SCOPE_ID = "platform"
 
+# How long admission history is kept. See `AdmissionService.purge`.
+#
+# A rate window is one minute, so an hour is already two orders of magnitude
+# past the point where a counter can affect a decision; the margin exists so a
+# purge that misses a run does not start refusing anybody.
+_COUNTER_RETENTION = timedelta(hours=2)
+# A released lease is an operational record of work that ran, useful for a day
+# of incident review and useless after that.
+_LEASE_RETENTION = timedelta(hours=24)
+
 
 # ---------------------------------------------------------------------------
 # Metrics. In-process counters only — there is no exporter in this repository,
@@ -464,9 +474,12 @@ class AdmissionService:
             existing = await self._find_active_duplicate(operation, dedupe_key, now=now)
             if existing is not None:
                 ADMISSION_ACCEPTED[operation.value] += 1
-                log.info("admission", operation=operation.value,
-                         decision="DUPLICATE", reason=RejectionReason
-                         .DUPLICATE_ACTIVE_OPERATION.value)
+                log.info(
+                    "admission",
+                    operation=operation.value,
+                    decision="DUPLICATE",
+                    reason=RejectionReason.DUPLICATE_ACTIVE_OPERATION.value,
+                )
                 return AdmissionTicket(
                     existing, operation, scope_id, duplicate_of_active=True
                 )
@@ -607,6 +620,72 @@ class AdmissionService:
             },
         )
         return int(count or 0)
+
+    async def purge(
+        self,
+        *,
+        now: datetime | None = None,
+        batch: int = 20_000,
+    ) -> dict[str, int]:
+        """Delete admission history that no decision can still depend on.
+
+        RETENTION IS LOAD-BEARING HERE, not housekeeping.
+
+        Before Phase 2 the counter table grew with the number of ACTIVE
+        PRINCIPALS: one row per (user, operation, minute), so its cardinality
+        was bounded by the size of the customer base. Throttling the login
+        surface changed that. The `AUTH_SUBJECT` scope is keyed on whatever
+        address the caller TYPED, so a credential-stuffing run through a million
+        distinct addresses writes a million rows in a minute. The cardinality is
+        now attacker-controlled, and a table an attacker can grow without bound
+        is its own denial of service — the one the limiter was supposed to
+        prevent, arriving through the limiter.
+
+        Two horizons because the rows are worth different things:
+
+          * a rate counter is dead the moment its window closes. Anything older
+            than `_COUNTER_RETENTION` cannot affect a decision, and keeping it
+            is keeping an attack's footprint;
+          * a released lease is a small operational record of work that ran.
+            Worth a day for incident review, worth nothing after that.
+
+        Bounded per call by `batch`, so this can never become one enormous
+        delete that holds locks across the hot path. Returns what it removed so
+        a caller can loop until it drains.
+        """
+        now = now or datetime.now(tz=UTC)
+        counters = await self.s.execute(
+            text("""
+                DELETE FROM admission.rate_counter
+                 WHERE ctid IN (
+                    SELECT ctid FROM admission.rate_counter
+                     WHERE window_start < :cutoff
+                     LIMIT :batch
+                 )
+             RETURNING 1
+            """),
+            {"cutoff": now - _COUNTER_RETENTION, "batch": batch},
+        )
+        leases = await self.s.execute(
+            text("""
+                DELETE FROM admission.lease
+                 WHERE ctid IN (
+                    SELECT ctid FROM admission.lease
+                     WHERE released_at IS NOT NULL AND released_at < :cutoff
+                     LIMIT :batch
+                 )
+             RETURNING 1
+            """),
+            {"cutoff": now - _LEASE_RETENTION, "batch": batch},
+        )
+        # `RETURNING 1` + fetchall rather than `rowcount`: SQLAlchemy types
+        # `execute()` as `Result`, which carries no row count, and reaching for
+        # the attribute anyway is exactly the kind of quietly-Any access the
+        # type gate exists to stop.
+        return {
+            "rate_counters_deleted": len(counters.fetchall()),
+            "leases_deleted": len(leases.fetchall()),
+        }
 
     async def sweep_expired(self, *, now: datetime | None = None) -> int:
         """Mark lapsed leases EXPIRED. Housekeeping, never load-bearing.

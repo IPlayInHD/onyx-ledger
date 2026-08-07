@@ -18,15 +18,27 @@ import statistics
 import sys
 import time
 import uuid
+from datetime import UTC, datetime
 
 sys.path.insert(0, os.getcwd())
 
+from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
+from sqlalchemy.pool import NullPool  # noqa: E402
+
+from app.core.config import get_settings  # noqa: E402
 from app.database.session import engine, unit_of_work  # noqa: E402
-from app.services.admission.policy import POLICIES, OperationClass  # noqa: E402
+from app.services.admission.policy import (  # noqa: E402
+    POLICIES,
+    OperationClass,
+    ScopeType,
+)
 from app.services.admission.service import (  # noqa: E402
     AdmissionRejected,
     AdmissionService,
+    _lock_key,
 )
+
+_settings = get_settings()
 
 
 async def _timed_admit(operation: OperationClass, scope: str) -> tuple[bool, float]:
@@ -177,6 +189,150 @@ async def scenario_overhead(n: int = 200) -> None:
     _report("rate-check only", latencies)
 
 
+async def _max_backends_during(coro):
+    """Run `coro` while sampling how many backends this application holds.
+
+    The number the blocking-lock question actually turns on. Waiting on an
+    advisory lock is not free: the waiter is holding a pooled connection while
+    it waits, so a long queue on one lock converts into connection pressure —
+    and if the pool runs out, callers fail with a pool timeout, which admission
+    reports as a store failure and (for every expensive class) refuses.
+    """
+    from sqlalchemy import text as sql
+
+    peak = 0
+    stop = asyncio.Event()
+
+    async def sample() -> None:
+        nonlocal peak
+        # A DEDICATED connection outside the application pool, so the probe
+        # cannot itself be starved by the thing it is measuring.
+        probe = create_async_engine(_settings.database_url, poolclass=NullPool)
+        try:
+            while not stop.is_set():
+                async with probe.connect() as conn:
+                    n = await conn.scalar(sql(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "  AND pid <> pg_backend_pid()"))
+                peak = max(peak, int(n or 0))
+                await asyncio.sleep(0.01)
+        finally:
+            await probe.dispose()
+
+    sampler = asyncio.create_task(sample())
+    try:
+        result = await coro
+    finally:
+        stop.set()
+        await sampler
+    return result, peak
+
+
+async def _blocking_contender(scope: str) -> tuple[str, float]:
+    """One contender through the PRODUCTION path: pg_advisory_xact_lock."""
+    start = time.perf_counter()
+    try:
+        async with unit_of_work(actor_type="admin") as session:
+            service = AdmissionService(session)
+            lease = await service._acquire_lease(
+                POLICIES[OperationClass.OPTIMIZATION_RUN],
+                ScopeType.USER, scope, dedupe_key=None,
+                now=datetime.now(tz=UTC),
+            )
+        outcome = "admitted" if lease is not None else "rejected"
+    except Exception as exc:  # noqa: BLE001 — a pool timeout is a RESULT here
+        outcome = f"error:{type(exc).__name__}"
+    return outcome, (time.perf_counter() - start) * 1000
+
+
+async def _try_contender(scope: str) -> tuple[str, float]:
+    """The alternative: pg_try_advisory_xact_lock, no waiting.
+
+    Written out here rather than behind a flag in the service, because it is a
+    candidate being measured, not a mode being shipped. Note what it costs: a
+    contender that fails to TAKE the lock has learned nothing about whether it
+    is under its limit, so the only safe answer is to refuse. Those refusals are
+    SPURIOUS — the caller may have had quota to spare — and counting them is the
+    entire point of the comparison.
+    """
+    from sqlalchemy import text as sql
+
+    policy = POLICIES[OperationClass.OPTIMIZATION_RUN]
+    start = time.perf_counter()
+    try:
+        async with unit_of_work(actor_type="admin") as session:
+            got = await session.scalar(
+                sql("SELECT pg_try_advisory_xact_lock(:k)"),
+                {"k": _lock_key(ScopeType.USER, scope, policy.operation)},
+            )
+            if not got:
+                return "lock-miss", (time.perf_counter() - start) * 1000
+            active = await session.scalar(sql("""
+                SELECT count(*) FROM admission.lease
+                 WHERE scope_type = 'USER' AND scope_id = :s
+                   AND operation_code = :op
+                   AND released_at IS NULL AND expires_at > now()
+            """), {"s": scope, "op": policy.operation.value})
+            if (active or 0) >= (policy.max_active_per_user or 0):
+                return "rejected", (time.perf_counter() - start) * 1000
+            await session.execute(sql("""
+                INSERT INTO admission.lease
+                    (id, scope_type, scope_id, operation_code, acquired_at, expires_at)
+                VALUES (:id, 'USER', :s, :op, now(), now() + interval '900 seconds')
+            """), {"id": uuid.uuid4(), "s": scope, "op": policy.operation.value})
+        return "admitted", (time.perf_counter() - start) * 1000
+    except Exception as exc:  # noqa: BLE001
+        return f"error:{type(exc).__name__}", (time.perf_counter() - start) * 1000
+
+
+async def scenario_lock_contention(n: int) -> int:
+    """§7 — blocking vs try-lock, at n contenders on ONE scope.
+
+    Everything here contends on a single (scope, operation) advisory lock, which
+    is the worst case the design can produce: real traffic spreads across
+    principals and never queues like this.
+    """
+    print(f"\nlock contention: {n} contenders on ONE scope")
+    limit = POLICIES[OperationClass.OPTIMIZATION_RUN].max_active_per_user or 0
+
+    outcomes: dict[str, int] = {}
+    for mode, run_one in (("blocking (production)", _blocking_contender),
+                          ("try-lock (alternative)", _try_contender)):
+        await _reset(OperationClass.OPTIMIZATION_RUN)
+        scope = str(uuid.uuid4())
+
+        async def run_all(one=run_one, target=scope):
+            return await asyncio.gather(*(one(target) for _ in range(n)))
+
+        wall = time.perf_counter()
+        results, peak_backends = await _max_backends_during(run_all())
+        wall = (time.perf_counter() - wall) * 1000
+
+        counts: dict[str, int] = {}
+        for outcome, _ in results:
+            counts[outcome] = counts.get(outcome, 0) + 1
+        latencies = sorted(ms for _, ms in results)
+        admitted = counts.get("admitted", 0)
+        overshoot = max(0, admitted - limit)
+
+        print(f"  {mode}")
+        print(f"    admitted={admitted} (cap {limit})  OVERSHOOT={overshoot}")
+        print(f"    outcomes={counts}")
+        print(f"    p50={statistics.median(latencies):7.2f}ms  "
+              f"p95={latencies[int(len(latencies) * 0.95) - 1]:7.2f}ms  "
+              f"max={latencies[-1]:7.2f}ms")
+        print(f"    wall={wall:.0f}ms  peak backends={peak_backends} "
+              f"(pool {_settings.db_pool_size}+{_settings.db_max_overflow})")
+        outcomes[mode] = overshoot
+        if mode.startswith("try") and counts.get("lock-miss"):
+            print(f"    NOTE: {counts['lock-miss']} spurious refusals — callers "
+                  f"that may have had quota, refused because another caller "
+                  f"held the lock.")
+
+    return sum(outcomes.values())
+
+
 async def main() -> int:
     print("=" * 70)
     print("ADMISSION CONTROL LOAD SIMULATION — local measurement only")
@@ -189,6 +345,8 @@ async def main() -> int:
     failures += await scenario_rapid_scenarios()
     failures += await scenario_retry_storm()
     failures += await scenario_mixed_principals()
+    failures += await scenario_lock_contention(100)
+    failures += await scenario_lock_contention(500)
     await scenario_overhead()
 
     print("\n" + "=" * 70)
