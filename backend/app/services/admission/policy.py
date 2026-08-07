@@ -54,11 +54,21 @@ class OperationClass(StrEnum):
 
 
 class ScopeType(StrEnum):
-    """Whose budget is being spent."""
+    """Whose budget is being spent.
+
+    The first three are PRINCIPAL scopes: the caller has already been
+    authenticated, so the identity is one the server assigned. The last two are
+    PRE-AUTHENTICATION scopes and exist only for `AUTH_ATTEMPT`, where there is
+    by definition no principal yet — the whole point of the operation is to find
+    out whether the caller is one. They are derived, never accepted: see
+    `app.services.admission.identity`.
+    """
 
     USER = "USER"      # the tenant boundary in this product; see module docstring
     ADMIN = "ADMIN"    # an operator principal from `admin.admin_user`
     GLOBAL = "GLOBAL"  # the platform as a whole
+    IP = "IP"          # the transport peer address, keyed-digested. Pre-auth only.
+    AUTH_SUBJECT = "AUTH_SUBJECT"  # keyed digest of the claimed identity. Pre-auth only.
 
 
 class RejectionReason(StrEnum):
@@ -71,6 +81,11 @@ class RejectionReason(StrEnum):
 
     USER_RATE_LIMIT = "USER_RATE_LIMIT"
     TENANT_RATE_LIMIT = "TENANT_RATE_LIMIT"
+    #: Credential-testing throttle. A DISTINCT code from USER_RATE_LIMIT on
+    #: purpose: it is returned before the caller is known to be anybody, so it
+    #: must not be read as "your account is being limited" — which would itself
+    #: disclose that the account exists.
+    AUTH_RATE_LIMIT = "AUTH_RATE_LIMIT"
     USER_CONCURRENCY_LIMIT = "USER_CONCURRENCY_LIMIT"
     TENANT_CONCURRENCY_LIMIT = "TENANT_CONCURRENCY_LIMIT"
     GLOBAL_CAPACITY = "GLOBAL_CAPACITY"
@@ -110,6 +125,16 @@ class AdmissionPolicy:
     per_user_per_minute: int | None = None
     burst: int = 0                       # extra attempts tolerated inside one window
 
+    #: Allowance for a PRE-AUTHENTICATION source scope (`ScopeType.IP`), which
+    #: only `AUTH_ATTEMPT` uses. It is a separate number rather than a reuse of
+    #: `per_user_per_minute` because the two scopes bound different attacks and
+    #: are wrong at each other's value: one address legitimately carries many
+    #: people (an office behind NAT), while one identity legitimately carries
+    #: one. Setting the address limit as tight as the identity limit would lock
+    #: out a whole office; setting the identity limit as loose as the address
+    #: limit would leave a single account open to sustained guessing.
+    per_source_ip_per_minute: int | None = None
+
     # --- concurrency: bounded work IN FLIGHT ---
     max_active_per_user: int | None = None
     max_active_global: int | None = None
@@ -126,7 +151,8 @@ class AdmissionPolicy:
     def __post_init__(self) -> None:
         # Validated at import, so a malformed policy is a startup failure rather
         # than a limit that silently never triggers.
-        for field_name in ("per_user_per_minute", "max_active_per_user", "max_active_global"):
+        for field_name in ("per_user_per_minute", "per_source_ip_per_minute",
+                           "max_active_per_user", "max_active_global"):
             value = getattr(self, field_name)
             if value is None:
                 continue
@@ -160,6 +186,24 @@ class AdmissionPolicy:
         return self.per_user_per_minute + self.burst
 
     @property
+    def source_rate_allowance(self) -> int | None:
+        """Attempts permitted in one window from one source address."""
+        if self.per_source_ip_per_minute is None:
+            return None
+        return self.per_source_ip_per_minute + self.burst
+
+    def allowance_for(self, scope_type: ScopeType) -> int | None:
+        """The window allowance that applies to one scope.
+
+        Routed through a method so `_check_rate` cannot pick the wrong number by
+        reading the wrong attribute: the mapping from scope to allowance is
+        written once, here.
+        """
+        if scope_type is ScopeType.IP:
+            return self.source_rate_allowance
+        return self.rate_allowance
+
+    @property
     def tracks_concurrency(self) -> bool:
         return self.max_active_per_user is not None or self.max_active_global is not None
 
@@ -191,12 +235,19 @@ _POLICIES: tuple[AdmissionPolicy, ...] = (
         on_store_failure=StoreFailurePolicy.FAIL_OPEN,
         retry_after_seconds=15,
     ),
-    # Credential-testing surface. Scoped per identity AND per source address by
-    # the caller, because an unauthenticated attempt has no user yet. Tight, and
-    # fail-closed: if the limiter is down, slowing logins is the safer failure.
+    # Credential-testing surface, and the only class with no principal to bill:
+    # an attempt is throttled per CLAIMED IDENTITY and per SOURCE ADDRESS, and
+    # either one may refuse it. Two scopes because one attack evades each:
+    #   * sustained guessing at one account arrives from many addresses, so the
+    #     address counter never fills — the identity counter is what stops it;
+    #   * credential stuffing sprays thousands of distinct accounts, so no
+    #     identity counter fills — the address counter is what stops it.
+    # Fail-closed: if the limiter cannot answer, slowing logins is the safer
+    # failure, and login is not the surface to guess about.
     AdmissionPolicy(
         OperationClass.AUTH_ATTEMPT,
         per_user_per_minute=10,
+        per_source_ip_per_minute=30,
         burst=5,
         on_store_failure=StoreFailurePolicy.FAIL_CLOSED,
         retry_after_seconds=60,
@@ -330,6 +381,7 @@ def _configured(base: tuple[AdmissionPolicy, ...]) -> dict[OperationClass, Admis
     resolved[OperationClass.AUTH_ATTEMPT] = replace(
         resolved[OperationClass.AUTH_ATTEMPT],
         per_user_per_minute=settings.rate_limit_auth_per_minute,
+        per_source_ip_per_minute=settings.rate_limit_auth_per_source_ip_per_minute,
     )
     resolved[OperationClass.ANALYSIS_RUN] = replace(
         resolved[OperationClass.ANALYSIS_RUN],

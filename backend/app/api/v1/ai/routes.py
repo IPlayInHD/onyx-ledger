@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import current_user_id, db_authed
 from app.core.exceptions import NotFound
 from app.database.models import AiConversation, AiMessage
+from app.services.admission import OperationClass, admission_guard
+from app.services.admission.guard import user_scope
 from app.services.ai.service import AiService
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -25,10 +27,19 @@ async def create_conversation(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> dict:
-    conv = AiConversation(user_id=user_id, title="New conversation")
-    session.add(conv)
-    await session.flush()
-    return {"id": str(conv.id), "title": conv.title}
+    """Open an empty conversation.
+
+    One INSERT, so it is a NORMAL_WRITE rather than an AI_EXPLAIN — but it is
+    still an unbounded row creator, and a loop against it costs the platform
+    storage without ever touching the expensive path.
+    """
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        conv = AiConversation(user_id=user_id, title="New conversation")
+        session.add(conv)
+        await session.flush()
+        return {"id": str(conv.id), "title": conv.title}
 
 
 @router.post("/conversations/{conversation_id}/messages")
@@ -37,9 +48,20 @@ async def ask(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> dict:
-    return await AiService(session).ask(
-        user_id, body.question, body.tax_year, conversation_id=conversation_id
-    )
+    """Ask within an existing conversation.
+
+    AI_EXPLAIN, because the work is retrieval plus a completion: a vector search
+    over the year's published rules, a lazy REINDEX of that year on first use,
+    and a provider call whose cost lives outside this process. That last part is
+    exactly why the ceiling has to be here — nothing downstream of this handler
+    is in a position to refuse.
+    """
+    async with admission_guard(
+        OperationClass.AI_EXPLAIN, scope_id=user_scope(user_id)
+    ):
+        return await AiService(session).ask(
+            user_id, body.question, body.tax_year, conversation_id=conversation_id
+        )
 
 
 @router.post("/ask", status_code=status.HTTP_201_CREATED)
@@ -49,7 +71,10 @@ async def ask_new(
     session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """One-shot: starts a new conversation and answers."""
-    return await AiService(session).ask(user_id, body.question, body.tax_year)
+    async with admission_guard(
+        OperationClass.AI_EXPLAIN, scope_id=user_scope(user_id)
+    ):
+        return await AiService(session).ask(user_id, body.question, body.tax_year)
 
 
 @router.get("/conversations/{conversation_id}/messages")

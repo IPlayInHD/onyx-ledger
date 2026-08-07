@@ -8,9 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import client_ip, current_admin_id, db_admin, db_anon
+from app.core.exceptions import ValidationError
 from app.core.security.jwt import create_admin_token
 from app.database.models import RuleChangeRequest, TaxRule, TaxRuleVersion
 from app.services.admin.service import AdminService
+from app.services.admission import OperationClass, ScopeType, admission_guard
+from app.services.admission.auth import admit_auth_attempt
+from app.services.admission.guard import admin_scope
+from app.services.admission.limits import MAX_IMPORT_BYTES
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -29,8 +34,14 @@ class IngestionJob(BaseModel):
 async def admin_login(
     body: AdminLogin, request: Request, session: AsyncSession = Depends(db_anon)
 ) -> dict:
+    """Operator login.
+
+    Throttled on the same class as user login, and if anything it matters more
+    here: the population of valid operator addresses is tiny, which makes this
+    the highest-value guessing target in the product.
+    """
+    await admit_auth_attempt(source_ip=client_ip(request), subject=body.email)
     admin = await AdminService(session).authenticate(body.email, body.password)
-    _ = client_ip(request)
     return {"access_token": create_admin_token(admin.id), "token_type": "bearer"}
 
 
@@ -41,8 +52,23 @@ async def create_ingestion_job(
     session: AsyncSession = Depends(db_admin),
 ) -> dict:
     """Raw dataset -> Extract -> Validate -> Transform -> DRAFT rule versions +
-    a pending four-eyes change request per rule."""
-    return await AdminService(session).ingest(admin_id, body.payload, body.format)
+    a pending four-eyes change request per rule.
+
+    The same cost class as a TKMS import: it parses a whole dataset and writes a
+    draft version plus a change request per rule. Bounded on bytes first, then
+    on the acting operator's import allowance.
+    """
+    payload_bytes = body.payload.encode("utf-8")
+    if len(payload_bytes) > MAX_IMPORT_BYTES:
+        raise ValidationError(
+            f"import payload exceeds the {MAX_IMPORT_BYTES} byte maximum"
+        )
+    async with admission_guard(
+        OperationClass.IMPORT_RUN,
+        scope_id=admin_scope(admin_id),
+        scope_type=ScopeType.ADMIN,
+    ):
+        return await AdminService(session).ingest(admin_id, body.payload, body.format)
 
 
 @router.post("/change-requests/{change_request_id}/approve")
@@ -61,9 +87,23 @@ async def publish_rule(
     admin_id: uuid.UUID = Depends(current_admin_id),
     session: AsyncSession = Depends(db_admin),
 ) -> dict:
-    v = await AdminService(session).publish(admin_id, version_id)
-    return {"version_id": str(v.id), "status": v.status,
-            "published_at": v.published_at.isoformat() if v.published_at else None}
+    """Activate an approved rule version.
+
+    Guarded on the ACTING OPERATOR, and the guard is outside the service call so
+    a refusal happens BEFORE activation — no version transitions to published,
+    and no freshness event is emitted for a publication that did not occur. A
+    guard placed inside the service, after the status change, would bound
+    nothing that matters: the invalidation storm is the cost, and it would
+    already have been paid.
+    """
+    async with admission_guard(
+        OperationClass.ADMIN_RULE_PUBLISH,
+        scope_id=admin_scope(admin_id),
+        scope_type=ScopeType.ADMIN,
+    ):
+        v = await AdminService(session).publish(admin_id, version_id)
+        return {"version_id": str(v.id), "status": v.status,
+                "published_at": v.published_at.isoformat() if v.published_at else None}
 
 
 @router.get("/rules")

@@ -23,7 +23,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from app.database.session import unit_of_work
-from app.services.admission.policy import OperationClass
+from app.services.admission.policy import OperationClass, ScopeType
 from app.services.admission.service import (
     AdmissionService,
     AdmissionTicket,
@@ -35,6 +35,7 @@ async def admission_guard(
     operation: OperationClass,
     *,
     scope_id: str,
+    scope_type: ScopeType = ScopeType.USER,
     dedupe_key: str | None = None,
 ) -> AsyncIterator[AdmissionTicket]:
     """Admit, run the body, release. Raises `AdmissionRejected` before the body.
@@ -48,7 +49,7 @@ async def admission_guard(
     """
     async with unit_of_work(actor_type="system") as session:
         ticket = await AdmissionService(session).admit(
-            operation, scope_id=scope_id, dedupe_key=dedupe_key
+            operation, scope_id=scope_id, scope_type=scope_type, dedupe_key=dedupe_key
         )
 
     try:
@@ -73,6 +74,19 @@ def user_scope(user_id: uuid.UUID) -> str:
     return str(user_id)
 
 
+def admin_scope(admin_id: uuid.UUID) -> str:
+    """The scope key for an operator principal.
+
+    A separate function from `user_scope` even though both stringify a UUID,
+    because they are different populations with different budgets, and the pair
+    (`ScopeType.ADMIN`, this id) is what keeps an operator's expensive work off
+    a tenant's ledger. Keyed on the ACTING OPERATOR, never on the entity being
+    operated on: keying a publish limit on the rule version would give an
+    operator a fresh allowance for every version they touched.
+    """
+    return str(admin_id)
+
+
 def owned_dedupe_key(user_id: uuid.UUID, *parts: str) -> str:
     """A dedupe key that is always scoped to its owner.
 
@@ -84,4 +98,4 @@ def owned_dedupe_key(user_id: uuid.UUID, *parts: str) -> str:
     return ":".join([str(user_id), *parts])
 
 
-__all__ = ["admission_guard", "owned_dedupe_key", "user_scope"]
+__all__ = ["admin_scope", "admission_guard", "owned_dedupe_key", "user_scope"]

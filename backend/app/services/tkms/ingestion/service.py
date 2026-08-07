@@ -20,6 +20,7 @@ from app.core.exceptions import Conflict, NotFound, ValidationError
 from app.database.models import ExtractedRule as ExtractedRuleRow
 from app.database.models import ImportJob, ParseResult, RawDocument
 from app.integrations.storage import LocalObjectStorage, get_object_storage
+from app.services.admission.limits import MAX_IMPORT_ROWS
 from app.services.tkms.parsers import build_default_registry
 from app.services.tkms.parsers.base import BaseParser
 from app.services.tkms.parsers.registry import ParserRegistry
@@ -194,6 +195,25 @@ class ImportService:
             job.error = f"extract: {e}"
             await self.s.flush()
             raise
+
+        # THE row bound, enforced where the count is first known and before a
+        # single row is staged. A byte bound on the payload does not imply this
+        # one: a compact document can expand into an enormous ruleset, and it is
+        # the staged rows — not the source bytes — that fill the review queue and
+        # the change-request table. Refused rather than truncated, because a
+        # silently truncated import would present a partial ruleset to a reviewer
+        # as if it were the whole document.
+        if len(ruleset.rules) > MAX_IMPORT_ROWS:
+            message = (
+                f"extraction produced {len(ruleset.rules)} rules, above the "
+                f"{MAX_IMPORT_ROWS} row maximum for one import"
+            )
+            pr.status = "failed"
+            pr.error = message
+            job.status = "failed"
+            job.error = f"extract: {message}"
+            await self.s.flush()
+            raise ValidationError(message)
 
         rows: list[ExtractedRuleRow] = []
         for ordinal, rule in enumerate(ruleset.rules):

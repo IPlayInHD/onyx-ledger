@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user_id, db_authed
 from app.schemas import ExpenseIn, IncomeIn, IncomeOut
+from app.services.admission import OperationClass, admission_guard
+from app.services.admission.guard import user_scope
 from app.services.financial.service import FinancialService
 
 router = APIRouter(prefix="/financials", tags=["financials"])
@@ -18,10 +20,20 @@ async def add_income(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> IncomeOut:
-    row = await FinancialService(session).add_income(
-        user_id, body.tax_year, body.income_type_code, body.amount, body.source_name
-    )
-    return IncomeOut.model_validate(row)
+    """Record an income source.
+
+    NORMAL_WRITE: cheap per call, and an UNBOUNDED row creator. RLS keeps the
+    rows inside one tenant, which bounds who can read them and not how many
+    there are — a script here fills a tenant's own financial tables and, through
+    them, the cost of every later analysis over that year.
+    """
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        row = await FinancialService(session).add_income(
+            user_id, body.tax_year, body.income_type_code, body.amount, body.source_name
+        )
+        return IncomeOut.model_validate(row)
 
 
 @router.get("/income", response_model=list[IncomeOut])
@@ -40,7 +52,10 @@ async def add_expense(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> dict:
-    row = await FinancialService(session).add_expense(
-        user_id, body.tax_year, body.expense_category_code, body.amount, body.description
-    )
-    return {"id": str(row.id), "tax_year": row.tax_year, "amount": str(row.amount)}
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        row = await FinancialService(session).add_expense(
+            user_id, body.tax_year, body.expense_category_code, body.amount, body.description
+        )
+        return {"id": str(row.id), "tax_year": row.tax_year, "amount": str(row.amount)}

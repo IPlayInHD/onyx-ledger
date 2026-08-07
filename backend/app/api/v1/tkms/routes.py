@@ -16,6 +16,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_admin_id, db_admin
+from app.core.exceptions import ValidationError
 from app.database.models import (
     ChangeItem,
     ChangeReport,
@@ -30,6 +31,9 @@ from app.database.models import (
     ExtractedRule as ExtractedRuleRow,
 )
 from app.services.admin.service import AdminService
+from app.services.admission import OperationClass, ScopeType, admission_guard
+from app.services.admission.guard import admin_scope, owned_dedupe_key
+from app.services.admission.limits import MAX_IMPORT_BYTES
 from app.services.tkms.governance.service import GovernanceService
 from app.services.tkms.ingestion.service import ImportService
 from app.services.tkms.parsers import build_default_registry
@@ -72,19 +76,49 @@ async def create_import(
     admin_id: uuid.UUID = Depends(current_admin_id),
     session: AsyncSession = Depends(db_admin),
 ) -> dict:
+    """Ingest a legislation document and run the governed pipeline.
+
+    THREE bounds, in the order they cost something:
+
+      1. the payload's real encoded size, refused before a row is written;
+      2. admission on the acting operator, refused before parsing starts;
+      3. `MAX_IMPORT_ROWS` inside `ImportService.extract`, which is where the
+         staged-row count is actually known — a small document can expand into
+         an enormous ruleset, so a byte bound does not imply a row bound.
+
+    Authorization comes FIRST, before the byte check and before admission: an
+    operator without `tkms.import` must not be able to spend an admission
+    allowance, and must not learn anything from the difference between "too
+    large" and "not permitted".
+    """
     admin = AdminService(session)
     await admin.require_permission(admin_id, "tkms.import")
-    imp = ImportService(session)
-    job = await imp.create_job(
-        source_org=body.source_org, fmt=body.format, operator_admin_id=admin_id,
-        jurisdiction_code=body.jurisdiction_code, province_code=body.province_code,
-        tax_year=body.tax_year, source_url=body.source_url,
-        document_version=body.document_version, parser_name=body.parser_name,
-        parser_version=body.parser_version,
-    )
-    await imp.store_raw(job.id, body.payload.encode("utf-8"))
-    summary = await run_ingestion_pipeline(session, job.id)
-    return {"job_id": str(job.id), **summary}
+
+    # `len(str)` counts characters; the payload is stored and hashed as UTF-8
+    # bytes, and a multi-byte document is up to four times larger than its
+    # character count suggests. The bound is on what is actually stored.
+    payload_bytes = body.payload.encode("utf-8")
+    if len(payload_bytes) > MAX_IMPORT_BYTES:
+        raise ValidationError(
+            f"import payload exceeds the {MAX_IMPORT_BYTES} byte maximum"
+        )
+
+    async with admission_guard(
+        OperationClass.IMPORT_RUN,
+        scope_id=admin_scope(admin_id),
+        scope_type=ScopeType.ADMIN,
+    ):
+        imp = ImportService(session)
+        job = await imp.create_job(
+            source_org=body.source_org, fmt=body.format, operator_admin_id=admin_id,
+            jurisdiction_code=body.jurisdiction_code, province_code=body.province_code,
+            tax_year=body.tax_year, source_url=body.source_url,
+            document_version=body.document_version, parser_name=body.parser_name,
+            parser_version=body.parser_version,
+        )
+        await imp.store_raw(job.id, payload_bytes)
+        summary = await run_ingestion_pipeline(session, job.id)
+        return {"job_id": str(job.id), **summary}
 
 
 @router.post("/imports/{job_id}/reparse")
@@ -95,22 +129,38 @@ async def reparse_import(
     parser_name: str | None = None,
     parser_version: str | None = None,
 ) -> dict:
+    """Re-run the pipeline for an existing job.
+
+    The same class as a fresh import, because it costs the same: it discards the
+    prior parse and re-executes every stage. Deduped on the job, so a retry
+    storm against one job resolves to the run already in flight rather than
+    stacking full re-parses of the same document.
+    """
     admin = AdminService(session)
     await admin.require_permission(admin_id, "tkms.import")
     job = await session.get(ImportJob, job_id)
     if job is None:
         from app.core.exceptions import NotFound
         raise NotFound("Import job not found")
-    if parser_name:
-        job.parser_name = parser_name
-        job.parser_version = parser_version
-    # drop the prior parse so the pipeline re-runs from parse
-    from app.database.models import ParseResult
-    for pr in await session.scalars(select(ParseResult).where(ParseResult.import_job_id == job_id)):
-        pr.status = "superseded"
-    await session.flush()
-    summary = await run_ingestion_pipeline(session, job_id)
-    return {"job_id": str(job_id), **summary}
+
+    async with admission_guard(
+        OperationClass.IMPORT_RUN,
+        scope_id=admin_scope(admin_id),
+        scope_type=ScopeType.ADMIN,
+        dedupe_key=owned_dedupe_key(admin_id, "reparse", str(job_id)),
+    ):
+        if parser_name:
+            job.parser_name = parser_name
+            job.parser_version = parser_version
+        # drop the prior parse so the pipeline re-runs from parse
+        from app.database.models import ParseResult
+        for pr in await session.scalars(
+            select(ParseResult).where(ParseResult.import_job_id == job_id)
+        ):
+            pr.status = "superseded"
+        await session.flush()
+        summary = await run_ingestion_pipeline(session, job_id)
+        return {"job_id": str(job_id), **summary}
 
 
 @router.get("/imports")
@@ -257,9 +307,21 @@ async def publish_version(
     admin_id: uuid.UUID = Depends(current_admin_id),
     session: AsyncSession = Depends(db_admin),
 ) -> dict:
-    v = await PublicationService(session).publish(admin_id, version_id, reindex=True)
-    return {"version_id": str(v.id), "status": v.status,
-            "published_at": v.published_at.isoformat() if v.published_at else None}
+    """Publish an approved version and reindex the knowledge base.
+
+    Costlier than the `/admin/rules/{id}/publish` path — it reindexes — and
+    guarded on the same class and the same principal. Refused BEFORE the
+    publication, so a rejected call leaves no published version, no reindex and
+    no freshness event behind.
+    """
+    async with admission_guard(
+        OperationClass.ADMIN_RULE_PUBLISH,
+        scope_id=admin_scope(admin_id),
+        scope_type=ScopeType.ADMIN,
+    ):
+        v = await PublicationService(session).publish(admin_id, version_id, reindex=True)
+        return {"version_id": str(v.id), "status": v.status,
+                "published_at": v.published_at.isoformat() if v.published_at else None}
 
 
 # ---- rollback ---------------------------------------------------------------

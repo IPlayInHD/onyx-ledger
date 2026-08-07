@@ -54,4 +54,21 @@ async def db_admin(admin_id: uuid.UUID = Depends(current_admin_id)) -> AsyncIter
 
 
 def client_ip(request: Request) -> str | None:
+    """The TRANSPORT peer address. Never a header.
+
+    `X-Forwarded-For`, `Forwarded` and `X-Real-IP` are all caller-supplied
+    strings. Reading any of them here would let a caller choose its own
+    rate-limit key — a fresh address per request is the same as having no limit
+    — and would let it pin the blame for its attempts on somebody else's
+    address. `request.client` comes from the ASGI server's socket, which the
+    caller cannot forge.
+
+    The cost of this choice is real and accepted: behind a load balancer that
+    does not use PROXY protocol, every request appears to come from the
+    balancer, so the address scope degenerates to one bucket. That fails toward
+    over-throttling one shared bucket rather than toward no throttling at all,
+    and the per-identity scope (see `app.services.admission.auth`) is unaffected
+    either way. Trusting a header would have to come with a configured list of
+    trusted proxy hops; until that exists, this refuses to guess.
+    """
     return request.client.host if request.client else None

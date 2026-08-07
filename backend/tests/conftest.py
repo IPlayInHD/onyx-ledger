@@ -6,6 +6,7 @@ connecting as a NON-superuser role (so RLS is enforced). The test runner
 """
 from __future__ import annotations
 
+import itertools
 import os
 
 import httpx
@@ -19,16 +20,53 @@ os.environ.setdefault(
 os.environ.setdefault("ONYX_JWT_SECRET", "test-secret-at-least-32-bytes-long-000")
 
 
+#: Distinct source address per test client. `ASGITransport` otherwise reports
+#: every request as coming from 127.0.0.1, which — now that AUTH_ATTEMPT is
+#: throttled per source address — would make the whole suite one caller sharing
+#: one allowance, and tests would start failing on each other's login traffic.
+#:
+#: This makes the fixture REALISTIC, not permissive: the production limit is
+#: unchanged and still enforced, and a test that wants to exercise the address
+#: limit uses `client_from_one_address` below to pin two clients together.
+_source_addresses = itertools.count(1)
+
+
+def next_source_address() -> str:
+    n = next(_source_addresses)
+    return f"10.{n // 65536 % 256}.{n // 256 % 256}.{n % 256}"
+
+
 @pytest_asyncio.fixture
 async def client():
     from app.database.session import engine
     from app.main import app  # imported after env is set
 
-    transport = httpx.ASGITransport(app=app)
+    transport = httpx.ASGITransport(app=app, client=(next_source_address(), 40000))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
     # Dispose the pool so connections aren't reused across per-test event loops.
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+def client_from_one_address():
+    """Factory for clients that all appear to come from the SAME address.
+
+    For the throttling tests, where sharing a source address is the point.
+    """
+    import contextlib
+
+    from app.main import app
+
+    address = next_source_address()
+
+    @contextlib.asynccontextmanager
+    async def _make():
+        transport = httpx.ASGITransport(app=app, client=(address, 40000))
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+
+    return _make
 
 
 def owner_dsn() -> str:

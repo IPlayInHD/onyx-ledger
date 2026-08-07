@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     admission_enabled: bool = True
 
     rate_limit_auth_per_minute: int = 10
+    #: Login attempts from ONE source address. Deliberately looser than the
+    #: per-identity limit: one address legitimately carries a whole office
+    #: behind NAT, while one identity legitimately carries one person.
+    rate_limit_auth_per_source_ip_per_minute: int = 30
     rate_limit_analysis_per_minute: int = 10
     rate_limit_optimization_per_minute: int = 6
     rate_limit_scenario_per_minute: int = 20
@@ -90,6 +94,15 @@ class Settings(BaseSettings):
     #: still working.
     admission_lease_seconds: int = 900
 
+    #: Secret for the keyed digests that stand in for an email address or a
+    #: source address in `admission.rate_counter`. DEDICATED rather than a reuse
+    #: of `jwt_secret`: the two have different blast radii and different rotation
+    #: schedules, and a signing key that has also been used as a digest key
+    #: cannot be rotated without silently resetting every throttle counter.
+    #: Rotating this one IS safe — it only re-partitions counters that expire
+    #: within a minute anyway.
+    admission_identity_secret: str = Field(default="dev-insecure-change-me")
+
     # --- object storage ---
     s3_endpoint_url: str | None = None
     s3_bucket_documents: str = "onyx-documents"
@@ -101,6 +114,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "rate_limit_auth_per_minute",
+        "rate_limit_auth_per_source_ip_per_minute",
         "rate_limit_analysis_per_minute",
         "rate_limit_optimization_per_minute",
         "rate_limit_scenario_per_minute",
@@ -143,6 +157,34 @@ class Settings(BaseSettings):
                     f"{per_user} ({getattr(self, per_user)}) exceeds "
                     f"{global_cap} ({getattr(self, global_cap)}), so the "
                     "per-user limit could never be reached"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _identity_secret_is_real_in_production(self) -> Settings:
+        """The dev default must not reach production.
+
+        `admission_identity_secret` is what stops `admission.rate_counter` from
+        being a searchable list of the email addresses people tried to log in
+        with. Left at the compiled-in default it is public, so the digests are
+        reversible by anyone with the source — which is everyone. Checked HERE,
+        at startup, rather than trusted to a deployment checklist: a checklist
+        failure is silent and this one is loud.
+
+        Development and test keep the default on purpose; a required secret in
+        every local shell buys nothing and gets pasted into a repository.
+        """
+        if self.environment == "production":
+            if self.admission_identity_secret == "dev-insecure-change-me":
+                raise ValueError(
+                    "ONYX_ADMISSION_IDENTITY_SECRET is still the development "
+                    "default in production; set it to a generated secret"
+                )
+            if len(self.admission_identity_secret) < 32:
+                raise ValueError(
+                    "ONYX_ADMISSION_IDENTITY_SECRET must be at least 32 "
+                    "characters; a short key is brute-forceable against a "
+                    "known email address"
                 )
         return self
 

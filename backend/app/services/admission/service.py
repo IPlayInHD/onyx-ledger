@@ -158,6 +158,28 @@ class AdmissionTicket:
         return self.lease_id is not None and not self.duplicate_of_active
 
 
+@dataclass(frozen=True)
+class AuthAdmissionDecision:
+    """The outcome of charging a credential attempt, carried out of the
+    transaction so the rejection can be raised after the counters commit.
+
+    Says whether the attempt may proceed and when to come back. Deliberately
+    NOT which of the two scopes refused: that would tell an unauthenticated
+    caller whether the address it typed is one the platform is tracking.
+    """
+
+    accepted: bool
+    retry_after_seconds: int
+
+    def raise_if_rejected(self) -> None:
+        if not self.accepted:
+            raise AdmissionRejected(
+                OperationClass.AUTH_ATTEMPT,
+                RejectionReason.AUTH_RATE_LIMIT,
+                self.retry_after_seconds,
+            )
+
+
 def _lock_key(scope_type: ScopeType, scope_id: str, operation: OperationClass) -> int:
     """A stable 63-bit advisory-lock key for one (scope, operation) pair.
 
@@ -195,8 +217,11 @@ class AdmissionService:
         One statement. The conditional DO UPDATE means concurrent callers
         serialize on the counter row and the increment stops exactly at the
         allowance — there is no read-then-write gap to lose.
+
+        The allowance depends on the scope: a source address and a claimed
+        identity are bounded by different numbers (see `AdmissionPolicy`).
         """
-        allowance = policy.rate_allowance
+        allowance = policy.allowance_for(scope_type)
         if allowance is None:
             return True
 
@@ -316,6 +341,67 @@ class AdmissionService:
         )
         return lease_id
 
+    # -------------------------------------------------------------- pre-auth --
+    async def charge_auth_attempt(
+        self,
+        *,
+        source_scope_id: str,
+        subject_scope_id: str,
+        now: datetime | None = None,
+    ) -> AuthAdmissionDecision:
+        """Charge one credential attempt to BOTH pre-authentication scopes.
+
+        Returns a decision instead of raising, and the distinction is
+        load-bearing. `_reject` raises, and an exception inside the caller's
+        transaction rolls it back — which would undo the source-address
+        increment whenever the identity limit was the one that refused. The
+        source counter would then never fill while an attacker hammered a single
+        account, and the limit that exists to catch credential stuffing would be
+        silently uncountable.
+
+        So: charge both, commit, and let the caller raise afterwards. Both
+        counters advance on every attempt, whichever limit ends up refusing it.
+
+        A store failure still raises from here — `AUTH_ATTEMPT` is FAIL_CLOSED,
+        and there is no partial state worth committing when the store cannot
+        answer at all.
+        """
+        policy = policy_for(OperationClass.AUTH_ATTEMPT)
+        now = now or datetime.now(tz=UTC)
+        ADMISSION_REQUESTS[OperationClass.AUTH_ATTEMPT.value] += 1
+
+        try:
+            source_ok = await self._check_rate(
+                policy, ScopeType.IP, source_scope_id, now=now)
+            subject_ok = await self._check_rate(
+                policy, ScopeType.AUTH_SUBJECT, subject_scope_id, now=now)
+        except (SQLAlchemyError, DBAPIError) as exc:
+            self._on_store_failure(policy, source_scope_id, exc)
+            raise  # unreachable: AUTH_ATTEMPT is FAIL_CLOSED, which raises above
+
+        accepted = source_ok and subject_ok
+        if accepted:
+            ADMISSION_ACCEPTED[OperationClass.AUTH_ATTEMPT.value] += 1
+            log.info("admission", operation=OperationClass.AUTH_ATTEMPT.value,
+                     decision="ACCEPTED")
+        else:
+            # Counted here, raised by the caller after the commit. The metric
+            # records WHICH scope refused, because "stuffing across accounts"
+            # and "guessing at one account" need different responses — but only
+            # as a bounded code, never with the scope id attached.
+            ADMISSION_REJECTED[
+                f"{OperationClass.AUTH_ATTEMPT.value}:"
+                f"{RejectionReason.AUTH_RATE_LIMIT.value}:"
+                f"{'SOURCE' if not source_ok else 'SUBJECT'}"
+            ] += 1
+            log.info("admission", operation=OperationClass.AUTH_ATTEMPT.value,
+                     decision="REJECTED",
+                     reason=RejectionReason.AUTH_RATE_LIMIT.value,
+                     scope="SOURCE" if not source_ok else "SUBJECT")
+        return AuthAdmissionDecision(
+            accepted=accepted, retry_after_seconds=policy.retry_after_seconds
+        )
+
     # ------------------------------------------------------------------ api --
     async def admit(
         self,
@@ -356,7 +442,16 @@ class AdmissionService:
 
         # 1 · rate, per principal
         if not await self._check_rate(policy, scope_type, scope_id, now=now):
-            self._reject(operation, RejectionReason.USER_RATE_LIMIT, policy, scope_id)
+            # AUTH_ATTEMPT gets its own code. USER_RATE_LIMIT would be a lie
+            # before authentication — there is no user yet — and a caller who
+            # reads it as "MY account is limited" has learned that the account
+            # exists, which is the one thing the login surface must not say.
+            reason = (
+                RejectionReason.AUTH_RATE_LIMIT
+                if operation is OperationClass.AUTH_ATTEMPT
+                else RejectionReason.USER_RATE_LIMIT
+            )
+            self._reject(operation, reason, policy, scope_id)
 
         if not policy.tracks_concurrency:
             ADMISSION_ACCEPTED[operation.value] += 1
@@ -542,6 +637,7 @@ __all__ = [
     "AdmissionRejected",
     "AdmissionService",
     "AdmissionTicket",
+    "AuthAdmissionDecision",
     "admission_metrics",
     "reset_admission_metrics",
 ]

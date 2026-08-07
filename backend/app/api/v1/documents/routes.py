@@ -129,8 +129,17 @@ async def confirm(
     user_id: uuid.UUID = Depends(current_user_id),
     session: AsyncSession = Depends(db_authed),
 ) -> dict:
-    created = await DocumentService(session).confirm(user_id, document_id, body.tax_year)
-    return {"created": created}
+    """Turn a confirmed extraction into income/expense rows.
+
+    NORMAL_WRITE rather than DOCUMENT_PROCESS: no extraction runs here, but each
+    call writes a row per extracted field plus a provenance link, so repeated
+    confirmation of one document is an unbounded row creator.
+    """
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        created = await DocumentService(session).confirm(user_id, document_id, body.tax_year)
+        return {"created": created}
 
 
 @router.get("")

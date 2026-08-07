@@ -3,7 +3,9 @@
 Bounds how much expensive work one principal, or the platform, can have in
 flight — decided before the expensive work starts.
 """
+from app.services.admission.auth import admit_auth_attempt
 from app.services.admission.guard import (
+    admin_scope,
     admission_guard,
     owned_dedupe_key,
     user_scope,
@@ -22,6 +24,7 @@ from app.services.admission.service import (
     AdmissionRejected,
     AdmissionService,
     AdmissionTicket,
+    AuthAdmissionDecision,
     admission_metrics,
     reset_admission_metrics,
 )
@@ -33,12 +36,15 @@ __all__ = [
     "AdmissionRejected",
     "AdmissionService",
     "AdmissionTicket",
+    "AuthAdmissionDecision",
     "OperationClass",
     "RejectionReason",
     "ScopeType",
     "StoreFailurePolicy",
+    "admin_scope",
     "admission_guard",
     "admission_metrics",
+    "admit_auth_attempt",
     "owned_dedupe_key",
     "policy_for",
     "reset_admission_metrics",
