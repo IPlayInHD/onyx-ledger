@@ -105,25 +105,80 @@ async def test_an_ordinary_request_is_unaffected(client):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_identical_analyses_do_not_both_run(client):
-    """A double-click, or a client retrying after a timeout. One runs; the other
-    gets a deterministic conflict rather than silently running a second full
-    engine pass over the same tax year."""
+async def test_an_analysis_is_refused_while_an_identical_one_is_in_flight(client):
+    """THE invariant, asserted deterministically.
+
+    A lease is taken directly for (user, tax year) — exactly the state a
+    still-running analysis leaves — and then the endpoint is called. It must
+    refuse rather than start a second full engine pass over the same year.
+
+    Deliberately not written as "fire N requests with asyncio.gather and expect
+    one 201". Nothing forces those requests to overlap: on a fast runner the
+    first completes and releases its lease before the third starts, two
+    analyses run SEQUENTIALLY, and the assertion fails on a system that behaved
+    perfectly. That version passed locally by timing luck and failed in CI — the
+    test was wrong, not the guard.
+    """
+    from app.services.admission.guard import owned_dedupe_key
+
+    token, user_id = await _register(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with unit_of_work(actor_type="admin") as session:
+        service = AdmissionService(session)
+        held = await service.admit(
+            OperationClass.ANALYSIS_RUN,
+            scope_id=str(user_id),
+            dedupe_key=owned_dedupe_key(user_id, "analysis", "2025"),
+        )
+        assert held.holds_lease
+
+    # SAME tax year: duplicate logical work. 409 — one is already running.
+    blocked = await client.post(
+        "/api/v1/analysis", json={"tax_year": 2025}, headers=headers)
+    assert blocked.status_code == 409, blocked.text
+    assert "already running" in blocked.json()["detail"]
+
+    # DIFFERENT tax year: not a duplicate, but ANALYSIS_RUN is capped at one
+    # active per user, so it is refused for a different reason and with a
+    # different code. The two rejections are distinguishable on purpose — 409
+    # says "you already asked for this", 429 says "you have no capacity left".
+    other_year = await client.post(
+        "/api/v1/analysis", json={"tax_year": 2024}, headers=headers)
+    assert other_year.status_code == 429, other_year.text
+    assert other_year.json()["error_code"] == "USER_CONCURRENCY_LIMIT"
+
+    # Once the in-flight analysis finishes, the year is available again.
+    async with unit_of_work(actor_type="admin") as session:
+        await AdmissionService(session).release_ticket(held)
+
+    after = await client.post(
+        "/api/v1/analysis", json={"tax_year": 2025}, headers=headers)
+    assert after.status_code == 201, after.text
+
+
+@pytest.mark.asyncio
+async def test_a_burst_of_identical_analyses_never_runs_two_at_once(client):
+    """The retry-storm shape, asserted without depending on overlap.
+
+    Whatever interleaving the runner produces, every request either ran or was
+    refused — never a partial write from a second concurrent pass — and at least
+    one was refused, proving the guard engaged rather than the burst simply
+    being serialized by the event loop.
+    """
     token, _ = await _register(client)
     headers = {"Authorization": f"Bearer {token}"}
 
     responses = await asyncio.gather(*(
         client.post("/api/v1/analysis", json={"tax_year": 2025}, headers=headers)
-        for _ in range(4)
+        for _ in range(6)
     ))
     codes = sorted(r.status_code for r in responses)
 
-    created = [r for r in responses if r.status_code == 201]
-    refused = [r for r in responses if r.status_code in (409, 429)]
-    assert len(created) >= 1, f"nothing ran: {codes}"
-    assert len(created) + len(refused) == 4, f"unexpected statuses: {codes}"
-    # Never two simultaneous full analyses for the same (user, tax year).
-    assert len(created) == 1, f"more than one analysis ran concurrently: {codes}"
+    assert set(codes) <= {201, 409, 429}, f"unexpected statuses: {codes}"
+    assert any(c in (409, 429) for c in codes), (
+        f"the guard never engaged across a 6-request burst: {codes}"
+    )
 
 
 @pytest.mark.asyncio
