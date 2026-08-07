@@ -46,11 +46,18 @@ async def admission_guard(
 
     The release runs in a `finally`, so a failing operation returns its slot
     rather than holding it until expiry.
+
+    THE REJECTION IS RAISED AFTER THE COMMIT, not inside it. Raising from inside
+    the transaction rolls back the rate-counter increment the decision was based
+    on, so a caller being refused never accumulated any rate-limit budget and
+    could retry forever — paying a full advisory-lock acquisition each time
+    while holding a pooled connection. See `AdmissionOutcome`.
     """
     async with unit_of_work(actor_type="system") as session:
-        ticket = await AdmissionService(session).admit(
+        outcome = await AdmissionService(session).evaluate(
             operation, scope_id=scope_id, scope_type=scope_type, dedupe_key=dedupe_key
         )
+    ticket = outcome.raise_if_rejected()
 
     try:
         yield ticket

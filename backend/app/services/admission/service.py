@@ -194,6 +194,48 @@ class AdmissionTicket:
 
 
 @dataclass(frozen=True)
+class AdmissionOutcome:
+    """A decision, carried OUT of the transaction that made it.
+
+    This type exists because of a defect, and the defect is worth stating: the
+    rate counter is incremented inside the caller's transaction, and raising the
+    rejection from inside that transaction rolls the increment back. So the
+    counter only ever recorded admissions that SUCCEEDED. A caller sitting at
+    its concurrency cap was refused, its attempt was un-counted, and it could
+    retry without limit — each retry paying a full advisory-lock acquisition and
+    a count query while holding a pooled connection. The rate limit, whose whole
+    job is to make exactly that storm cheap, never engaged.
+
+    Measured before the fix: 50 attempts against a scope at its cap, rate
+    allowance 8, left `request_count` at 2.
+
+    So the decision is returned, the transaction commits, and the caller raises
+    afterwards. `AuthAdmissionDecision` already did this for the credential
+    surface in Phase 2; this is the same fix applied where it should have been
+    applied then.
+    """
+
+    operation: OperationClass
+    ticket: AdmissionTicket | None = None
+    reason: RejectionReason | None = None
+    retry_after_seconds: int = 60
+
+    @property
+    def accepted(self) -> bool:
+        return self.ticket is not None
+
+    def raise_if_rejected(self) -> AdmissionTicket:
+        """The ticket, or the rejection this decision recorded."""
+        if self.ticket is not None:
+            return self.ticket
+        if self.reason is None:  # pragma: no cover - construction invariant
+            raise RuntimeError("a rejected outcome must carry a reason")
+        raise AdmissionRejected(
+            self.operation, self.reason, self.retry_after_seconds
+        )
+
+
+@dataclass(frozen=True)
 class AuthAdmissionDecision:
     """The outcome of charging a credential attempt, carried out of the
     transaction so the rejection can be raised after the counters commit.
@@ -455,10 +497,39 @@ class AdmissionService:
     ) -> AdmissionTicket:
         """Admit the operation, or raise `AdmissionRejected`.
 
+        CAUTION: raising is what rolls back the rate-counter increment, so a
+        rejection from here does NOT count the attempt against the caller's
+        window. That is correct for a caller who owns a transaction they are
+        about to abandon anyway, and wrong for anything in the request path —
+        use `evaluate()` and raise after the commit, which is what
+        `admission_guard` does.
+        """
+        return (
+            await self.evaluate(
+                operation, scope_id=scope_id, scope_type=scope_type,
+                dedupe_key=dedupe_key, now=now,
+            )
+        ).raise_if_rejected()
+
+    async def evaluate(
+        self,
+        operation: OperationClass,
+        *,
+        scope_id: str,
+        scope_type: ScopeType = ScopeType.USER,
+        dedupe_key: str | None = None,
+        now: datetime | None = None,
+    ) -> AdmissionOutcome:
+        """Decide, without raising, so the decision survives the commit.
+
         `scope_id` MUST come from the authenticated principal. Nothing here reads
         a body field or a header for identity: a caller that could name its own
         scope could spend somebody else's budget, or evade its own by inventing
         a fresh one per request.
+
+        A store FAILURE still raises: when the admission store cannot answer
+        there is no increment worth preserving, and the transaction is already
+        unusable.
         """
         policy = policy_for(operation)
         now = now or datetime.now(tz=UTC)
@@ -474,23 +545,23 @@ class AdmissionService:
         # large is malformed whether or not the platform is under strain.
         if _admission_disabled():
             ADMISSION_BYPASSED[operation.value] += 1
-            return AdmissionTicket(None, operation, scope_id)
+            return AdmissionOutcome(
+                operation, ticket=AdmissionTicket(None, operation, scope_id))
 
         try:
-            return await self._admit(policy, scope_id, scope_type, dedupe_key, now)
-        except AdmissionRejected:
-            raise
+            return await self._evaluate(policy, scope_id, scope_type, dedupe_key, now)
         except (SQLAlchemyError, DBAPIError) as exc:
-            return self._on_store_failure(policy, scope_id, exc)
+            return AdmissionOutcome(
+                operation, ticket=self._on_store_failure(policy, scope_id, exc))
 
-    async def _admit(
+    async def _evaluate(
         self,
         policy: AdmissionPolicy,
         scope_id: str,
         scope_type: ScopeType,
         dedupe_key: str | None,
         now: datetime,
-    ) -> AdmissionTicket:
+    ) -> AdmissionOutcome:
         operation = policy.operation
 
         # 1 · rate, per principal
@@ -504,11 +575,12 @@ class AdmissionService:
                 if operation is OperationClass.AUTH_ATTEMPT
                 else RejectionReason.USER_RATE_LIMIT
             )
-            self._reject(operation, reason, policy, scope_id)
+            return self._refuse(operation, reason, policy)
 
         if not policy.tracks_concurrency:
             ADMISSION_ACCEPTED[operation.value] += 1
-            return AdmissionTicket(None, operation, scope_id)
+            return AdmissionOutcome(
+                operation, ticket=AdmissionTicket(None, operation, scope_id))
 
         # 2 · an identical logical request already in flight. Checked BEFORE the
         # concurrency limits so a retry storm resolves to the running operation
@@ -523,9 +595,9 @@ class AdmissionService:
                     decision="DUPLICATE",
                     reason=RejectionReason.DUPLICATE_ACTIVE_OPERATION.value,
                 )
-                return AdmissionTicket(
+                return AdmissionOutcome(operation, ticket=AdmissionTicket(
                     existing, operation, scope_id, duplicate_of_active=True
-                )
+                ))
 
         # 3 · platform capacity BEFORE the per-principal slot, so a caller with
         # quota to spare is not charged a lease the platform has no room to run.
@@ -536,7 +608,8 @@ class AdmissionService:
                 dedupe_key=None, now=now,
             )
             if global_lease is None:
-                self._reject(operation, RejectionReason.GLOBAL_CAPACITY, policy, scope_id)
+                return self._refuse(
+                    operation, RejectionReason.GLOBAL_CAPACITY, policy)
 
         # 4 · this principal's slot
         lease_id = await self._acquire_lease(
@@ -544,32 +617,38 @@ class AdmissionService:
         )
         if lease_id is None:
             if global_lease is not None:
+                # Released rather than rolled back: the transaction COMMITS now,
+                # so the platform slot has to be handed back explicitly or it
+                # would leak on every user-concurrency rejection.
                 await self.release(global_lease, reason="CANCELLED")
-            self._reject(
-                operation, RejectionReason.USER_CONCURRENCY_LIMIT, policy, scope_id
-            )
+            return self._refuse(
+                operation, RejectionReason.USER_CONCURRENCY_LIMIT, policy)
 
         ADMISSION_ACCEPTED[operation.value] += 1
         log.info("admission", operation=operation.value, decision="ACCEPTED")
         # The global lease travels with the per-principal one, so releasing the
         # ticket releases both and platform capacity cannot leak while a user's
         # own quota is returned.
-        return AdmissionTicket(lease_id, operation, scope_id,
-                               global_lease_id=global_lease)
+        return AdmissionOutcome(operation, ticket=AdmissionTicket(
+            lease_id, operation, scope_id, global_lease_id=global_lease))
 
-    def _reject(
+    def _refuse(
         self,
         operation: OperationClass,
         reason: RejectionReason,
         policy: AdmissionPolicy,
-        scope_id: str,
-    ) -> None:
+    ) -> AdmissionOutcome:
+        """Record a refusal and RETURN it. Raising here is what caused the
+        counter to roll back; see `AdmissionOutcome`."""
         ADMISSION_REJECTED[f"{operation.value}:{reason.value}"] += 1
         # Codes only. No scope id, no counter value, no payload — this line goes
         # to the same log stream as everything else.
         log.info("admission", operation=operation.value,
                  decision="REJECTED", reason=reason.value)
-        raise AdmissionRejected(operation, reason, policy.retry_after_seconds)
+        return AdmissionOutcome(
+            operation, reason=reason,
+            retry_after_seconds=policy.retry_after_seconds,
+        )
 
     def _on_store_failure(
         self, policy: AdmissionPolicy, scope_id: str, exc: Exception
@@ -756,6 +835,7 @@ class AdmissionService:
 __all__ = [
     "ADMISSION_POLICY_VERSION",
     "GLOBAL_SCOPE_ID",
+    "AdmissionOutcome",
     "AdmissionRejected",
     "AdmissionService",
     "AdmissionTicket",

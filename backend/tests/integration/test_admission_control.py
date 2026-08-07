@@ -17,6 +17,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import text
 
 from app.database.session import unit_of_work
 from app.services.admission.policy import (
@@ -410,3 +411,130 @@ async def test_expensive_classes_fail_closed_and_cheap_reads_fail_open():
     assert POLICIES[OperationClass.CHEAP_READ].on_store_failure is (
         StoreFailurePolicy.FAIL_OPEN
     )
+
+
+@pytest.mark.asyncio
+async def test_a_refused_attempt_still_counts_against_the_rate_window():
+    """THE regression test for a defect that made the rate limit inert.
+
+    `_reject` used to raise from inside the caller's transaction, and the raise
+    rolled back the rate-counter increment the decision had just made. So the
+    counter only ever recorded admissions that SUCCEEDED. A caller sitting at
+    its concurrency cap was refused, its attempt vanished from the ledger, and
+    it could retry without limit — each retry paying a full advisory-lock
+    acquisition and a count query while holding a pooled connection. The rate
+    limit, whose entire purpose is to make that storm cheap, never engaged.
+
+    Measured before the fix: 50 attempts against a capped scope, allowance 8,
+    left request_count at 2 — exactly the number that succeeded.
+
+    Asserted here through `admission_guard`, because the fix lives at that seam:
+    the decision is returned, the transaction commits, and the rejection is
+    raised afterwards.
+    """
+    from app.services.admission.guard import admission_guard
+
+    policy = POLICIES[OperationClass.OPTIMIZATION_RUN]
+    allowance = policy.rate_allowance
+    cap = policy.max_active_per_user
+    assert allowance is not None and cap is not None
+    assert allowance > cap, "the test needs headroom between the two limits"
+
+    scope = _scope()
+    held = []
+
+    # Occupy the concurrency cap with leases that stay live.
+    async with unit_of_work(actor_type="admin") as session:
+        service = AdmissionService(session)
+        for _ in range(cap):
+            ticket = await service.admit(
+                OperationClass.OPTIMIZATION_RUN, scope_id=scope)
+            assert ticket.holds_lease
+            held.append(ticket)
+
+    reasons: dict[str, int] = {}
+    for _ in range(allowance * 3):
+        try:
+            async with admission_guard(
+                OperationClass.OPTIMIZATION_RUN, scope_id=scope
+            ):
+                pass
+            reasons["admitted"] = reasons.get("admitted", 0) + 1
+        except AdmissionRejected as exc:
+            reasons[exc.reason.value] = reasons.get(exc.reason.value, 0) + 1
+
+    # The window fills, so the LATER retries are refused by the cheap rate
+    # check rather than by the expensive concurrency path.
+    assert reasons.get("USER_RATE_LIMIT", 0) > 0, (
+        f"a capped caller retried {allowance * 3} times without ever hitting "
+        f"the rate limit: {reasons}"
+    )
+
+    async with unit_of_work(actor_type="admin") as session:
+        counted = await session.scalar(
+            text("""
+                SELECT coalesce(sum(request_count), 0)
+                  FROM admission.rate_counter
+                 WHERE scope_id = :s AND operation_code = :o
+            """),
+            {"s": scope, "o": OperationClass.OPTIMIZATION_RUN.value},
+        )
+    assert int(counted or 0) == allowance, (
+        f"the window recorded {counted} attempts, not {allowance}; refusals "
+        "are not being counted"
+    )
+
+    async with unit_of_work(actor_type="admin") as session:
+        service = AdmissionService(session)
+        for ticket in held:
+            await service.release_ticket(ticket)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_admission_does_not_leak_a_platform_slot():
+    """The rejection path now COMMITS, so the global lease it took on the way
+    has to be handed back explicitly rather than rolled back.
+
+    Before the decision survived the commit, a user-concurrency rejection
+    discarded the global lease by rolling the transaction back. Now the
+    transaction commits, and an unreleased platform slot would leak on every
+    such rejection — draining global capacity through the one path that is
+    supposed to cost nothing.
+    """
+    from app.services.admission.guard import admission_guard
+
+    policy = POLICIES[OperationClass.OPTIMIZATION_RUN]
+    cap = policy.max_active_per_user
+    assert cap is not None
+
+    scope = _scope()
+    held = []
+    async with unit_of_work(actor_type="admin") as session:
+        service = AdmissionService(session)
+        for _ in range(cap):
+            held.append(await service.admit(
+                OperationClass.OPTIMIZATION_RUN, scope_id=scope))
+
+    async with unit_of_work(actor_type="admin") as session:
+        before = await AdmissionService(session).active_count(
+            OperationClass.OPTIMIZATION_RUN,
+            scope_id=GLOBAL_SCOPE_ID, scope_type=ScopeType.GLOBAL)
+
+    with pytest.raises(AdmissionRejected):
+        async with admission_guard(
+            OperationClass.OPTIMIZATION_RUN, scope_id=scope
+        ):
+            pass
+
+    async with unit_of_work(actor_type="admin") as session:
+        after = await AdmissionService(session).active_count(
+            OperationClass.OPTIMIZATION_RUN,
+            scope_id=GLOBAL_SCOPE_ID, scope_type=ScopeType.GLOBAL)
+    assert after == before, (
+        "a rejected admission left a platform-capacity slot held"
+    )
+
+    async with unit_of_work(actor_type="admin") as session:
+        service = AdmissionService(session)
+        for ticket in held:
+            await service.release_ticket(ticket)

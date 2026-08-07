@@ -588,6 +588,7 @@ admitted.
 | `tests/integration/test_admission_auth.py` | 8 | the credential surface: per-identity and per-address limits, refusal **before** Argon2, no account-existence disclosure, both counters charged, forwarded headers ignored, no address stored in the clear, spelling folded |
 | `tests/integration/test_admission_document_bounds.py` | 5 | the lying declaration (1 MB declared / 30 MB sent / 25 MB limit), tighter-of-two ceiling, undeclared upload bounded, byte-accurate text bound, 20 retries against one in-flight extraction |
 | `tests/security/test_admission_preauth.py` | 11 | authorization before admission, pre-auth scope cannot hold a lease, domain separation, digest depends on the secret, production refuses the dev default, purge keeps live windows and drops dead ones |
+| `tests/integration/test_admission_control.py` (pool/counter regressions) | 2 | a refused attempt still counts against the rate window; a refused admission does not leak a platform slot |
 | `tests/unit/test_admission_wiring.py` | 16 | **no database**: every class wired or explicitly reserved, every reason raised or reserved, nothing in `app/` publishes to the broker, every task explicitly routed |
 
 Clock is **injected, never slept** — a window-expiry test built on `sleep(60)` is
@@ -656,15 +657,6 @@ spreads across principals.
 | 500 | blocking (production) | 2 | **0** | 511 ms | 839 ms | 878 ms | 30 | 0 |
 | 500 | try-lock | 2 | 0 | 288 ms | 441 ms | 458 ms | 30 | 0 |
 
-**Pool exhaustion did not occur and cannot easily occur.** Peak backends topped
-out at 30, which is the pool ceiling itself (`db_pool_size` 10 +
-`db_max_overflow` 20). The pool caps concurrency *before* the lock does: at most
-30 waiters queue on the lock at once and the rest wait in SQLAlchemy's queue,
-whose timeout (30 s default) was never approached — the entire 500-contender run
-finished in 1.0 s. A pool timeout would surface as a `SQLAlchemyError`, which
-every expensive class treats as FAIL_CLOSED, so the failure mode would be
-spurious refusals rather than overshoot; it is roughly 30× away.
-
 **The blocking lock is kept, and the measurement is why.** Try-lock is about
 twice as fast and answers the wrong question: 467 of the 500 contenders got a
 lock-miss, and a contender that could not take the lock has learned nothing
@@ -673,17 +665,108 @@ is a **93% spurious-refusal rate** — callers with quota to spare, turned away
 because someone else held a lock — versus a half-second wait. Retrying instead
 of refusing just reintroduces the waiting with extra round trips.
 
-Note also that in production nobody reaches the lock 500 times: the rate check
-runs first, and `OPTIMIZATION_RUN` allows 8 attempts per minute. The measurement
-called `_acquire_lease` directly to isolate the lock.
-
-Latencies move run to run with machine noise — a second run of the same
-scenarios gave 404 ms p50 for the 500-way blocking case rather than 511 ms. What
-is stable, and what the conclusion rests on, is the shape: **overshoot 0 in every
-run**, peak backends pinned at the pool ceiling, and a spurious-refusal ratio for
-try-lock of 93-94%.
+Latencies move run to run with machine noise. What is stable, and what the
+conclusion rests on, is the shape: **overshoot 0 in every run** and try-lock's
+93-94% spurious-refusal ratio.
 
 Reproduce with `python scripts/load_admission.py`.
+
+### 26.1 Pool contention — the two ceilings, and which one was reached
+
+An earlier version of this section reported "peak backends = 30" alongside a
+claim that pool exhaustion was "~30x away". Those are two different quantities
+and putting them in one sentence was wrong. **30 IS the application pool
+ceiling**, so the pool was not near its limit — it was at it, in every run. The
+"30x" referred to something else entirely: wall-clock headroom against
+`pool_timeout`. The claim has been withdrawn and the question measured properly
+(`scripts/probe_admission_pool.py`).
+
+The two ceilings are not the same thing and must not be conflated:
+
+| Ceiling | Value | Source |
+|---|---|---|
+| Application pool | **30** concurrent checkouts | `db_pool_size` 10 + `db_max_overflow` 20 |
+| `pool_timeout` | 30 s | SQLAlchemy default |
+| `pool_recycle` | none (-1) | SQLAlchemy default |
+| PostgreSQL server | **97** usable | `max_connections` 100 − 3 `superuser_reserved_connections` |
+
+The application can therefore never come close to the server ceiling; the pool
+is the binding constraint, by a factor of three.
+
+**Why this needed measuring at all.** A contender waiting on
+`pg_advisory_xact_lock` holds its pooled connection while it waits. Enough
+contenders on one hot scope and every connection in the pool is parked on one
+lock — at which point an unrelated request, from a different user doing
+something entirely different, cannot get a connection. The concurrency limit
+would be perfectly enforced while the application stopped answering. Zero
+overshoot with a starved pool is not a pass.
+
+Measured on one scope, with two unrelated probes running continuously through
+the same pool throughout:
+
+| Load | Path | Checkout wait p50/max | Lock or admission work p50 | Peak checked out | Checkout timeouts | Unrelated max |
+|---|---|---|---|---|---|---|
+| 100 | lock only | 118 / 210 ms | 51 ms | 30/30 | 0 | 164 ms |
+| 500 | lock only | 600 / 970 ms | 54 ms | 30/30 | 0 | 931 ms |
+| 1000 | lock only | 845 / 1495 ms | 41 ms | 30/30 | 0 | 1464 ms |
+| 1000 | **production** (`evaluate`) | 706 / 1219 ms | 31 ms | 30/30 | 0 | 1191 ms |
+| 1000 | **control — no admission at all** | 418 / 746 ms | 3 ms | 30/30 | 0 | 719 ms |
+
+Four things follow, and the last one is the point.
+
+1. **The dominant cost is queueing for a connection, not the lock.** At 1000
+   contenders the checkout wait is 706 ms and the entire admission decision —
+   advisory lock included — is 31 ms. The lock was never the bottleneck.
+2. **Nothing failed.** Zero checkout timeouts at every level, no errors, and
+   every connection returned: 0 checked out after the runs, so admission leaks
+   nothing. Worst observed request 1.31 s against a 30 s pool timeout.
+3. **Unrelated work stays serviceable but is degraded.** It completes, never
+   errors, and its worst case (1.19 s) is far inside the API deadline — but a
+   2 ms operation taking 1.19 s is a real tail degradation and the probe's
+   throughput collapses while the flood runs. That is stated, not smoothed over.
+4. **The control settles the attribution.** The same 1000 concurrent tasks
+   doing nothing but `SELECT 1` saturate the pool identically — 30/30, 970
+   queued — and degrade the unrelated probe to 719 ms. So the saturation
+   belongs to *1000 concurrent requests against a 30-connection pool*, not to
+   admission. Admission adds roughly 1.6x on top of that floor, which is the
+   cost of its statements, not monopolisation. The remedy for the remaining
+   degradation is pool sizing and ingress concurrency limiting — not a change
+   to the limiter.
+
+Against the criteria for keeping the blocking lock: no checkout failures,
+bounded checkout wait, unrelated traffic serviceable, latency inside the API
+timeout, no leak. All five hold, so **the blocking lock stays**.
+
+Reproduce with `python scripts/probe_admission_pool.py`.
+
+### 26.2 The defect this investigation found
+
+The pool measurement was worse on the *production* path than on the raw-lock
+path — 4.1 s wall versus 1.7 s — which made no sense, because the rate check is
+supposed to refuse a flood cheaply before it ever reaches the lock. It did not,
+and the reason was a real defect in the rate limiter:
+
+**`_reject` raised from inside the caller's transaction, and the raise rolled
+back the rate-counter increment the decision had just made.** The counter
+therefore only ever recorded admissions that SUCCEEDED. Fifty attempts against a
+scope at its concurrency cap, with an allowance of 8, left `request_count` at 2
+— exactly the number that got in. Every refused attempt erased its own evidence.
+
+The consequence was not cosmetic. A caller at its cap could retry without limit
+forever, and each retry took the advisory lock, ran the count query, and held a
+pooled connection while doing it. The rate limit exists precisely to make that
+storm cheap, and it never engaged.
+
+The fix is the one already applied to the credential surface in Phase 2 and not
+generalised then: the decision is RETURNED (`AdmissionOutcome`), the transaction
+commits, and `admission_guard` raises afterwards. Because the rejection path now
+commits, a global lease taken on the way to a user-concurrency refusal must be
+released explicitly rather than rolled back — both are asserted by
+`tests/integration/test_admission_control.py`.
+
+After the fix, the same 1000-contender production flood refuses 992 callers at
+the rate check for one conditional UPSERT each: wall time 4.1 s to 1.4 s, and
+the unrelated-traffic tail 3.83 s to 1.19 s.
 
 ## 27. Known limitations
 
@@ -743,6 +826,12 @@ Real, not hedging:
   keyed. `tests/security/test_admission_preauth.py` asserts each of those.
 - Advisory-lock contention is per scope and bounded (§26). A pathological client
   can still make its *own* admissions slow; it affects only that principal.
+- **Connection-pool headroom is the real capacity limit, not the limiter.** The
+  pool saturates at 30 concurrent checkouts, and a control workload doing no
+  admission at all saturates it identically (§26.1). Nothing fails and nothing
+  leaks, but unrelated traffic degrades while a flood is in flight. Raising
+  `db_pool_size`/`db_max_overflow` — there is room, the server ceiling is 97 —
+  or limiting concurrency at ingress is the lever; changing the limiter is not.
 - Admission-table growth is now partly attacker-controlled through the
   `AUTH_SUBJECT` scope, and the mitigation is an hourly bounded purge. A
   deployment that never runs Beat keeps the counters forever — costing disk, not

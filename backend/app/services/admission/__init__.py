@@ -21,6 +21,7 @@ from app.services.admission.policy import (
 )
 from app.services.admission.service import (
     ADMISSION_POLICY_VERSION,
+    AdmissionOutcome,
     AdmissionRejected,
     AdmissionService,
     AdmissionTicket,
@@ -32,6 +33,7 @@ from app.services.admission.service import (
 __all__ = [
     "ADMISSION_POLICY_VERSION",
     "POLICIES",
+    "AdmissionOutcome",
     "AdmissionPolicy",
     "AdmissionRejected",
     "AdmissionService",
