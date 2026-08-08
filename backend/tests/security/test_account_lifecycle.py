@@ -89,6 +89,21 @@ def _count(sql: str, *params) -> int:
         return cur.fetchone()[0]
 
 
+def _age_claim(user_id: uuid.UUID, interval: str = "2 hours") -> None:
+    """Backdate a claim so it looks like one a dead worker left behind.
+
+    Through the owner, because the runtime role has no UPDATE on this table —
+    an ordinary session would report success and change nothing, and the test
+    would then be asserting against a claim that was never actually stale.
+    """
+    with owner_cursor() as cur:
+        cur.execute(
+            f"UPDATE identity.account_lifecycle "
+            f"SET claimed_at = now() - interval '{interval}' WHERE user_id = %s",
+            (str(user_id),))
+        assert cur.rowcount == 1, "the claim was not aged"
+
+
 # ---------------------------------------------------------------------------
 # request lifecycle
 # ---------------------------------------------------------------------------
@@ -114,13 +129,10 @@ async def test_the_deletion_request_is_durable_and_carries_a_database_cutoff(cli
     token, user_id, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
-    async with unit_of_work(actor_type="admin") as session:
-        row = (await session.execute(
-            text("""
-                SELECT requested_at, state, revision, completed_at,
-                       requested_at BETWEEN now() - interval '1 minute' AND now()
-                  FROM identity.account_lifecycle WHERE user_id = :uid
-            """), {"uid": user_id})).first()
+    row = _lifecycle_row(user_id, """
+        requested_at, state, revision, completed_at,
+        requested_at BETWEEN now() - interval '1 minute' AND now()
+    """)
 
     assert row is not None, "the deletion request was not durable"
     assert row[1] == LifecycleState.DELETION_REQUESTED.value
@@ -139,14 +151,12 @@ async def test_repeating_the_request_yields_one_lifecycle(client):
         assert response.status_code == 202, response.text
         assert response.json()["status"] == "deletion_requested"
 
-    async with unit_of_work(actor_type="admin") as session:
-        rows = await session.scalar(
-            text("SELECT count(*) FROM identity.account_lifecycle WHERE user_id = :uid"),
-            {"uid": user_id})
-        requested_events = await session.scalar(
-            text("""SELECT count(*) FROM identity.account_lifecycle_event
-                     WHERE user_id = :uid AND event_code = 'DELETION_REQUESTED'"""),
-            {"uid": user_id})
+    rows = _count(
+        "SELECT count(*) FROM identity.account_lifecycle WHERE user_id = %s",
+        str(user_id))
+    requested_events = _count(
+        "SELECT count(*) FROM identity.account_lifecycle_event "
+        "WHERE user_id = %s AND event_code = 'DELETION_REQUESTED'", str(user_id))
     assert rows == 1
     assert requested_events == 1, (
         "a repeated request produced a second lifecycle event; the second "
@@ -168,10 +178,9 @@ async def test_concurrent_requests_yield_one_lifecycle(client):
         [r.status_code for r in responses]
     )
 
-    async with unit_of_work(actor_type="admin") as session:
-        assert await session.scalar(
-            text("SELECT count(*) FROM identity.account_lifecycle WHERE user_id = :uid"),
-            {"uid": user_id}) == 1
+    assert _count(
+        "SELECT count(*) FROM identity.account_lifecycle WHERE user_id = %s",
+        str(user_id)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -199,15 +208,13 @@ async def test_a_user_cannot_delete_or_read_another_account(client):
 @pytest.mark.asyncio
 async def test_rls_hides_another_accounts_lifecycle_row():
     """The database boundary, independent of the API."""
-    async with unit_of_work(actor_type="admin") as session:
-        victim = uuid.uuid4()
-        await session.execute(
-            text("""INSERT INTO identity.user_account (id, email, status)
-                    VALUES (:id, :email, 'active')"""),
-            {"id": victim, "email": f"rlsvictim_{uuid.uuid4().hex[:8]}@example.com"})
-        await session.execute(
-            text("""INSERT INTO identity.account_lifecycle (user_id, state)
-                    VALUES (:id, 'DELETION_REQUESTED')"""), {"id": victim})
+    victim = uuid.uuid4()
+    with owner_cursor() as cur:
+        cur.execute("INSERT INTO identity.user_account (id, email, status) "
+                    "VALUES (%s, %s, 'active')",
+                    (str(victim), f"rlsvictim_{uuid.uuid4().hex[:8]}@example.com"))
+        cur.execute("INSERT INTO identity.account_lifecycle (user_id, state) "
+                    "VALUES (%s, 'DELETION_REQUESTED')", (str(victim),))
 
     stranger = uuid.uuid4()
     async with unit_of_work(user_id=stranger, actor_type="user") as session:
@@ -488,20 +495,24 @@ async def test_a_worker_starting_after_the_cutoff_creates_no_user_data(client):
         )
 
     # And the real task body stops without writing anything.
+    from app.database.session import engine
     from workers.tasks.analysis import run_analysis
 
-    async with unit_of_work(actor_type="admin") as session:
-        before = await session.scalar(
-            text("SELECT count(*) FROM analysis.analysis_run WHERE user_id = :uid"),
-            {"uid": user_id})
+    runs = "SELECT count(*) FROM analysis.analysis_run WHERE user_id = %s"
+    before = _count(runs, str(user_id))
 
-    assert run_analysis.run(str(user_id), 2025) == ""
+    # The task body calls `asyncio.run` — that is how Celery executes it in
+    # production — which cannot nest inside this test's loop. Running it in a
+    # worker thread reproduces the real execution shape rather than a test-only
+    # one. The engine is disposed either side because its pooled asyncpg
+    # connections belong to whichever loop opened them.
+    await engine.dispose()
+    assert await asyncio.to_thread(run_analysis.run, str(user_id), 2025) == ""
+    await engine.dispose()
 
-    async with unit_of_work(actor_type="admin") as session:
-        after = await session.scalar(
-            text("SELECT count(*) FROM analysis.analysis_run WHERE user_id = :uid"),
-            {"uid": user_id})
-    assert after == before, "a queued task created user data after the cutoff"
+    assert _count(runs, str(user_id)) == before, (
+        "a queued task created user data after the cutoff"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -543,11 +554,7 @@ async def test_an_abandoned_claim_is_recovered_by_another_worker(client):
     assert user_id in {c.user_id for c in claimed}
 
     # Age the claim past the timeout, as a dead worker's claim would age.
-    async with unit_of_work(actor_type="admin") as session:
-        await session.execute(
-            text("""UPDATE identity.account_lifecycle
-                       SET claimed_at = now() - interval '2 hours'
-                     WHERE user_id = :uid"""), {"uid": user_id})
+    _age_claim(user_id)
 
     async with unit_of_work(actor_type="admin") as session:
         recovered = await AccountLifecycleService(session).claim(
@@ -556,12 +563,10 @@ async def test_an_abandoned_claim_is_recovered_by_another_worker(client):
         "an abandoned claim was never released"
     )
 
-    async with unit_of_work(actor_type="admin") as session:
-        events = await session.scalar(
-            text("""SELECT count(*) FROM identity.account_lifecycle_event
-                     WHERE user_id = :uid AND event_code = 'CLAIM_RECOVERED'"""),
-            {"uid": user_id})
-    assert events >= 1, "claim recovery was not recorded"
+    assert _count(
+        "SELECT count(*) FROM identity.account_lifecycle_event "
+        "WHERE user_id = %s AND event_code = 'CLAIM_RECOVERED'",
+        str(user_id)) >= 1, "claim recovery was not recorded"
 
 
 @pytest.mark.asyncio
@@ -576,13 +581,11 @@ async def test_a_stale_claim_token_cannot_advance_the_lifecycle(client):
             worker_id="worker-a", batch_size=50))
     mine = next(c for c in first if c.user_id == user_id)
 
+    _age_claim(user_id)
     async with unit_of_work(actor_type="admin") as session:
-        await session.execute(
-            text("""UPDATE identity.account_lifecycle
-                       SET claimed_at = now() - interval '2 hours'
-                     WHERE user_id = :uid"""), {"uid": user_id})
-    async with unit_of_work(actor_type="admin") as session:
-        await AccountLifecycleService(session).claim(worker_id="worker-b", batch_size=50)
+        stolen = await AccountLifecycleService(session).claim(
+            worker_id="worker-b", batch_size=50)
+    assert user_id in {c.user_id for c in stolen}, "worker-b never took the claim"
 
     async with unit_of_work(actor_type="admin") as session:
         assert not await AccountLifecycleService(session).advance(
