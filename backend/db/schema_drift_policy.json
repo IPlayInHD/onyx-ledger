@@ -29,6 +29,16 @@
       "reason": "Foreign key created by backend/db/sql, typically with an ON DELETE action or a name the ORM does not reproduce."
     },
     {
+      "key": "modify_comment|identity|account_lifecycle|requested_at",
+      "kind": "modify_comment",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "requested_at",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
       "key": "modify_default|admin|admin_user|status",
       "kind": "modify_default",
       "schema": "admin",
@@ -324,6 +334,36 @@
       "schema": "finance",
       "table": "income_source",
       "object": "verification_status",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|identity|account_lifecycle|attempts",
+      "kind": "modify_default",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "attempts",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|identity|account_lifecycle|requested_at",
+      "kind": "modify_default",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "requested_at",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|identity|account_lifecycle|revision",
+      "kind": "modify_default",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "revision",
       "detail": "",
       "class": "SERVER_DEFAULT_OWNED_BY_SQL",
       "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
@@ -4779,6 +4819,86 @@
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
     },
     {
+      "key": "remove_constraint|identity|account_lifecycle_event|account_lifecycle_event_event_code_check",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle_event",
+      "object": "account_lifecycle_event_event_code_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|account_lifecycle_event|account_lifecycle_event_reason_code_check",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle_event",
+      "object": "account_lifecycle_event_reason_code_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|account_lifecycle|ck_account_lifecycle_attempts",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ck_account_lifecycle_attempts",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|account_lifecycle|ck_account_lifecycle_claim_coherent",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ck_account_lifecycle_claim_coherent",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|account_lifecycle|ck_account_lifecycle_completion",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ck_account_lifecycle_completion",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|account_lifecycle|ck_account_lifecycle_failure_code",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ck_account_lifecycle_failure_code",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|account_lifecycle|ck_account_lifecycle_revision",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ck_account_lifecycle_revision",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|account_lifecycle|ck_account_lifecycle_state",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ck_account_lifecycle_state",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
       "key": "remove_constraint|identity|login_event|login_event_event_type_check",
       "kind": "remove_constraint",
       "schema": "identity",
@@ -8024,6 +8144,36 @@
       "schema": "finance",
       "table": "income_source",
       "object": "ix_income_user_year",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|identity|account_lifecycle_event|ix_account_lifecycle_event_user",
+      "kind": "remove_index",
+      "schema": "identity",
+      "table": "account_lifecycle_event",
+      "object": "ix_account_lifecycle_event_user",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|identity|account_lifecycle|ix_account_lifecycle_claimable",
+      "kind": "remove_index",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ix_account_lifecycle_claimable",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|identity|account_lifecycle|ix_account_lifecycle_claimed",
+      "kind": "remove_index",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "ix_account_lifecycle_claimed",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."

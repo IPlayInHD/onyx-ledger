@@ -8,8 +8,12 @@ cross-tenant worker.
 
 Deletes nothing. Later 11B phases perform the purge this orchestrates.
 
-ADDITIVE. Two new tables, four functions, two triggers, one role. No existing
-table, column, constraint, policy or grant is modified.
+ADDITIVE. Two new tables, their triggers and policies, the privileged worker
+role and its functions. No existing table, column, constraint, policy or grant
+is modified — with one deliberate exception: the grants this file issues on its
+own two tables REVOKE first, because 16_rls_grants.sql sets ALTER DEFAULT
+PRIVILEGES granting UPDATE and DELETE on every new table in the identity
+schema, and a lifecycle row an ordinary role can update is not a lifecycle.
 """
 from __future__ import annotations
 
