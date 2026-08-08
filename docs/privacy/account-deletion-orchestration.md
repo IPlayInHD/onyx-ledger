@@ -1,4 +1,4 @@
-# Account deletion orchestration (Entry 11B1)
+# Account deletion orchestration (Entry 11B2)
 
 **This deletes no user data.** Financial records, documents, frozen snapshots,
 scenarios, optimizations, AI conversations, freshness and integrity history are
@@ -21,11 +21,16 @@ does.
 The Entry 11A plan (`data-lifecycle-specification.md` §26) numbered the phases
 itself, and its numbering is **not** the numbering used here:
 
-| This entry | The 11A plan calls it | Status |
+| Phase | Scope | Status |
 |---|---|---|
-| Entry 11B1 (this document) | 11B2 — "Account lifecycle + deletion-request state machine" | done |
-| — | 11B0 — PD-4, audit log accumulating whole user rows | **not done** |
-| — | 11B1 — PD-1, RLS on the 16 tenant-owned child tables | **not done** |
+| 11B0 | PD-4 — audit log accumulating whole user rows | **closed** |
+| **11B1** | **PD-1 — RLS on the 16 tenant-owned child tables** | **open, next** |
+| **11B2** (this document) | Account lifecycle and deletion orchestration | **closed** |
+
+This work was merged under the label "11B1" and is now numbered **11B2**: the
+11A plan had already assigned 11B1 to the RLS remediation. The label moved, the
+work did not — the commits keep their hashes and dates, and this was genuinely
+built before 11B0.
 
 The plan sequenced PD-4 and PD-1 first, on the reasoning that deleting data
 across an incomplete tenant boundary is the wrong order to do two risky things
@@ -33,8 +38,8 @@ in. That reasoning still stands and is untouched by this entry — but it applie
 to the phases that *delete*, and this one does not. The two tables added here
 both carry RLS from the migration that creates them.
 
-**Consequence to carry forward:** PD-1 and PD-4 remain open and remain
-prerequisites for 11B3 onward.
+**Consequence to carry forward:** PD-4 was closed in Entry 11B0. **PD-1 remains
+open** and remains a prerequisite for 11B3 onward.
 
 ---
 
@@ -411,8 +416,8 @@ async with unit_of_work(actor_type="system") as session:
 ## 16. Known limitations
 
 1. **Nothing is deleted.** `PURGE_PENDING` is as far as an account gets.
-2. **PD-1 and PD-4 are open**, and the 11A plan makes them prerequisites for the
-   phases that delete.
+2. **PD-1 is open** (PD-4 was closed in Entry 11B0), and the 11A plan makes it
+   a prerequisite for the phases that delete.
 3. **The six scenario routes narrow the in-flight race but do not close it.**
    They take `assert_account_active`, which runs in its own transaction rather
    than the one the handler later opens, so the ordering guarantee in §4.1 does

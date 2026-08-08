@@ -792,7 +792,7 @@ crosses tenants silently. Recorded as **PD-1**, `IMPLEMENTATION_GAP (HIGH)`.
 | `ref`, `rules`, `tax_kb` | no | published/reference data, identical for all users |
 | `tkms` | no | legislation ingestion; operator-scoped |
 | `admission` | **pseudonymous only** | global capacity counting must see *all* rows; an RLS policy keyed on `app.user_id` would make the global count return only the caller's rows — a limiter that stops limiting exactly when the platform is busiest. Protection is **grants** (`onyx_app_rw` CRUD, `onyx_app_ro` SELECT, `PUBLIC` revoked) plus shape: no financial column exists, and no endpoint returns a row. |
-| `audit.audit_log` | **yes — whole user rows** | append-only by trigger; **no privacy justification exists**. PD-4. |
+| `audit.audit_log` | **pseudonymous only, since 11B0** | append-only by trigger; operator store. Payload values are minimized at write time (PD-4, §32); what remains is actor/entity/ownership ids, timestamps, workflow state and sealed-evidence content addresses. |
 
 ---
 
@@ -867,7 +867,7 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 | ID | Finding | Class | Severity |
 |---|---|---|---|
 | **PD-4a** | `audit.log_change` wrote the Argon2 password hash into the append-only `audit.audit_log` on every registration | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in 11A** |
-| **PD-4** | `audit.audit_log` holds whole copies of financial/profile rows, has no user FK, is append-only, and account deletion *adds* to it | `PRIVACY_DEFECT_NOW` | **HIGH — 11B** |
+| **PD-4** | `audit.audit_log` holds whole copies of financial/profile rows, has no user FK, is append-only, and account deletion *adds* to it | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in 11B0 (§32)** |
 | **PD-1** | 16 tenant-owned child tables have no RLS, including the frozen snapshot, extraction fields, AI messages and AI prompt context. (27 user-derived tables lack RLS in total; 11 of those — `identity` and `audit` — correctly cannot have it.) | `IMPLEMENTATION_GAP` | HIGH |
 | **PD-2** | Document object keys embed the user-supplied filename; no `filename` column exists | `IMPLEMENTATION_GAP` | MEDIUM |
 | **PD-3** | The four `SET NULL` tables do not de-identify: `login_event` keeps `email_tried` and `ip_address`; `recommendation_status_event` keeps a free-text note | `IMPLEMENTATION_GAP` | MEDIUM |
@@ -880,6 +880,7 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 | **PD-12** | Celery serialized failed-task exceptions — statement and bound parameters included — into the Redis result backend | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in closeout (§29.2)** |
 | **PD-13** | The same exception text reaches the Celery worker's own log; sanitizing it is a logging concern, not a persistence one | `DEPLOYMENT_CONFIGURATION_REQUIRED` + 11B | MEDIUM |
 | **PD-14** | `server/` (Node/Netlify Blobs) is a second application storing emails, bcrypt hashes, profiles and documents, and was absent from the first inventory pass | `IMPLEMENTATION_GAP` | MEDIUM — see §29.1 |
+| **PD-15** | The audit log's ownership key is not `actor_id`: registration and login run anonymously, so the rows creating an account and its credential record no actor and carry the identity in their payload. A de-identification phase keyed on `actor_id` alone would miss them. | `IMPLEMENTATION_GAP` | MEDIUM — recorded in 11B0 (§32), owed by 11B3+ |
 | **PD-11** | Future AI provider retention, training reuse, region, deletion API all unknown | `EXTERNAL_PROVIDER_REVIEW_REQUIRED` | — |
 
 ### PD-6 recommendation
@@ -945,14 +946,34 @@ implemented; none is built in 11A.**
 
 ## 26. Entry 11B implementation plan
 
+> **Phase status — this table is the authoritative roadmap.**
+>
+> | Entry | Status | Scope |
+> |---|---|---|
+> | **11A** | **CLOSED** | Privacy and data lifecycle specification |
+> | **11B0** | **CLOSED** | **PD-4 foundational privacy remediation** |
+> | **11B1** | **PENDING — NEXT** | PD-1 RLS remediation, 16 tables |
+> | **11B2** | **CLOSED** | Account lifecycle and deletion orchestration |
+> | **11B3+** | **PENDING** | The phases that actually delete or de-identify |
+>
+> **A numbering correction, not a history rewrite.** The orchestration work was
+> built and merged under the label "11B1" before anyone noticed this table had
+> already assigned that number to the RLS remediation. The work is correct and
+> stays exactly as it was merged; only the label moves, to **11B2**. Its commits
+> keep their original hashes and dates, and it was genuinely implemented before
+> 11B0 — the row order below is dependency order, not chronology.
+>
+> The consequence that matters: **PD-1 is still open**. Nothing in 11B2's
+> closure implies otherwise, and the phases that delete still depend on it.
+
 Refined from the closeout findings. Ordered so that the two things which make
 everything else unsafe come first.
 
 | Phase | Scope | Tables / services | Migration | Worker privilege | Idempotency | Failure recovery | Tests | External dependency |
 |---|---|---|---|---|---|---|---|---|
-| **11B0** | **PD-4** — stop `audit.audit_log` accumulating whole user rows; decide what an audit record must contain | `audit.log_change`, `audit.audit_log` | yes (function, possibly columns) | `SECURITY DEFINER`, narrowed payload | n/a | n/a | audit still proves who/what/when; no financial value persisted; Entry 3A four-eyes tests unaffected | — |
-| **11B1** | **PD-1** — RLS on the 16 tenant-owned child tables | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | n/a | n/a | n/a | cross-tenant read denied per table; **login still works** (RLS must not reach `identity`); `NON_RLS` defect count drops to 0 | — |
-| **11B2** | Account lifecycle + deletion-request state machine | `audit.data_deletion_request` (**PD-9**: FK `CASCADE` → must outlive the account), new lifecycle state | yes | privileged worker, `FOR UPDATE SKIP LOCKED` keyhole; **no broad `SECURITY DEFINER`** | phase checkpoints | resume at checkpoint | state transitions; crash mid-phase resumes; `ACCESS_DISABLED` entered first | grace period `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
+| **11B0** ✅ | **PD-4** — stop `audit.audit_log` accumulating whole user rows; decide what an audit record must contain | `audit.log_change`, `audit.audit_log` | yes (function, possibly columns) | `SECURITY DEFINER`, narrowed payload | n/a | n/a | audit still proves who/what/when; no financial value persisted; Entry 3A four-eyes tests unaffected | — |
+| **11B1** ⏭ NEXT | **PD-1** — RLS on the 16 tenant-owned child tables | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | n/a | n/a | n/a | cross-tenant read denied per table; **login still works** (RLS must not reach `identity`); `NON_RLS` defect count drops to 0 | — |
+| **11B2** ✅ | Account lifecycle + deletion-request state machine | `audit.data_deletion_request` (**PD-9**: FK `CASCADE` → must outlive the account), new lifecycle state | yes | privileged worker, `FOR UPDATE SKIP LOCKED` keyhole; **no broad `SECURITY DEFINER`** | phase checkpoints | resume at checkpoint | state transitions; crash mid-phase resumes; `ACCESS_DISABLED` entered first | grace period `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
 | **11B3** | Source deletion + correction | `finance.*`, `profile.*`, `wealth.*` | possibly | user-authorized, ownership-checked | delete-if-exists | idempotent retry | source gone, sealed result byte-identical, dependents stale | — |
 | **11B4** | Document / object / extraction deletion | `docs.*`, `ObjectStorage.delete` (**PD-8**), `filename` column + opaque keys (**PD-2**) | yes | ownership-checked | purge-if-exists | orphan sweep | binary gone, fields gone, confirmed facts survive, provenance link marked, no orphaned object | object versioning `DEPLOYMENT_REVIEW_REQUIRED` |
 | **11B5** | Sealed-snapshot erasure semantics | `analysis.*`, `ioe.*`, new `SOURCE_ERASED_BY_PRIVACY_LIFECYCLE` reason | yes (enum/check) | privileged erasure path; **ordinary immutability triggers untouched** | idempotent | resumable | replay reports erasure, never `verified` | erasure exceptions `LEGAL_REVIEW_REQUIRED` |
@@ -1297,19 +1318,19 @@ account undoes every guarantee in this document in one operation.
 
 ---
 
-## 31. What Entry 11B1 changed in the running system
+## 31. What Entry 11B2 changed in the running system
 
 Full detail in [`account-deletion-orchestration.md`](./account-deletion-orchestration.md).
 This section records only what a reader of *this* document needs to know has
 moved since it was written.
 
-**The phase numbering in §26 is not the numbering the work was done under.**
-This entry's "11B1" is §26's **11B2** — the account lifecycle and deletion-request
-state machine. §26's own 11B0 (PD-4) and 11B1 (PD-1) are **not done** and remain
-prerequisites for every phase that deletes. The ordering rationale in §26 is
+**This work was merged under the label "11B1" and is now numbered 11B2.**
+See the status table at the head of §26 for the correction. §26's 11B0 (PD-4)
+is now **closed** — see §32. Its 11B1 (PD-1) is **still open** and remains a
+prerequisite for every phase that deletes. The ordering rationale in §26 is
 unaffected: it concerns phases that remove data, and this one removes none.
 
-| Question this document asked | Answer as of Entry 11B1 |
+| Question this document asked | Answer as of Entry 11B2 |
 |---|---|
 | §17 — queued work during deletion | Implemented. Every Celery task taking a `user_id` consults a preflight in the same database the request was recorded in; `revoke` is not relied on. A structural test makes the coverage a rule rather than a habit. |
 | §9 — account deleted | Access is disabled, sessions revoked, a durable record exists. **No data is removed.** The lifecycle stops at `PURGE_PENDING`; `COMPLETE` is unreachable by trigger, by CHECK and by service. |
@@ -1330,4 +1351,44 @@ data inherits this obligation.
 
 **Still open after 11B1:** PD-1, PD-2, PD-3, PD-4, PD-7, PD-8, PD-14; the
 cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
+(`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.
+
+---
+
+## 32. What Entry 11B0 changed in the running system (PD-4)
+
+Full detail in [`pd4-remediation.md`](./pd4-remediation.md).
+
+**PD-4 is closed.** `audit.log_change` no longer copies user rows into
+`audit.audit_log`. Keys and change indication stay; values go. The operator
+plane — legislation, rule versions, publications, change requests, import jobs —
+keeps its payloads whole, so the Entry 3A four-eyes guarantees still read what a
+rule changed from and to. Sealed-evidence content addresses survive, because the
+append-only audit copy is what makes the live sealed row tamper-evident.
+
+Corrections to this document, found while establishing PD-4's definition from
+these artifacts:
+
+| What was wrong | Correction |
+|---|---|
+| §18 said `audit.audit_log` contains "whole user rows" with "no privacy justification". True when written; the content is now minimized. | Still non-RLS, still justified as an operator store, but the payload is no longer a second copy of everyone's data. |
+| The registry was blind to its own defect: `audit.audit_log` had a `NON_RLS` entry but **no `LIFECYCLE` entry**, and was not in `MANUALLY_DECLARED_USER_DERIVED`. The inventory guard could not see the table PD-4 was about. | Both fixed. Classified `AUDIT_SECURITY_RECORD` + `PSEUDONYMOUS_IDENTIFIER`, `DE_IDENTIFY`. |
+| §10's dependency graph marks `audit.audit_log` `UNREACHABLE (PD-4)`. | Still unreachable **by cascade** — deliberately. Reachable by the composite ownership key below. |
+
+**PD-15, new.** The audit log's ownership key is **not** `actor_id`.
+Registration and login run on an anonymous session, so the rows creating an
+account and its credential record no actor and carry the identity in their
+payload instead. A de-identification phase keyed on `actor_id` alone would leave
+them behind. The composite key is in `pd4-remediation.md` and is proven to
+locate everything carrying a user's id without reaching the next account.
+Recorded for Entry 11B3+; nothing uses it yet.
+
+**Historical rows are not repaired automatically.** `audit.audit_log` is
+append-only and migration 0048 is forward-only.
+`scripts/audit_payload_scan.py` reports and repairs, idempotently, as a
+deliberate privileged operation. Whether any real environment holds such rows is
+`OPERATIONAL_REVIEW_REQUIRED`.
+
+**Still open after 11B0:** PD-1 (next), PD-2, PD-3, PD-7, PD-8, PD-9, PD-14,
+PD-15; the cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
 (`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.
