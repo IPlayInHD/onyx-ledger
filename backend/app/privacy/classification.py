@@ -502,6 +502,35 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        notes="EXISTS AND IS UNUSED. Same CASCADE problem as the deletion "
              "request table."),
 
+    # --- the audit log itself (PD-4, Entry 11B0) -----------------------------
+    # Entry 11A named this table as PD-4 and classified its RLS exception, but
+    # never gave it a LIFECYCLE entry — so the registry that decides what
+    # happens to user-derived data on deletion had nothing to say about the one
+    # table the defect was about. That is what §10 of Entry 11B0 calls the
+    # prose and the registry drifting apart, and it is fixed here rather than
+    # noted.
+    #
+    # Entry 11B0 removed the personal VALUES from the payload. What remains is
+    # pseudonymous: an actor id, an entity id, ownership ids, timestamps,
+    # workflow states, and — on sealed relations — content addresses. That is
+    # PSEUDONYMOUS_IDENTIFIER, not anonymous, and de-identification is
+    # therefore still owed at account deletion.
+    *(_e(f"audit.{t}",
+         (P.AUDIT_SECURITY_RECORD, P.PSEUDONYMOUS_IDENTIFIER),
+         S.AUDIT, R.BOUNDED_AUDIT, D.DE_IDENTIFY,
+         immutable=True, rls=False,
+         notes="Append-only, partitioned by month, NO foreign key to the "
+               "account. Not reachable by cascade, so DE_IDENTIFY must be "
+               "driven by the composite ownership key (PD-15): actor_id, the "
+               "payload's user_id, and — on user_account rows — the payload's "
+               "id. Registration and login run anonymously, so actor_id alone "
+               "misses the account and credential rows. Payload VALUES are "
+               "minimized at write time by audit.log_change (PD-4); rows "
+               "written before migration 0048 need "
+               "scripts/audit_payload_scan.py.")
+      for t in ("audit_log", "audit_log_2025m01", "audit_log_2025m02",
+                "audit_log_default")),
+
     # NOTE: `admin.admin_user_role` is deliberately ABSENT. An early draft
     # listed it, because the survey that produced this registry seeded on any
     # column matching `%admin_id` as well as `user_id`. The enforcement test
@@ -526,6 +555,16 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
 #: derivation to expect it.
 MANUALLY_DECLARED_USER_DERIVED: frozenset[str] = frozenset({
     "identity.account_lifecycle_event",
+    # PD-4's own table. Entry 11A described it as holding whole copies of user
+    # rows and left it out of this set, so the derivation still could not see
+    # it and the LIFECYCLE registry had no entry for it — the registry was
+    # blind to precisely the table the defect was about. Declared here in
+    # Entry 11B0 so a future user-derived column in the audit schema fails the
+    # inventory guard like any other.
+    "audit.audit_log",
+    "audit.audit_log_2025m01",
+    "audit.audit_log_2025m02",
+    "audit.audit_log_default",
 })
 
 
