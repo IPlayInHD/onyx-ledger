@@ -442,6 +442,78 @@ def _forged_inserts(a: Tenant, b: Tenant) -> dict[str, tuple[str, tuple]]:
     }
 
 
+#: Where a forged row would land if it succeeded, so the test can assert the
+#: OUTCOME rather than which mechanism refused it.
+_TREE_COUNT = {
+    "ai.ai_message":
+        ("SELECT count(*) FROM ai.ai_message m JOIN ai.ai_conversation c "
+         "  ON c.id = m.conversation_id WHERE c.user_id = %s"),
+    "ai.ai_message_citation":
+        ("SELECT count(*) FROM ai.ai_message_citation x JOIN ai.ai_message m "
+         "  ON m.id = x.message_id JOIN ai.ai_conversation c "
+         "  ON c.id = m.conversation_id WHERE c.user_id = %s"),
+    "ai.ai_prompt_context":
+        ("SELECT count(*) FROM ai.ai_prompt_context x JOIN ai.ai_message m "
+         "  ON m.id = x.message_id JOIN ai.ai_conversation c "
+         "  ON c.id = m.conversation_id WHERE c.user_id = %s"),
+    "analysis.analysis_assumption":
+        ("SELECT count(*) FROM analysis.analysis_assumption x "
+         "  JOIN analysis.analysis_run r ON r.id = x.analysis_id "
+         " WHERE r.user_id = %s"),
+    "analysis.analysis_input_snapshot":
+        ("SELECT count(*) FROM analysis.analysis_input_snapshot x "
+         "  JOIN analysis.analysis_run r ON r.id = x.analysis_id "
+         " WHERE r.user_id = %s"),
+    "analysis.analysis_line_item":
+        ("SELECT count(*) FROM analysis.analysis_line_item x "
+         "  JOIN analysis.analysis_run r ON r.id = x.analysis_id "
+         " WHERE r.user_id = %s"),
+    "analysis.reconciliation_check":
+        ("SELECT count(*) FROM analysis.reconciliation_check x "
+         "  JOIN analysis.analysis_run r ON r.id = x.analysis_id "
+         " WHERE r.user_id = %s"),
+    "billing.invoice":
+        ("SELECT count(*) FROM billing.invoice x JOIN billing.subscription s "
+         "  ON s.id = x.subscription_id WHERE s.user_id = %s"),
+    "docs.document_extraction":
+        ("SELECT count(*) FROM docs.document_extraction x JOIN docs.document d "
+         "  ON d.id = x.document_id WHERE d.user_id = %s"),
+    "docs.document_link":
+        ("SELECT count(*) FROM docs.document_link x JOIN docs.document d "
+         "  ON d.id = x.document_id WHERE d.user_id = %s"),
+    "docs.extraction_field":
+        ("SELECT count(*) FROM docs.extraction_field x "
+         "  JOIN docs.document_extraction e ON e.id = x.extraction_id "
+         "  JOIN docs.document d ON d.id = e.document_id WHERE d.user_id = %s"),
+    "ioe.run_rule_snapshot":
+        ("SELECT count(*) FROM ioe.run_rule_snapshot x "
+         "  LEFT JOIN ioe.optimization_run r ON r.id = x.run_id "
+         "  LEFT JOIN ioe.scenario sc ON sc.id = x.scenario_id "
+         " WHERE r.user_id = %s OR sc.user_id = %s"),
+    "reco.recommendation_status_event":
+        ("SELECT count(*) FROM reco.recommendation_status_event x "
+         "  JOIN reco.recommendation r ON r.id = x.recommendation_id "
+         " WHERE r.user_id = %s"),
+    "wealth.asset_valuation":
+        ("SELECT count(*) FROM wealth.asset_valuation x JOIN wealth.asset a "
+         "  ON a.id = x.asset_id WHERE a.user_id = %s"),
+    "wealth.liability_balance":
+        ("SELECT count(*) FROM wealth.liability_balance x "
+         "  JOIN wealth.liability l ON l.id = x.liability_id "
+         " WHERE l.user_id = %s"),
+    "wealth.registered_account_detail":
+        ("SELECT count(*) FROM wealth.registered_account_detail x "
+         "  JOIN wealth.asset a ON a.id = x.asset_id WHERE a.user_id = %s"),
+}
+
+
+def _rows_in_tree(cur, table: str, user_id: uuid.UUID) -> int:
+    sql = _TREE_COUNT[table]
+    params = (str(user_id),) * sql.count("%s")
+    cur.execute(sql, params)
+    return cur.fetchone()[0]
+
+
 @pytest.mark.parametrize("table", PD1_TABLES)
 def test_one_tenant_cannot_insert_a_row_into_anothers_tree(tenants, table):
     """§18 — the case a read-only policy misses.
@@ -450,29 +522,58 @@ def test_one_tenant_cannot_insert_a_row_into_anothers_tree(tenants, table):
     somebody else's account: a forged invoice, a forged AI message, a forged
     line item on another tenant's sealed analysis. `WITH CHECK` is what stops
     it, and a policy written without one looks complete.
+
+    Asserted on the OUTCOME, because two different correct refusals exist. A
+    literal parent id is rejected by `WITH CHECK` and raises. A forged INSERT
+    that reads the parent from the table first — the shape a real attacker's
+    query would have — now selects nothing, so it inserts nothing and raises
+    nothing. Requiring the error would have failed three tables for being
+    protected slightly better than expected.
     """
     a, b = tenants
     sql, params = _forged_inserts(a, b)[table]
+    with owner_cursor() as owner:
+        before = _rows_in_tree(owner, table, b.user_id)
+
     with runtime_cursor(a.user_id) as cur:
-        with pytest.raises(psycopg2.errors.InsufficientPrivilege) as caught:
+        try:
             cur.execute(sql, params)
-        assert "row-level security" in str(caught.value).lower(), caught.value
+            inserted = cur.rowcount
+        except psycopg2.errors.InsufficientPrivilege as exc:
+            assert "row-level security" in str(exc).lower(), exc
+            inserted = 0
+
+    with owner_cursor() as owner:
+        after = _rows_in_tree(owner, table, b.user_id)
+
+    assert inserted == 0, f"{table}: tenant A inserted into tenant B's tree"
+    assert after == before, (
+        f"{table}: tenant B's tree gained a row written by tenant A"
+    )
 
 
 def test_a_tenant_cannot_move_a_row_into_another_tenants_tree(tenants):
     """§18 — reassignment. Changing a child's parent from A's to B's is the
     same forgery as inserting it there, and needs the same `WITH CHECK`.
 
-    Asserted on the AI branch, where the parent pointer is a plain nullable-free
-    column an update can move.
+    Here the row IS visible to A — it is A's — so `USING` admits the update and
+    `WITH CHECK` rejects the new value, loudly. That is the better of the two
+    refusals: a silent zero-row update would leave the caller believing the
+    move simply did not match.
     """
     a, b = tenants
     with runtime_cursor(a.user_id) as cur:
-        # A owns this citation; try to reattach it to B's message.
-        cur.execute(
-            "UPDATE ai.ai_message_citation SET message_id = %s WHERE id = %s",
-            (b.rows["ai.ai_message"], a.rows["ai.ai_message_citation"]))
-        moved = cur.rowcount
-    assert moved == 0, (
-        "a citation was reassigned into another tenant's message tree"
-    )
+        with pytest.raises(psycopg2.errors.InsufficientPrivilege) as caught:
+            cur.execute(
+                "UPDATE ai.ai_message_citation SET message_id = %s "
+                " WHERE id = %s",
+                (b.rows["ai.ai_message"], a.rows["ai.ai_message_citation"]))
+        assert "row-level security" in str(caught.value).lower(), caught.value
+
+    with owner_cursor() as owner:
+        owner.execute(
+            "SELECT message_id FROM ai.ai_message_citation WHERE id = %s",
+            (a.rows["ai.ai_message_citation"],))
+        assert owner.fetchone()[0] == a.rows["ai.ai_message"], (
+            "the citation was reassigned into another tenant's message tree"
+        )

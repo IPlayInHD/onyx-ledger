@@ -281,21 +281,41 @@ def test_the_non_rls_registry_describes_no_table_that_gained_rls():
     )
 
 
-def test_the_recorded_defects_are_exactly_the_known_gap():
-    """PD-1 is a bounded, named set. If it grows, someone added a tenant-owned
-    table without RLS; if it shrinks, 11B1 made progress. Either way it should
-    be a deliberate edit rather than a drift."""
+def test_no_tenant_owned_table_is_left_without_row_level_security():
+    """PD-1 was a bounded, named set of 16 tenant-owned child tables with no
+    RLS. Entry 11B1 closed it, so the registry should now hold NO privacy
+    defect at all — and if one reappears, someone has added a tenant-owned
+    table without a policy.
+
+    This replaces the earlier guard, which asserted the set was exactly 16.
+    That assertion was right while the gap was open and became a test that
+    would have failed the moment the gap was fixed.
+    """
     defects = sorted(t for t, e in NON_RLS.items() if e.is_defect)
-    assert len(defects) == 16, (
-        f"the PD-1 set changed to {len(defects)} tables: {defects}"
+    assert defects == [], (
+        f"{defects} are classed as privacy defects requiring RLS remediation. "
+        "PD-1 was closed in Entry 11B1; a new entry here means a tenant-owned "
+        "table shipped without a tenant boundary."
     )
-    # None of them may be in a schema whose whole point is that it holds no
-    # tenant data — that would mean the classification is wrong, not the count.
-    for table in defects:
-        assert not table.startswith(("ref.", "rules.", "tax_kb.", "tkms.", "admin.")), (
-            f"{table} is classed as a tenant-data defect but lives in a "
-            "non-tenant schema"
-        )
+
+
+def test_the_pd1_tables_are_gone_from_the_non_rls_registry():
+    """The sixteen by name. A registry entry that merely changed its REASON —
+    rather than being removed because the table genuinely gained RLS — would
+    still leave the table listed as an exception it no longer is."""
+    pd1 = {
+        "ai.ai_message", "ai.ai_message_citation", "ai.ai_prompt_context",
+        "analysis.analysis_assumption", "analysis.analysis_input_snapshot",
+        "analysis.analysis_line_item", "analysis.reconciliation_check",
+        "billing.invoice", "docs.document_extraction", "docs.document_link",
+        "docs.extraction_field", "ioe.run_rule_snapshot",
+        "reco.recommendation_status_event", "wealth.asset_valuation",
+        "wealth.liability_balance", "wealth.registered_account_detail",
+    }
+    still_listed = sorted(pd1 & set(NON_RLS))
+    assert not still_listed, (
+        f"{still_listed} are still in the non-RLS registry but now carry RLS"
+    )
 
 
 @pytest.mark.parametrize("table,entry", sorted(NON_RLS.items()))

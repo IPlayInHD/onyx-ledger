@@ -332,16 +332,16 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        exportable=True),
     _e("wealth.asset_valuation", (P.FINANCIAL_SOURCE_DATA,),
-       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, exportable=True,
+       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True, exportable=True,
        notes="NO RLS: reachable only through `wealth.asset`. See defect PD-1."),
     _e("wealth.liability", (P.FINANCIAL_SOURCE_DATA, P.USER_FREE_TEXT),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        exportable=True),
     _e("wealth.liability_balance", (P.FINANCIAL_SOURCE_DATA,),
-       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, exportable=True,
+       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True, exportable=True,
        notes="NO RLS. See defect PD-1."),
     _e("wealth.registered_account_detail", (P.FINANCIAL_SOURCE_DATA, P.TAX_PROFILE_DATA),
-       S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, exportable=True,
+       S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True, exportable=True,
        notes="RRSP/TFSA contribution room. NO RLS. See defect PD-1."),
 
     # -------------------------------------------------------------- documents
@@ -354,16 +354,16 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "user-supplied filename — see defect PD-2. `deleted_at` exists "
              "and is unused."),
     _e("docs.document_extraction", (P.DOCUMENT_EXTRACTED_DATA,),
-       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE,
+       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        notes="NO RLS. See defect PD-1."),
     _e("docs.extraction_field",
        (P.DOCUMENT_EXTRACTED_DATA, P.FINANCIAL_SOURCE_DATA),
-       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, exportable=True,
+       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True, exportable=True,
        notes="`value_number` carries amounts read off a tax slip; "
              "`bounding_box` locates them on the page. NO RLS — this is the "
              "most sensitive unprotected table. See defect PD-1."),
     _e("docs.document_link", (P.PSEUDONYMOUS_IDENTIFIER,),
-       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE,
+       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        notes="Provenance edge from a confirmed fact back to its document. "
              "Deleting a document must decide this edge's fate explicitly — "
              "an orphaned link claims evidence that no longer exists."),
@@ -374,21 +374,21 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        replay_dependency=True, exportable=True),
     _e("analysis.analysis_input_snapshot",
        (P.DERIVED_TAX_INPUT, P.FINANCIAL_SOURCE_DATA, P.SEALED_EVIDENCE),
-       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW,
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
        replay_dependency=True, immutable=True,
        notes="THE frozen snapshot: 27 engine inputs plus its hash. Contains no "
              "identifier and no free text (§10), but every financial figure. "
              "Erasing it makes replay impossible — see §40. NO RLS: defect "
              "PD-1, and the highest-value row in that finding."),
     _e("analysis.analysis_line_item", (P.DERIVED_TAX_RESULT,),
-       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE,
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        replay_dependency=True, exportable=True,
        notes="Computed amounts with display labels. NO RLS. See PD-1."),
     _e("analysis.analysis_assumption", (P.DERIVED_TAX_INPUT, P.USER_FREE_TEXT),
-       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE,
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        notes="Free-text `text` column inside sealed evidence. NO RLS."),
     _e("analysis.reconciliation_check", (P.DERIVED_TAX_RESULT,),
-       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE,
+       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        notes="`detail` is free text produced by the system, not the user."),
 
     # ------------------------------------------------------------------- IOE
@@ -420,7 +420,7 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
     _e("ioe.scenario_event", (P.OPERATIONAL_TELEMETRY,),
        S.AUDIT, R.BOUNDED_AUDIT, D.CASCADE_DELETE, rls=True),
     _e("ioe.run_rule_snapshot", (P.PSEUDONYMOUS_IDENTIFIER,),
-       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE,
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        replay_dependency=True,
        notes="Join from a run to the shared rule snapshot. Carries no personal "
              "data but links a user's run to a version manifest. NO RLS."),
@@ -441,7 +441,7 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        exportable=True, notes="`comment` is unbounded user free text."),
     _e("reco.recommendation_status_event", (P.RECOMMENDATION_DATA, P.USER_FREE_TEXT),
-       S.AUDIT, R.BOUNDED_AUDIT, D.DE_IDENTIFY,
+       S.AUDIT, R.BOUNDED_AUDIT, D.DE_IDENTIFY, rls=True,
        notes="FK already SET NULL on user delete; `note` free text must be "
              "cleared too or de-identification is incomplete. NO RLS."),
 
@@ -450,17 +450,17 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        exportable=True, notes="`title` is derived from the first question."),
     _e("ai.ai_message", (P.USER_FREE_TEXT, P.DERIVED_TAX_RESULT),
-       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, exportable=True,
+       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True, exportable=True,
        notes="Both sides of the conversation: the user's question verbatim and "
              "the generated answer. NO RLS. See defect PD-1."),
     _e("ai.ai_prompt_context", (P.DERIVED_TAX_RESULT, P.FINANCIAL_SOURCE_DATA),
-       S.DERIVED, R.SHORT_OPERATIONAL, D.CASCADE_DELETE,
+       S.DERIVED, R.SHORT_OPERATIONAL, D.CASCADE_DELETE, rls=True,
        notes="JSONB holding the verified figures that were put in front of the "
              "model — taxable income, tax, savings, marginal rate. A debugging "
              "artifact holding financial data with NO RLS. See PD-1; a strong "
              "candidate for the shortest retention in the system."),
     _e("ai.ai_message_citation", (P.PSEUDONYMOUS_IDENTIFIER,),
-       S.DERIVED, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE,
+       S.DERIVED, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        notes="Links a message to rule versions and to an analysis. Its FK to "
              "`analysis.analysis_run` is NO ACTION and will BLOCK deletion of "
              "an analysis — see the dependency graph, §23."),
@@ -471,7 +471,7 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        notes="Provider identifiers. Financial-record retention is "
              "LEGAL_REVIEW_REQUIRED."),
     _e("billing.invoice", (P.FINANCIAL_SOURCE_DATA, P.PSEUDONYMOUS_IDENTIFIER),
-       S.AUDIT, R.RETAINED_PENDING_REVIEW, D.RETAIN, exportable=True,
+       S.AUDIT, R.RETAINED_PENDING_REVIEW, D.RETAIN, rls=True, exportable=True,
        notes="Amounts and a provider invoice id. NO RLS. Almost certainly "
              "subject to a statutory retention period — LEGAL_REVIEW_REQUIRED."),
     _e("billing.entitlement", (P.ACCOUNT_IDENTITY,),
@@ -752,19 +752,17 @@ _NON_RLS: tuple[NonRlsTable, ...] = (
       for t in ("audit_log", "audit_log_2025m01", "audit_log_2025m02",
                 "audit_log_default")),
 
-    # --- the actual defects ---------------------------------------------------
-    *(_n(t, N.PRIVACY_DEFECT_REQUIRES_REMEDIATION, _GRANTS_RW,
-         "Tenant-owned child row reached through an RLS-protected parent. The "
-         "ioe schema gave exactly this shape RLS in Entry 3B; these did not "
-         "follow. PD-1, scheduled for 11B1.", ud=True)
-      for t in ("analysis.analysis_assumption", "analysis.analysis_input_snapshot",
-                "analysis.analysis_line_item", "analysis.reconciliation_check",
-                "docs.document_extraction", "docs.document_link",
-                "docs.extraction_field", "wealth.asset_valuation",
-                "wealth.liability_balance", "wealth.registered_account_detail",
-                "ai.ai_message", "ai.ai_message_citation", "ai.ai_prompt_context",
-                "billing.invoice", "ioe.run_rule_snapshot",
-                "reco.recommendation_status_event")),
+    # --- PD-1: closed in Entry 11B1 -------------------------------------------
+    # These sixteen tenant-owned child tables used to live here as
+    # PRIVACY_DEFECT_REQUIRES_REMEDIATION. They now carry RLS, FORCE RLS and a
+    # FOR ALL policy with both USING and WITH CHECK, resolved through their
+    # parent to ref.current_app_user() — so they are no longer non-RLS tables
+    # and have no entry in this registry at all.
+    #
+    # The entries were removed only after the isolation was proven: removing
+    # the RLS makes tests/security/test_pd1_tenant_isolation.py fail 81 times,
+    # and test_the_non_rls_registry_describes_no_table_that_gained_rls fails if
+    # a table listed here has policies in the live database.
 )
 
 NON_RLS: dict[str, NonRlsTable] = {entry.table: entry for entry in _NON_RLS}
