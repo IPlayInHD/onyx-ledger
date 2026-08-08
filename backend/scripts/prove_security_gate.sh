@@ -66,9 +66,22 @@ fi
 PASS=0; FAIL=0
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"; cleanup' EXIT
 
+# Admission state accumulates across suite runs — every run books leases and
+# rate counters in the same database. With fifteen cases the suite runs thirty
+# times here, and the global concurrency limiter eventually refuses work that a
+# fresh database would admit. Cleared alongside the ledger so each case starts
+# from a comparable state; both tables are rebuilt by the suite itself.
+SUITE_STATE_RESET="
+  DELETE FROM admission.lease;
+  DELETE FROM admission.rate_counter;
+"
+
 # $1 label   $2 remove the invariant   $3 restore it
 prove() {
   local label="$1" remove="$2" restore="$3"
+  # Comparable starting state for every case. Without it a case fails or passes
+  # according to how many cases ran before it, which is the opposite of a proof.
+  psql "$CONN" -q -v ON_ERROR_STOP=1 -c "$SUITE_STATE_RESET"
   psql "$CONN" -q -v ON_ERROR_STOP=1 -c "$remove"
   if PYTHONPATH=. "${SUITE[@]}" > "$WORK/out" 2>&1; then
     echo "  FAIL  ${label} — security suite PASSED with the invariant removed"
@@ -78,8 +91,9 @@ prove() {
     PASS=$((PASS + 1))
   fi
   psql "$CONN" -q -v ON_ERROR_STOP=1 -c "$restore"
-  if ! PYTHONPATH=. "${SUITE[@]}" > /dev/null 2>&1; then
-    echo "  FAIL  ${label} — suite still failing after restore"
+  if ! PYTHONPATH=. "${SUITE[@]}" > "$WORK/restore" 2>&1; then
+    echo "  FAIL  ${label} — suite still failing after restore:"
+    grep -m3 -E '^(FAILED|E  )' "$WORK/restore" | sed 's/^/          /'
     FAIL=$((FAIL + 1))
   fi
 }
@@ -162,6 +176,99 @@ prove "PD-1 regression guard (new unguarded tenant table)" \
      id uuid PRIMARY KEY DEFAULT ref.uuid_generate_v7(),
      user_id uuid NOT NULL REFERENCES identity.user_account(id));" \
   "DROP TABLE wealth.pd1_regression_probe;"
+
+
+# PD-9 restores need a cleanup prelude. These cases relax a constraint and then
+# let the whole security suite run against the relaxed schema, so the suite can
+# write rows the original constraint would have refused — duplicate subjects
+# once the primary key is gone, ledger rows whose account was removed while the
+# cascade was absent. Restoring the constraint over them fails, which would
+# leave the disposable database in a state no later case could use.
+#
+# Lifecycle rows are not deletable by design, so the cleanup disables that
+# trigger for the duration. It runs only inside this proof, on a database the
+# script created and drops.
+LEDGER_CLEANUP="${SUITE_STATE_RESET}
+  ALTER TABLE identity.account_lifecycle DISABLE TRIGGER trg_account_lifecycle_no_delete;
+  DELETE FROM identity.account_lifecycle a
+   WHERE a.ctid <> (SELECT min(b.ctid) FROM identity.account_lifecycle b
+                     WHERE b.user_id = a.user_id);
+  DELETE FROM identity.account_lifecycle a
+   WHERE NOT EXISTS (SELECT 1 FROM identity.user_account u WHERE u.id = a.user_id);
+  ALTER TABLE identity.account_lifecycle ENABLE TRIGGER trg_account_lifecycle_no_delete;
+"
+
+# ---- PD-9, Entry 11B3 -------------------------------------------------------
+# The deletion ledger must outlive the account it records. Each case restores
+# one way of losing that and expects the suite to notice.
+
+# The cascade itself. This is the defect: with it back, removing an account
+# either destroys the ledger or — because of the no-delete trigger — makes the
+# account impossible to remove at all.
+#
+# NOT VALID because by this point the database already holds ledger rows whose
+# accounts were removed by the suite, and a validating constraint cannot be
+# added over them. That is not a workaround, it is the migration docstring's
+# warning demonstrating itself: once a record has outlived its account, the
+# cascade genuinely cannot come back. NOT VALID still arms it for every
+# subsequent delete, which is the behaviour under test.
+prove "PD-9 no cascade on the deletion ledger" \
+  "ALTER TABLE identity.account_lifecycle
+     ADD CONSTRAINT account_lifecycle_user_id_fkey
+     FOREIGN KEY (user_id) REFERENCES identity.user_account(id)
+     ON DELETE CASCADE NOT VALID;" \
+  "${LEDGER_CLEANUP}
+   ALTER TABLE identity.account_lifecycle
+     DROP CONSTRAINT IF EXISTS account_lifecycle_user_id_fkey;"
+
+# The same cascade on the table PD-9's wording names.
+prove "PD-9 no cascade on audit.data_deletion_request" \
+  "ALTER TABLE audit.data_deletion_request
+     ADD CONSTRAINT data_deletion_request_user_id_fkey
+     FOREIGN KEY (user_id) REFERENCES identity.user_account(id)
+     ON DELETE CASCADE NOT VALID;" \
+  "ALTER TABLE audit.data_deletion_request
+     DROP CONSTRAINT IF EXISTS data_deletion_request_user_id_fkey;"
+
+# A DELETE grant on the ledger. The record that survives the account must also
+# survive the application.
+prove "PD-9 ledger DELETE grant" \
+  "GRANT DELETE ON identity.account_lifecycle TO onyx_app_rw;" \
+  "${LEDGER_CLEANUP}
+   REVOKE DELETE ON identity.account_lifecycle FROM onyx_app_rw;"
+
+# The subject's uniqueness. Without the primary key, one account could
+# accumulate several logical lifecycles and idempotency would be a claim rather
+# than a fact.
+prove "PD-9 durable subject uniqueness" \
+  "ALTER TABLE identity.account_lifecycle
+     DROP CONSTRAINT account_lifecycle_pkey;" \
+  "${LEDGER_CLEANUP}
+   ALTER TABLE identity.account_lifecycle
+     ADD CONSTRAINT account_lifecycle_pkey PRIMARY KEY (user_id);"
+
+# The worker requiring a live account again. Restoring the join is the shape of
+# a future change that quietly breaks every phase after account removal.
+prove "PD-9 worker does not need a live account" \
+  "CREATE OR REPLACE FUNCTION identity.account_deletion_state(p_user_id uuid)
+     RETURNS text LANGUAGE sql STABLE SECURITY DEFINER
+     SET search_path = identity, pg_catalog
+     AS \$fn\$ SELECT l.state FROM identity.account_lifecycle l
+                JOIN identity.user_account u ON u.id = l.user_id
+               WHERE l.user_id = p_user_id \$fn\$;" \
+  "CREATE OR REPLACE FUNCTION identity.account_deletion_state(p_user_id uuid)
+     RETURNS text LANGUAGE sql STABLE SECURITY DEFINER
+     SET search_path = identity, pg_catalog
+     AS \$fn\$ SELECT state FROM identity.account_lifecycle
+               WHERE user_id = p_user_id \$fn\$;"
+
+# The creation-time integrity that replaced the foreign key.
+prove "PD-9 subject must exist at creation" \
+  "DROP TRIGGER trg_account_lifecycle_subject_exists
+     ON identity.account_lifecycle;" \
+  "CREATE TRIGGER trg_account_lifecycle_subject_exists
+     BEFORE INSERT ON identity.account_lifecycle
+     FOR EACH ROW EXECUTE FUNCTION identity.require_lifecycle_subject_exists();"
 
 echo
 echo "security gate proof: ${PASS} passed, ${FAIL} failed"

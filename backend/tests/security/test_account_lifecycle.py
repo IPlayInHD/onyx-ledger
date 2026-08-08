@@ -104,6 +104,27 @@ def _age_claim(user_id: uuid.UUID, interval: str = "2 hours") -> None:
         assert cur.rowcount == 1, "the claim was not aged"
 
 
+
+async def _claim_until_found(service, user_id, worker_id: str, rounds: int = 20):
+    """Claim repeatedly until this account appears, or give up.
+
+    `claim_account_lifecycle` caps its batch at 50 and orders by `requested_at`
+    — oldest first, which is right for a worker draining a backlog. It means a
+    test that claims once and expects its OWN account is really asserting that
+    fewer than 50 claimable lifecycles exist, which is true on a fresh database
+    and false on one the security-gate proof has run the suite against thirty
+    times. The invariant under test is that the worker can claim this account;
+    the batch position is not part of it.
+    """
+    for _ in range(rounds):
+        claimed = await service.claim(worker_id=worker_id, batch_size=50)
+        if not claimed:
+            return None
+        for candidate in claimed:
+            if candidate.user_id == user_id:
+                return candidate
+    return None
+
 # ---------------------------------------------------------------------------
 # request lifecycle
 # ---------------------------------------------------------------------------
@@ -539,10 +560,9 @@ async def test_the_worker_claims_advances_and_recovers(client):
 
     async with unit_of_work(actor_type="admin") as session:
         service = AccountLifecycleService(session)
-        claimed = await service.claim(worker_id="worker-a", batch_size=50)
-    mine = [c for c in claimed if c.user_id == user_id]
-    assert len(mine) == 1, "the requested account was not claimable"
-    assert mine[0].requested_at is not None, "the cutoff was not handed to the worker"
+        mine = await _claim_until_found(service, user_id, "worker-a")
+    assert mine is not None, "the requested account was not claimable"
+    assert mine.requested_at is not None, "the cutoff was not handed to the worker"
 
     # A second worker cannot take a live claim.
     async with unit_of_work(actor_type="admin") as session:
@@ -552,7 +572,7 @@ async def test_the_worker_claims_advances_and_recovers(client):
 
     async with unit_of_work(actor_type="admin") as session:
         assert await AccountLifecycleService(session).advance(
-            mine[0], LifecycleState.ACCESS_DISABLED, worker_id="worker-a")
+            mine, LifecycleState.ACCESS_DISABLED, worker_id="worker-a")
     assert await _state_of(user_id) == LifecycleState.ACCESS_DISABLED.value
 
 
@@ -563,19 +583,17 @@ async def test_an_abandoned_claim_is_recovered_by_another_worker(client):
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
     async with unit_of_work(actor_type="admin") as session:
-        claimed = await AccountLifecycleService(session).claim(
-            worker_id="doomed-worker", batch_size=50)
-    assert user_id in {c.user_id for c in claimed}
+        claimed = await _claim_until_found(
+            AccountLifecycleService(session), user_id, "doomed-worker")
+    assert claimed is not None
 
     # Age the claim past the timeout, as a dead worker's claim would age.
     _age_claim(user_id)
 
     async with unit_of_work(actor_type="admin") as session:
-        recovered = await AccountLifecycleService(session).claim(
-            worker_id="rescue-worker", batch_size=50)
-    assert user_id in {c.user_id for c in recovered}, (
-        "an abandoned claim was never released"
-    )
+        recovered = await _claim_until_found(
+            AccountLifecycleService(session), user_id, "rescue-worker")
+    assert recovered is not None, "an abandoned claim was never released"
 
     assert _count(
         "SELECT count(*) FROM identity.account_lifecycle_event "
@@ -591,15 +609,15 @@ async def test_a_stale_claim_token_cannot_advance_the_lifecycle(client):
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
     async with unit_of_work(actor_type="admin") as session:
-        first = (await AccountLifecycleService(session).claim(
-            worker_id="worker-a", batch_size=50))
-    mine = next(c for c in first if c.user_id == user_id)
+        mine = await _claim_until_found(
+            AccountLifecycleService(session), user_id, "worker-a")
+    assert mine is not None
 
     _age_claim(user_id)
     async with unit_of_work(actor_type="admin") as session:
-        stolen = await AccountLifecycleService(session).claim(
-            worker_id="worker-b", batch_size=50)
-    assert user_id in {c.user_id for c in stolen}, "worker-b never took the claim"
+        stolen = await _claim_until_found(
+            AccountLifecycleService(session), user_id, "worker-b")
+    assert stolen is not None, "worker-b never took the claim"
 
     async with unit_of_work(actor_type="admin") as session:
         assert not await AccountLifecycleService(session).advance(
@@ -614,8 +632,9 @@ async def test_a_failed_phase_records_a_closed_code_and_stays_retryable(client):
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
     async with unit_of_work(actor_type="admin") as session:
-        claimed = next(c for c in await AccountLifecycleService(session).claim(
-            worker_id="worker-a", batch_size=50) if c.user_id == user_id)
+        claimed = await _claim_until_found(
+            AccountLifecycleService(session), user_id, "worker-a")
+        assert claimed is not None
 
     async with unit_of_work(actor_type="admin") as session:
         assert await AccountLifecycleService(session).fail(
