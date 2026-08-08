@@ -918,11 +918,88 @@ if len(STORAGE_SURFACES) != len(_SURFACES):  # pragma: no cover
     raise RuntimeError("duplicate storage surface")
 
 
+# ---------------------------------------------------------------------------
+# How other applications relate to THIS application's account lifecycle
+# (Entry 11B1 §19)
+# ---------------------------------------------------------------------------
+class ApplicationLifecycleRelation(StrEnum):
+    """What a deletion request in the Python backend means for another
+    application that also holds accounts."""
+
+    #: One account, one deletion. A request here must purge there too.
+    SAME_ACCOUNT_LIFECYCLE = "SAME_ACCOUNT_LIFECYCLE"
+    #: Its own accounts, its own store, its own deletion. A request here does
+    #: nothing there, and saying otherwise would be a false completion.
+    SEPARATE_APPLICATION = "SEPARATE_APPLICATION"
+    DEMO_DEVELOPMENT_ONLY = "DEMO_DEVELOPMENT_ONLY"
+    LEGACY_UNUSED = "LEGACY_UNUSED"
+    UNKNOWN_REQUIRES_OPERATIONAL_REVIEW = "UNKNOWN_REQUIRES_OPERATIONAL_REVIEW"
+
+
+@dataclass(frozen=True)
+class ApplicationRelation:
+    application: str
+    relation: ApplicationLifecycleRelation
+    #: What in the repository establishes it.
+    evidence: tuple[str, ...]
+    #: What is still an operational fact rather than a repository fact.
+    operational_question: str | None
+    #: What a deletion request in this backend actually does to it.
+    effect_of_backend_deletion: str
+
+
+#: The Node/Express application under `server/`.
+#:
+#: The determinable answer is SEPARATE_APPLICATION, and it is determinable
+#: from the repository rather than inferred: the two systems share no code, no
+#: database, no identifier and no call. `server/` authenticates with its own
+#: bcrypt hashes and its own JWTs against its own store, and nothing in it
+#: names the Python API.
+#:
+#: What is NOT determinable here is whether the deployed instance currently
+#: holds real people's data. That is an operational fact about a running
+#: Netlify site, and no amount of reading this repository settles it.
+NODE_APPLICATION = ApplicationRelation(
+    application="server (Node/Express)",
+    relation=ApplicationLifecycleRelation.SEPARATE_APPLICATION,
+    evidence=(
+        "server/ contains no reference to the Python API — no base URL, no "
+        "api/v1 path, no shared client. Verified by search.",
+        "It authenticates independently: bcryptjs password hashes and "
+        "jsonwebtoken sessions, in its own store.",
+        "It persists its own users — email, name, passwordHash, tax profile, "
+        "documents — to Netlify Blobs, keyed by its own generated ids.",
+        "Root netlify.toml deploys it: base `server`, publish `public`, the "
+        "Express app as a serverless function. It is configured to run.",
+        "No GitHub Actions workflow builds, tests or deploys it, so the "
+        "repository's gates say nothing about it either way.",
+        "It carries no lifecycle table and no notion of a deletion request; "
+        "its `deleteUser` is an immediate store deletion.",
+    ),
+    operational_question=(
+        "Is the deployed instance live, and does it hold data belonging to "
+        "real people rather than the demo session visible locally? The "
+        "untracked FileStore holds 7 accounts on a single email domain inside "
+        "an 8-minute window, which reads as a demo — but the deployed Blobs "
+        "store is a different store and this repository cannot see it."
+    ),
+    effect_of_backend_deletion=(
+        "NOTHING. A deletion requested through this backend does not reach the "
+        "Node application's store, and no phase of Entry 11B plans to. An "
+        "account deleted here may still exist there, under the same email "
+        "address, with a password hash and uploaded documents."
+    ),
+)
+
+
 __all__ = [
     "LIFECYCLE",
+    "NODE_APPLICATION",
     "MANUALLY_DECLARED_USER_DERIVED",
     "NON_RLS",
     "STORAGE_SURFACES",
+    "ApplicationLifecycleRelation",
+    "ApplicationRelation",
     "DeletionAction",
     "LifecycleState",
     "NonRlsReason",

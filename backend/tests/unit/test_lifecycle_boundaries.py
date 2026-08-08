@@ -226,3 +226,66 @@ def test_the_cutoff_is_read_through_the_privileged_function_not_the_table():
             "from a session that sets no app.user_id; RLS would hide the row "
             "and the check would silently pass for every deleting account"
         )
+
+
+# ---------------------------------------------------------------------------
+# other applications (§19)
+# ---------------------------------------------------------------------------
+REPO = BACKEND.parent
+SERVER = REPO / "server"
+
+
+def test_the_node_application_is_still_a_separate_application():
+    """§19 — the classification, re-derived rather than trusted.
+
+    `server/` is a second implementation of this product with its own accounts.
+    Classifying it as SEPARATE_APPLICATION is what makes it honest to say that
+    Entry 11B1 does not touch it; if someone later wires the two together, that
+    sentence silently becomes false, and this is what notices.
+    """
+    from app.privacy.classification import (
+        NODE_APPLICATION,
+        ApplicationLifecycleRelation,
+    )
+
+    assert NODE_APPLICATION.relation is (
+        ApplicationLifecycleRelation.SEPARATE_APPLICATION
+    )
+
+    if not SERVER.exists():
+        pytest.skip("the Node application is not present in this checkout")
+
+    sources = [
+        p for p in SERVER.rglob("*.js")
+        if "node_modules" not in p.parts and "public" not in p.parts
+    ]
+    assert sources, "no Node sources found; the evidence cannot be re-derived"
+
+    # The claim is that it never calls this backend. Anything that looks like
+    # our API would make it SAME_ACCOUNT_LIFECYCLE and pull it into 11B's scope.
+    calls_backend = [
+        f"{p.relative_to(REPO)}"
+        for p in sources
+        if re.search(r"/api/v1/|localhost:8000|ONYX_API|PYTHON_API", p.read_text())
+    ]
+    assert not calls_backend, (
+        f"{calls_backend} reference the Python API, so the Node application may "
+        "no longer be a separate application — re-decide its relation to the "
+        "account lifecycle before this ships"
+    )
+
+
+def test_no_lifecycle_phase_claims_to_delete_the_node_application():
+    """The failure mode this guards is a false completion.
+
+    An account deleted here still exists in the Node store, under the same
+    email address, with a password hash and uploaded documents. Nothing in the
+    backend is entitled to imply otherwise.
+    """
+    from app.privacy.classification import NODE_APPLICATION
+
+    assert NODE_APPLICATION.effect_of_backend_deletion.startswith("NOTHING")
+    assert NODE_APPLICATION.operational_question, (
+        "whether the deployed instance holds real people's data is not a "
+        "repository fact and must stay flagged as an operational question"
+    )

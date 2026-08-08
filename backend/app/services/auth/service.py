@@ -12,6 +12,7 @@ from app.core.exceptions import Conflict, Unauthorized
 from app.core.security.jwt import create_access_token, generate_refresh_token
 from app.core.security.password import hash_password, hash_token, verify_password
 from app.database.models import AuthSession, LoginEvent, UserAccount, UserCredential
+from app.database.session import unit_of_work
 from app.schemas import TokenPair
 
 
@@ -43,8 +44,7 @@ class AuthService:
             else None
         )
         if not user or not cred or not verify_password(password, cred.password_hash):
-            self.s.add(LoginEvent(user_id=user.id if user else None, email_tried=email,
-                                  event_type="failure", ip_address=ip))
+            await self._record_login_failure(email, user.id if user else None, ip)
             raise Unauthorized("Invalid email or password")
 
         # The deletion cutoff, applied AFTER credential verification on purpose.
@@ -65,7 +65,7 @@ class AuthService:
         if not sess or sess.revoked_at is not None or sess.expires_at <= now:
             # reuse of a rotated/expired token → revoke the whole family for safety
             if sess and sess.revoked_at is not None:
-                await self._revoke_user_sessions(sess.user_id)
+                await self._revoke_user_sessions_durably(sess.user_id)
             raise Unauthorized("Invalid or expired refresh token")
         sess.revoked_at = now  # rotate: single-use refresh tokens
         # A token minted before the deletion request must not survive rotation:
@@ -92,6 +92,36 @@ class AuthService:
         )
         if state is not None:
             raise AccountDeletionInProgress()
+
+    # ---- effects that must outlive the raise that follows them -------------
+    #
+    # `unit_of_work` wraps the request in `session.begin()`, so raising discards
+    # everything staged on the way out. For a SUCCESSFUL request that is exactly
+    # right. For a failure it is not: the security value of a failed login is
+    # the record of it, and the security value of detecting a replayed refresh
+    # token is the revocation that follows — and both were being staged into the
+    # transaction that was about to be rolled back.
+    #
+    # Recorded as PD-6 in Entry 11A, as a missing audit row. It was worse: the
+    # revocation was going the same way, so a stolen refresh token kept working
+    # after the theft had been detected.
+    #
+    # Their own short transaction, committed before the raise. Cheaper than
+    # restructuring both call paths to return an outcome and raise after the
+    # commit — the shape Entry 10 used for the rate counter — and it does not
+    # move the decision away from the code that makes it. The extra connection
+    # is taken only on the failure path, which admission already bounds.
+
+    async def _record_login_failure(
+        self, email: str, user_id: uuid.UUID | None, ip: str | None
+    ) -> None:
+        async with unit_of_work(actor_type="system") as session:
+            session.add(LoginEvent(user_id=user_id, email_tried=email,
+                                   event_type="failure", ip_address=ip))
+
+    async def _revoke_user_sessions_durably(self, user_id: uuid.UUID) -> None:
+        async with unit_of_work(actor_type="system") as session:
+            await AuthService(session)._revoke_user_sessions(user_id)
 
     async def logout(self, user_id: uuid.UUID) -> None:
         await self._revoke_user_sessions(user_id)
