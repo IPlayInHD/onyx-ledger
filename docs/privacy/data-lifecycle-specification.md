@@ -968,8 +968,15 @@ into a store that accumulates user data with no deletion path (PD-4), across a
 tenant boundary that is incomplete (PD-1). Deleting data while both are true is
 the wrong order to do two risky things in.
 
-**PD-6 and PD-3 are deliberately absent.** They belong to a separate
+**PD-3 is deliberately absent.** It belongs to a separate
 authentication/security hardening entry (§29.7).
+
+**PD-6 was fixed in Entry 11B1 instead** — see §31. It was recorded here as a
+missing audit row, which could reasonably have waited. It was not only that: the
+same rollback discarded the session-family revocation that follows refresh-token
+reuse detection, so a stolen refresh token kept working after the theft had been
+detected. That is a security defect rather than an observability one, and it was
+three lines in a function Entry 11B1 was already modifying.
 
 ---
 
@@ -1287,3 +1294,40 @@ restore backup from T1  (T1 < T2)
 
 This is mandatory, not advisory: a restore that silently resurrects a deleted
 account undoes every guarantee in this document in one operation.
+
+---
+
+## 31. What Entry 11B1 changed in the running system
+
+Full detail in [`account-deletion-orchestration.md`](./account-deletion-orchestration.md).
+This section records only what a reader of *this* document needs to know has
+moved since it was written.
+
+**The phase numbering in §26 is not the numbering the work was done under.**
+This entry's "11B1" is §26's **11B2** — the account lifecycle and deletion-request
+state machine. §26's own 11B0 (PD-4) and 11B1 (PD-1) are **not done** and remain
+prerequisites for every phase that deletes. The ordering rationale in §26 is
+unaffected: it concerns phases that remove data, and this one removes none.
+
+| Question this document asked | Answer as of Entry 11B1 |
+|---|---|
+| §17 — queued work during deletion | Implemented. Every Celery task taking a `user_id` consults a preflight in the same database the request was recorded in; `revoke` is not relied on. A structural test makes the coverage a rule rather than a habit. |
+| §9 — account deleted | Access is disabled, sessions revoked, a durable record exists. **No data is removed.** The lifecycle stops at `PURGE_PENDING`; `COMPLETE` is unreachable by trigger, by CHECK and by service. |
+| §29 / PD-6 — failed-login rollback | Fixed, and it was larger than recorded: refresh-token reuse detection revoked the session family inside the transaction it then rolled back, so a replayed token left every session alive. Failure effects now commit in their own transaction. |
+| §19 — the `server/` application | Classified `SEPARATE_APPLICATION`, in code, with its evidence re-derived by test. A deletion here does **nothing** to it. |
+| §16 / §30 — restore invariant | Unchanged and still mandatory. 11B1 contributes the ledger's durability: the lifecycle row is undeletable, the event log is append-only and carries no FK so it outlives the account, and the cutoff is immutable. |
+
+**One thing this document did not anticipate.** `requested_at` was specified as
+"the deletion cutoff" without saying how it orders against writes already in
+flight. It does not order against them by itself: a write and a request arriving
+together both succeed, and the row lands dated after the cutoff — where a purge
+bounded on `requested_at` never looks. All four user-data surfaces reproduced
+this. User work now takes a shared advisory lock on the account and a deletion
+request takes it exclusively, and the cutoff is `clock_timestamp()` rather than
+`now()` so it records when the request became real rather than when its
+transaction began. Any later phase that introduces another way to write user
+data inherits this obligation.
+
+**Still open after 11B1:** PD-1, PD-2, PD-3, PD-4, PD-7, PD-8, PD-14; the
+cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
+(`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.
