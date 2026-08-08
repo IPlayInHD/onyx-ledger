@@ -68,9 +68,10 @@ class DataDeletionRequest(Base):
     __table_args__ = {"schema": "audit"}
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
-    )
+    # Durable subject, not a foreign key (PD-9): a deletion request must
+    # outlive the account it describes. This table is currently unused —
+    # identity.account_lifecycle is the live ledger.
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     status: Mapped[str] = mapped_column(String, default="requested")
     reason: Mapped[str | None] = mapped_column(Text)
     requested_at: Mapped[datetime] = created_at_col()

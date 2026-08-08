@@ -26,6 +26,7 @@ itself, and its numbering is **not** the numbering used here:
 | 11B0 | PD-4 — audit log accumulating whole user rows | **closed** |
 | 11B1 | PD-1 — RLS on the 16 tenant-owned child tables | **closed** |
 | **11B2** (this document) | Account lifecycle and deletion orchestration | **closed** |
+| 11B3 | PD-9 — durable deletion ledger | **closed** |
 
 This work was merged under the label "11B1" and is now numbered **11B2**: the
 11A plan had already assigned 11B1 to the RLS remediation. The label moved, the

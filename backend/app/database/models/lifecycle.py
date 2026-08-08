@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text
+from sqlalchemy import DateTime, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,9 +33,17 @@ class AccountLifecycle(Base):
         ),
     }
 
+    #: The DURABLE SUBJECT of the deletion, and deliberately NOT a foreign key.
+    #:
+    #: PD-9: this record has to outlive the account row it describes, so a purge
+    #: can finish and a restored backup can be told what to re-delete. A model
+    #: that still declared the relationship would tell a reader the cascade
+    #: exists — which is exactly the belief that made the account impossible to
+    #: remove. Creation-time integrity is enforced by
+    #: `trg_account_lifecycle_subject_exists`; see
+    #: db/sql/44_pd9_durable_deletion_ledger.sql.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("identity.user_account.id", ondelete="CASCADE"),
         primary_key=True,
     )
     state: Mapped[str] = mapped_column(

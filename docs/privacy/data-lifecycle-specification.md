@@ -875,7 +875,7 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 | **PD-6** | Failed logins record nothing: `AuthService` adds a `login_event` then raises, so the row rolls back | `PRIVACY_DEFECT_NOW` (security-audit) | MEDIUM |
 | **PD-7** | No deletion capability exists at all — no account, document, financial-record or conversation delete endpoint | `IMPLEMENTATION_GAP` | HIGH |
 | **PD-8** | `ObjectStorage` port has no `delete` method; binaries are unreachable by any cascade | `IMPLEMENTATION_GAP` | HIGH |
-| **PD-9** | `audit.data_deletion_request` FK is `CASCADE`, so the deletion record dies with the account it must outlive | `IMPLEMENTATION_GAP` | MEDIUM |
+| **PD-9** | `audit.data_deletion_request` FK is `CASCADE`, so the deletion record dies with the account it must outlive | `IMPLEMENTATION_GAP` | **MEDIUM — FIXED in 11B3 (§34)**. The wording named a table that was never used; the live ledger `identity.account_lifecycle` had the same defect in a stronger form. |
 | **PD-10** | Object-store encryption, versioning, TLS and backup config absent from the repository | `DEPLOYMENT_CONFIGURATION_REQUIRED` | — |
 | **PD-12** | Celery serialized failed-task exceptions — statement and bound parameters included — into the Redis result backend | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in closeout (§29.2)** |
 | **PD-13** | The same exception text reaches the Celery worker's own log; sanitizing it is a logging concern, not a persistence one | `DEPLOYMENT_CONFIGURATION_REQUIRED` + 11B | MEDIUM |
@@ -954,7 +954,8 @@ implemented; none is built in 11A.**
 > | **11B0** | **CLOSED** | **PD-4 foundational privacy remediation** |
 > | **11B1** | **CLOSED** | PD-1 RLS remediation, 16 tables |
 > | **11B2** | **CLOSED** | Account lifecycle and deletion orchestration |
-> | **11B3+** | **PENDING — NEXT** | The phases that actually delete or de-identify |
+> | **11B3** | **CLOSED** | PD-9 durable deletion ledger |
+> | **11B4+** | **PENDING — NEXT** | The phases that actually delete or de-identify |
 >
 > **A numbering correction, not a history rewrite.** The orchestration work was
 > built and merged under the label "11B1" before anyone noticed this table had
@@ -1432,5 +1433,43 @@ these tables — purge authority belongs to the entry that writes the purge.
 unexplained privacy-relevant non-RLS 0 → 0.
 
 **Still open after 11B1:** PD-2, PD-3, PD-7, PD-8, PD-9, PD-14, PD-15; the
+cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
+(`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.
+
+---
+
+## 34. What Entry 11B3 changed in the running system (PD-9)
+
+Full detail in [`pd9-durable-deletion-ledger.md`](./pd9-durable-deletion-ledger.md).
+
+**PD-9 is closed.** The deletion ledger now outlives the account it records.
+
+**This document named the wrong table.** PD-9's wording points at
+`audit.data_deletion_request`, which §13 of this specification itself describes
+as "EXISTS AND IS UNUSED" and which still holds zero rows. Entry 11B2 built the
+real lifecycle in `identity.account_lifecycle` and reproduced the same defect in
+a stronger form — there the account id is not merely a cascading foreign key, it
+is the primary key. Both are fixed; the register entry is corrected.
+
+**What was actually happening was not what the register predicted.** Not silent
+loss: `DELETE FROM identity.user_account` failed outright, because the cascade
+tried to destroy the ledger and Entry 11B2's own no-delete trigger refused. The
+evidence was safe and the account could never be removed — which blocks the last
+step of every purge phase. Two wrongs cancelling into a third.
+
+**The fix keeps the subject and severs the link.** The account's internal UUID
+was already the ledger's primary key and is already durable: immutable, never
+reused, and carried by the `user_account` rows a restored backup brings back. No
+digest was invented, no surrogate key added, no account field retained. The
+foreign key's creation-time half — you cannot open a lifecycle for an account
+that does not exist — moved to a `BEFORE INSERT` trigger, which is the asymmetry
+a foreign key cannot express.
+
+**Backup and restore.** §16 and §30 of this document describe a reconciliation
+process that replays deletion records after a restore. PD-9 is the storage
+foundation that makes those records exist to be replayed. **The reconciliation
+itself is not implemented and is not claimed.**
+
+**Still open after 11B3:** PD-2, PD-3, PD-7, PD-8, PD-14, PD-15; the
 cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
 (`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.

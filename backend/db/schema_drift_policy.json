@@ -29,11 +29,31 @@
       "reason": "Foreign key created by backend/db/sql, typically with an ON DELETE action or a name the ORM does not reproduce."
     },
     {
+      "key": "modify_comment|audit|data_deletion_request|user_id",
+      "kind": "modify_comment",
+      "schema": "audit",
+      "table": "data_deletion_request",
+      "object": "user_id",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
       "key": "modify_comment|identity|account_lifecycle|requested_at",
       "kind": "modify_comment",
       "schema": "identity",
       "table": "account_lifecycle",
       "object": "requested_at",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|identity|account_lifecycle|user_id",
+      "kind": "modify_comment",
+      "schema": "identity",
+      "table": "account_lifecycle",
+      "object": "user_id",
       "detail": "",
       "class": "COLUMN_COMMENT_METADATA",
       "reason": "Governed column-comment divergence."

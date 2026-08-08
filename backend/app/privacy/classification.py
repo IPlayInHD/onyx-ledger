@@ -271,13 +271,20 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "NOT de-identify it. See specification §25 and defect PD-3."),
 
     _e("identity.account_lifecycle",
-       (P.ACCOUNT_IDENTITY, P.AUDIT_SECURITY_RECORD),
+       (P.ACCOUNT_IDENTITY, P.AUDIT_SECURITY_RECORD, P.PSEUDONYMOUS_IDENTIFIER),
        S.AUDIT, R.BOUNDED_AUDIT, D.RETAIN, rls=True, exportable=True,
-       notes="Entry 11B1. One row per account undergoing privacy deletion; the "
-             "absence of a row means active. RETAIN on account deletion is the "
-             "point — this row IS the deletion record, and a restored backup "
-             "needs it to know what to re-delete. Carries no email, no "
-             "financial value and no exception text: failure is a closed code."),
+       notes="Entry 11B2 built it; Entry 11B3 made it durable. One row per "
+             "account undergoing privacy deletion; the absence of a row means "
+             "active. RETAIN on account deletion is the point — this row IS "
+             "the deletion record, and a restored backup needs it to know what "
+             "to re-delete. PD-9: `user_id` is the DURABLE SUBJECT and is "
+             "deliberately NOT a foreign key, so the record outlives the "
+             "account row; a BEFORE INSERT trigger keeps the creation-time "
+             "half of the integrity the FK used to provide. Pseudonymous "
+             "rather than anonymous: the subject is an internal UUID that "
+             "still points at exactly one former account. Carries no email, no "
+             "financial value and no exception text — failure is a closed "
+             "code."),
     _e("identity.account_lifecycle_event",
        (P.AUDIT_SECURITY_RECORD, P.PSEUDONYMOUS_IDENTIFIER),
        S.AUDIT, R.BOUNDED_AUDIT, D.RETAIN, rls=True,
