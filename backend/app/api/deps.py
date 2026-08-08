@@ -29,6 +29,39 @@ async def current_user_id(
 
 
 async def db_authed(user_id: uuid.UUID = Depends(current_user_id)) -> AsyncIterator[AsyncSession]:
+    """The authenticated session, with the account-deletion cutoff applied.
+
+    THE central lifecycle boundary. Putting it here rather than on each route is
+    the difference between a rule and a habit: every protected endpoint in the
+    application inherits it, including ones written after this dependency, and
+    a new route cannot forget to check.
+
+    It costs one statement on a connection that is already open. There is no
+    cheaper place — access tokens in this system are self-contained and the
+    request path performs no account lookup at all, so lifecycle state has to be
+    read from somewhere, and this is the only somewhere every route passes
+    through.
+
+    Routes that must keep working for a deleting account — asking for deletion
+    again, reading its status — use `db_authed_lifecycle_exempt`.
+    """
+    from app.services.privacy.lifecycle import AccountLifecycleService
+
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        await AccountLifecycleService(session).assert_may_act(user_id)
+        yield session
+
+
+async def db_authed_lifecycle_exempt(
+    user_id: uuid.UUID = Depends(current_user_id),
+) -> AsyncIterator[AsyncSession]:
+    """For the deletion endpoints themselves.
+
+    Exempt, not unauthenticated: the caller is still identified and still
+    scoped by RLS to their own account. Without this, requesting deletion twice
+    would be refused by the cutoff the first request installed, and a user could
+    never read the status of the thing they asked for.
+    """
     async with unit_of_work(user_id=user_id, actor_type="user") as session:
         yield session
 

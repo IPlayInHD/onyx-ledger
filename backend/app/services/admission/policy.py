@@ -95,6 +95,11 @@ class RejectionReason(StrEnum):
     DUPLICATE_ACTIVE_OPERATION = "DUPLICATE_ACTIVE_OPERATION"
     OPERATION_COMPLEXITY_LIMIT = "OPERATION_COMPLEXITY_LIMIT"
     ADMISSION_STORE_UNAVAILABLE = "ADMISSION_STORE_UNAVAILABLE"
+    #: The account is past its privacy-deletion cutoff. NOT a rate-limit
+    #: violation and never counted as one: the caller did nothing wrong, and
+    #: charging it against an abuse quota would both mislabel the event and
+    #: make a deleting account look like an attacker in the metrics.
+    ACCOUNT_DELETION_IN_PROGRESS = "ACCOUNT_DELETION_IN_PROGRESS"
 
 
 class StoreFailurePolicy(StrEnum):

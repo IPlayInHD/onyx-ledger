@@ -12,6 +12,7 @@ from celery import Task
 
 from app.database.session import unit_of_work
 from app.services.analysis.service import AnalysisService
+from app.services.privacy.preflight import refuse_if_deleting
 from workers.celery_app import celery_app
 
 
@@ -19,6 +20,13 @@ from workers.celery_app import celery_app
 def run_analysis(self: Task, user_id: str, tax_year: int) -> str:
     async def _run() -> str:
         async with unit_of_work(user_id=uuid.UUID(user_id), actor_type="user") as session:
+            # The deletion cutoff. This task may have been queued long before
+            # the account asked to be deleted; refusing here is the only
+            # reliable place, because a reserved task is already past the
+            # queue. See app/services/privacy/preflight.py.
+            if await refuse_if_deleting(session, uuid.UUID(user_id),
+                                        task="analysis.run_analysis"):
+                return ""
             run = await AnalysisService(session).run(uuid.UUID(user_id), tax_year)
             return str(run.id)
 

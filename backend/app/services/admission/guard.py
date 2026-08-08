@@ -22,12 +22,43 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.database.session import unit_of_work
-from app.services.admission.policy import OperationClass, ScopeType
+from app.services.admission.policy import (
+    OperationClass,
+    RejectionReason,
+    ScopeType,
+    policy_for,
+)
 from app.services.admission.service import (
+    AdmissionRejected,
     AdmissionService,
     AdmissionTicket,
 )
+
+
+async def _refuse_if_account_deleting(
+    session: AsyncSession, operation: OperationClass, scope_id: str
+) -> None:
+    """Refuse new expensive work for an account past its deletion cutoff.
+
+    Reads through the privileged state function rather than the table: this is
+    a `system` unit of work with no `app.user_id`, so the lifecycle row is
+    correctly invisible to RLS and a direct read would silently see nothing —
+    the same trap the login path has.
+    """
+    state = await session.scalar(
+        text("SELECT identity.account_deletion_state(cast(:uid AS uuid))"),
+        {"uid": scope_id},
+    )
+    if state is not None:
+        raise AdmissionRejected(
+            operation,
+            RejectionReason.ACCOUNT_DELETION_IN_PROGRESS,
+            policy_for(operation).retry_after_seconds,
+        )
 
 
 @asynccontextmanager
@@ -54,6 +85,17 @@ async def admission_guard(
     while holding a pooled connection. See `AdmissionOutcome`.
     """
     async with unit_of_work(actor_type="system") as session:
+        # The privacy cutoff comes FIRST, and is not a rate decision. A deleting
+        # account must not consume its own allowance to be told it may not act,
+        # and the rejection must not appear in the abuse metrics as though the
+        # caller had misbehaved.
+        #
+        # `db_authed` already refuses every authenticated route for such an
+        # account, so this is the second boundary rather than the only one — it
+        # covers admission taken from a worker, where no HTTP dependency ran.
+        if scope_type is ScopeType.USER:
+            await _refuse_if_account_deleting(session, operation, scope_id)
+
         outcome = await AdmissionService(session).evaluate(
             operation, scope_id=scope_id, scope_type=scope_type, dedupe_key=dedupe_key
         )

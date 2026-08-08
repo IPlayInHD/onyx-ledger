@@ -18,7 +18,12 @@ import psycopg2
 import pytest
 
 from app.privacy import LIFECYCLE, DeletionAction, PrivacyClass, SourceKind
-from app.privacy.classification import NON_RLS, STORAGE_SURFACES, StorageKind
+from app.privacy.classification import (
+    MANUALLY_DECLARED_USER_DERIVED,
+    NON_RLS,
+    STORAGE_SURFACES,
+    StorageKind,
+)
 from tests.conftest import owner_dsn
 
 #: Schemas that hold no user-derived data by design: published legislation,
@@ -85,7 +90,17 @@ def _user_derived() -> set[str]:
             if child in tables and child not in reached:
                 reached.add(child)
                 frontier.append(child)
-    return reached
+
+    # Tables that hold user data with no FK to the account. Reachability cannot
+    # find them by construction, so they are declared — and the declaration is
+    # checked: naming a table that does not exist fails here rather than
+    # quietly padding the coverage count.
+    missing = sorted(MANUALLY_DECLARED_USER_DERIVED - set(tables))
+    assert not missing, (
+        f"MANUALLY_DECLARED_USER_DERIVED names tables that do not exist: "
+        f"{missing}"
+    )
+    return reached | set(MANUALLY_DECLARED_USER_DERIVED)
 
 
 def test_every_user_derived_table_has_a_lifecycle_classification():

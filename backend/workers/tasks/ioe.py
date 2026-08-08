@@ -71,6 +71,18 @@ def run_optimization(
     from app.services.ioe.orchestrator import OptimizationOrchestrator
 
     async def _run() -> str:
+        # `admission_guard` inside the orchestrator already refuses a deleting
+        # account, but it does so by raising — which would send a task that is
+        # behaving perfectly through the retry ladder. Preflighting turns a
+        # correct refusal into a clean stop.
+        from app.database.session import unit_of_work
+        from app.services.privacy.preflight import refuse_if_deleting
+
+        async with unit_of_work(actor_type="system") as session:
+            if await refuse_if_deleting(session, uuid.UUID(user_id),
+                                        task="ioe.run_optimization"):
+                return ""
+
         outcome = await OptimizationOrchestrator(uuid.UUID(user_id)).generate(
             uuid.UUID(analysis_id), idempotency_key=idempotency_key
         )

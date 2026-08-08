@@ -97,6 +97,10 @@ from app.database.models.ioe import (  # noqa: F401
     StrategyPortfolio,
     WeightConfig,
 )
+from app.database.models.lifecycle import (  # noqa: F401
+    AccountLifecycle,
+    AccountLifecycleEvent,
+)
 from app.database.models.profile import (  # noqa: F401
     Dependent,
     SpouseProfile,

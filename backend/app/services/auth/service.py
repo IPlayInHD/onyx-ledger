@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -46,6 +46,12 @@ class AuthService:
             self.s.add(LoginEvent(user_id=user.id if user else None, email_tried=email,
                                   event_type="failure", ip_address=ip))
             raise Unauthorized("Invalid email or password")
+
+        # The deletion cutoff, applied AFTER credential verification on purpose.
+        # Checking first would answer "is this address being deleted?" to
+        # anyone who typed it, which is a worse disclosure than the one it would
+        # save. A caller who gets here has already proved they own the account.
+        await self._refuse_if_deleting(user.id)
         user.last_login_at = datetime.now(tz=UTC)
         self.s.add(LoginEvent(user_id=user.id, event_type="success", ip_address=ip))
         return await self._issue_tokens(user.id, ip)
@@ -62,7 +68,30 @@ class AuthService:
                 await self._revoke_user_sessions(sess.user_id)
             raise Unauthorized("Invalid or expired refresh token")
         sess.revoked_at = now  # rotate: single-use refresh tokens
+        # A token minted before the deletion request must not survive rotation:
+        # revocation closes the sessions that exist, and this closes the path
+        # that would create new ones.
+        await self._refuse_if_deleting(sess.user_id)
         return await self._issue_tokens(sess.user_id, ip)
+
+    async def _refuse_if_deleting(self, user_id: uuid.UUID) -> None:
+        """Deny authentication for an account past its deletion cutoff.
+
+        Goes through `identity.account_deletion_state` rather than reading the
+        table, because this session is ANONYMOUS: `app.user_id` is unset during
+        login, so the RLS policy correctly hides the lifecycle row — and a check
+        that silently sees nothing would admit every deleting account. That is a
+        failure mode worth naming, because the query looks right and does the
+        opposite of what it claims.
+        """
+        from app.services.privacy.lifecycle import AccountDeletionInProgress
+
+        state = await self.s.scalar(
+            text("SELECT identity.account_deletion_state(:uid)"),
+            {"uid": user_id},
+        )
+        if state is not None:
+            raise AccountDeletionInProgress()
 
     async def logout(self, user_id: uuid.UUID) -> None:
         await self._revoke_user_sessions(user_id)

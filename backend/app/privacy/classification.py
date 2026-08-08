@@ -270,6 +270,22 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "`ip_address` remain in the clear, so severing user_id alone does "
              "NOT de-identify it. See specification §25 and defect PD-3."),
 
+    _e("identity.account_lifecycle",
+       (P.ACCOUNT_IDENTITY, P.AUDIT_SECURITY_RECORD),
+       S.AUDIT, R.BOUNDED_AUDIT, D.RETAIN, rls=True, exportable=True,
+       notes="Entry 11B1. One row per account undergoing privacy deletion; the "
+             "absence of a row means active. RETAIN on account deletion is the "
+             "point — this row IS the deletion record, and a restored backup "
+             "needs it to know what to re-delete. Carries no email, no "
+             "financial value and no exception text: failure is a closed code."),
+    _e("identity.account_lifecycle_event",
+       (P.AUDIT_SECURITY_RECORD, P.PSEUDONYMOUS_IDENTIFIER),
+       S.AUDIT, R.BOUNDED_AUDIT, D.RETAIN, rls=True,
+       notes="Append-only lifecycle transitions. Deliberately carries NO "
+             "foreign key to the account, because it must outlive the account "
+             "it describes — that is what makes the backup-restore invariant "
+             "implementable. Closed event codes, states and worker ids only."),
+
     # ----------------------------------------------------------------- profile
     _e("profile.user_profile", (P.DIRECT_IDENTIFIER, P.TAX_PROFILE_DATA),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
@@ -494,6 +510,24 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
     # Operator access records are governed by the admin/four-eyes model, not by
     # the customer privacy lifecycle.
 )
+
+#: Tables that hold user-derived data but have NO foreign key to the account,
+#: so foreign-key reachability cannot find them.
+#:
+#: Entry 11A named this blind spot when `audit.audit_log` turned out to hold
+#: whole copies of user rows while being invisible to the derivation. Entry 11B1
+#: creates one deliberately: `account_lifecycle_event` must OUTLIVE the account
+#: it describes, so a restored backup can be told which accounts were deleted
+#: after the snapshot — and a foreign key would delete exactly the record the
+#: restore needs.
+#:
+#: Membership here is a claim that a table is user-derived despite the missing
+#: edge. It must still be classified in LIFECYCLE; this set only teaches the
+#: derivation to expect it.
+MANUALLY_DECLARED_USER_DERIVED: frozenset[str] = frozenset({
+    "identity.account_lifecycle_event",
+})
+
 
 LIFECYCLE: dict[str, TableLifecycle] = {entry.table: entry for entry in _ENTRIES}
 
@@ -886,6 +920,7 @@ if len(STORAGE_SURFACES) != len(_SURFACES):  # pragma: no cover
 
 __all__ = [
     "LIFECYCLE",
+    "MANUALLY_DECLARED_USER_DERIVED",
     "NON_RLS",
     "STORAGE_SURFACES",
     "DeletionAction",
