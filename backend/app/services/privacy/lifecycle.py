@@ -206,7 +206,32 @@ class AccountLifecycleService:
         to put it: access tokens in this system are self-contained and the
         request path performs no account lookup at all, so lifecycle state has
         to be read from somewhere.
+
+        IT ALSO TAKES A SHARED LOCK, and that is not incidental. Reading the
+        state alone answers "was this account deleting a moment ago", which is
+        not the question — the write this request is about to make happens
+        later, and a deletion committed in between would leave a row dated after
+        the cutoff for a purge phase to miss. The shared lock makes the two
+        transactions order against each other; see `identity.lifecycle_lock_key`
+        for the two interleavings and why both end truthfully.
+
+        TWO STATEMENTS, NOT ONE. Combining them looks like a free saving and is
+        wrong: under READ COMMITTED a statement's snapshot is taken when the
+        statement begins, so a SELECT that waits for the lock partway through
+        still reads the snapshot from before it waited. It would block for the
+        deletion, then report the account active anyway. The lock has to be
+        granted in its own statement, so the read that follows takes a fresh
+        snapshot that includes whatever committed while it waited.
+
+        This was not theoretical — the single-statement version blocked
+        correctly and then admitted the write, which reached admission and came
+        back as 429 instead of 403.
         """
+        await self.s.execute(
+            text("SELECT pg_advisory_xact_lock_shared("
+                 "identity.lifecycle_lock_key(:uid))"),
+            {"uid": user_id},
+        )
         state = await self.s.scalar(
             text("SELECT state FROM identity.account_lifecycle WHERE user_id = :uid"),
             {"uid": user_id},
@@ -225,16 +250,30 @@ class AccountLifecycleService:
 
         Idempotency is the primary key, not a check-then-insert. Twenty
         concurrent requests all attempt the insert; nineteen get a unique
-        violation and read back the row the twentieth created. No advisory lock,
-        no race window.
+        violation and read back the row the twentieth created.
+
+        THE EXCLUSIVE LOCK IS ABOUT WRITES IN FLIGHT, NOT ABOUT DUPLICATES.
+        Duplicate requests were already handled by the primary key. What the
+        primary key cannot do is order this request against a financial write
+        that started before it and has not committed yet: without the lock, that
+        write lands after the cutoff and a purge bounded on `requested_at`
+        leaves it behind. Taking the lock exclusively means the insert happens
+        either strictly before such a write is admitted, or strictly after it
+        has finished — and `requested_at` defaults to `clock_timestamp()` so it
+        records when the lock was granted rather than when this transaction
+        began waiting for it.
         """
+        await self.s.execute(
+            text("SELECT pg_advisory_xact_lock(identity.lifecycle_lock_key(:uid))"),
+            {"uid": user_id},
+        )
         try:
             async with self.s.begin_nested():
                 await self.s.execute(
                     text("""
                         INSERT INTO identity.account_lifecycle
-                            (user_id, state, requested_at)
-                        VALUES (:uid, 'DELETION_REQUESTED', now())
+                            (user_id, state)
+                        VALUES (:uid, 'DELETION_REQUESTED')
                     """),
                     {"uid": user_id},
                 )

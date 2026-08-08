@@ -391,9 +391,9 @@ async def test_refresh_is_denied_and_sessions_are_revoked(client):
 @pytest.mark.parametrize("method,path,body", [
     ("post", "/api/v1/analysis", {"tax_year": 2025}),
     ("post", "/api/v1/financials/income",
-     {"tax_year": 2025, "income_type_code": "EMPLOYMENT", "amount": "1000.00"}),
+     {"tax_year": 2025, "income_type_code": "employment", "amount": "1000.00"}),
     ("post", "/api/v1/financials/expenses",
-     {"tax_year": 2025, "expense_category_code": "MEDICAL", "amount": "10.00"}),
+     {"tax_year": 2025, "expense_category_code": "medical", "amount": "10.00"}),
     ("post", "/api/v1/documents",
      {"document_type_code": "T4", "filename": "a.pdf", "mime_type": "application/pdf"}),
     ("post", "/api/v1/ai/ask", {"question": "why", "tax_year": 2025}),
@@ -703,3 +703,301 @@ async def test_deletion_is_never_reported_complete_in_11b1(client):
     assert body["status"] == "deletion_requested", (
         "the API reported completion before any purge phase ran"
     )
+
+
+# ---------------------------------------------------------------------------
+# the whole state machine (§34)
+# ---------------------------------------------------------------------------
+_STATES = [s.value for s in LifecycleState]
+
+#: The transition table, restated here independently of the trigger.
+#: A test that imported the rule from the thing it is testing would agree with
+#: any rule, including a wrong one.
+_LEGAL: frozenset[tuple[str, str]] = frozenset({
+    ("DELETION_REQUESTED", "ACCESS_DISABLED"),
+    ("DELETION_REQUESTED", "FAILED_RETRYABLE"),
+    ("ACCESS_DISABLED", "PURGE_PENDING"),
+    ("ACCESS_DISABLED", "FAILED_RETRYABLE"),
+    ("PURGE_PENDING", "PURGING"),
+    ("PURGE_PENDING", "FAILED_RETRYABLE"),
+    ("PURGING", "COMPLETE"),
+    ("PURGING", "FAILED_RETRYABLE"),
+    # Recovery returns to the phase that failed, never forward.
+    ("FAILED_RETRYABLE", "DELETION_REQUESTED"),
+    ("FAILED_RETRYABLE", "ACCESS_DISABLED"),
+    ("FAILED_RETRYABLE", "PURGE_PENDING"),
+    ("FAILED_RETRYABLE", "PURGING"),
+})
+
+#: How to reach each state from a fresh row, using only legal steps.
+_PATH_TO = {
+    "DELETION_REQUESTED": [],
+    "ACCESS_DISABLED": ["ACCESS_DISABLED"],
+    "PURGE_PENDING": ["ACCESS_DISABLED", "PURGE_PENDING"],
+    "PURGING": ["ACCESS_DISABLED", "PURGE_PENDING", "PURGING"],
+    "COMPLETE": ["ACCESS_DISABLED", "PURGE_PENDING", "PURGING", "COMPLETE"],
+    "FAILED_RETRYABLE": ["FAILED_RETRYABLE"],
+}
+
+
+def _seed_lifecycle_at(cur, state: str) -> uuid.UUID:
+    """A fresh account walked to `state` through legal transitions only."""
+    user = uuid.uuid4()
+    cur.execute("INSERT INTO identity.user_account (id, email, status) "
+                "VALUES (%s, %s, 'active')",
+                (str(user), f"sm_{uuid.uuid4().hex[:10]}@example.com"))
+    cur.execute("INSERT INTO identity.account_lifecycle (user_id, state) "
+                "VALUES (%s, 'DELETION_REQUESTED')", (str(user),))
+    for step in _PATH_TO[state]:
+        completed = ", completed_at = now()" if step == "COMPLETE" else ""
+        cur.execute(f"UPDATE identity.account_lifecycle SET state = %s{completed} "
+                    f"WHERE user_id = %s", (step, str(user)))
+    return user
+
+
+@pytest.mark.parametrize("frm", _STATES)
+@pytest.mark.parametrize("to", _STATES)
+def test_the_transition_table_is_enforced_exhaustively(frm: str, to: str):
+    """Every one of the 36 ordered pairs, not the handful anyone thought of.
+
+    A same-state update is bookkeeping — a claim, an attempt count — and is
+    allowed without being a transition.
+    """
+    if frm == to:
+        pytest.skip("same-state updates are claim bookkeeping, not transitions")
+
+    with owner_cursor() as cur:
+        user = _seed_lifecycle_at(cur, frm)
+        completed = ", completed_at = now()" if to == "COMPLETE" else ""
+        sql = (f"UPDATE identity.account_lifecycle SET state = %s{completed} "
+               f"WHERE user_id = %s")
+
+        if (frm, to) in _LEGAL:
+            cur.execute(sql, (to, str(user)))
+            cur.execute("SELECT state FROM identity.account_lifecycle "
+                        "WHERE user_id = %s", (str(user),))
+            assert cur.fetchone()[0] == to, f"{frm} -> {to} was refused"
+        else:
+            with pytest.raises(psycopg2.errors.CheckViolation):
+                cur.execute(sql, (to, str(user)))
+
+
+def test_complete_is_reachable_only_from_purging():
+    """Stated separately because it is the invariant 11B1 exists to protect:
+    nothing may report an account deleted before a purge phase has run."""
+    into_complete = {frm for frm, to in _LEGAL if to == "COMPLETE"}
+    assert into_complete == {"PURGING"}, into_complete
+
+
+# ---------------------------------------------------------------------------
+# races between a request in flight and the cutoff (§34)
+# ---------------------------------------------------------------------------
+#: Where user data lands, and the column that says when. The partitioned
+#: finance tables are queried through their parent.
+_USER_DATA = [
+    ("finance.income_source", "created_at"),
+    ("finance.expense_record", "created_at"),
+    ("analysis.analysis_run", "created_at"),
+    ("docs.document", "created_at"),
+]
+
+
+def _rows_written_after_cutoff(user_id: uuid.UUID) -> list[str]:
+    """Any user row whose own timestamp is later than the deletion cutoff.
+
+    This is the invariant later purge phases depend on: `requested_at` divides
+    data that existed before the request from data that should have been
+    impossible to write after it.
+    """
+    offenders = []
+    with owner_cursor() as cur:
+        for table, column in _USER_DATA:
+            cur.execute(
+                f"SELECT count(*) FROM {table} t "
+                f"JOIN identity.account_lifecycle l ON l.user_id = t.user_id "
+                f"WHERE t.user_id = %s AND t.{column} > l.requested_at",
+                (str(user_id),))
+            count = cur.fetchone()[0]
+            if count:
+                offenders.append(f"{table}: {count}")
+    return offenders
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path,body", [
+    ("/api/v1/financials/income",
+     {"tax_year": 2025, "income_type_code": "employment", "amount": "1000.00"}),
+    ("/api/v1/financials/expenses",
+     {"tax_year": 2025, "expense_category_code": "medical", "amount": "10.00"}),
+    ("/api/v1/analysis", {"tax_year": 2025}),
+    ("/api/v1/documents",
+     {"document_type_code": "T4", "filename": "a.pdf", "mime_type": "application/pdf"}),
+])
+async def test_a_write_racing_the_deletion_request_never_lands_after_the_cutoff(
+    client, path, body
+):
+    """The writes and the request are issued together, so which wins is
+    genuinely undecided — and either outcome is acceptable. What is not
+    acceptable is a row dated after the cutoff, because a later purge phase
+    bounded on `requested_at` would never claim it, and an account reported as
+    deleted would still have data.
+
+    Eight writes rather than one: a single pair resolves the same way most of
+    the time, and this defect is exactly the kind that a lucky ordering hides.
+    Before the shared lock in `assert_may_act`, every one of these four surfaces
+    failed here.
+    """
+    token, user_id, _ = await _register(client)
+
+    results = await asyncio.gather(
+        *(client.post(path, json=body, headers=_headers(token)) for _ in range(8)),
+        client.post("/api/v1/account/deletion", headers=_headers(token)),
+        return_exceptions=True,
+    )
+    writes, deletion = results[:-1], results[-1]
+
+    assert not isinstance(deletion, BaseException), deletion
+    assert deletion.status_code == 202, deletion.text
+    for write in writes:
+        assert not isinstance(write, BaseException), write
+        assert write.status_code in (200, 201, 202, 403, 409, 429), write.status_code
+
+    offenders = _rows_written_after_cutoff(user_id)
+    assert not offenders, (
+        f"{offenders} — a row landed after the deletion cutoff, so a purge "
+        "bounded on requested_at would leave it behind"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repeated_writes_after_the_cutoff_land_nothing(client):
+    """The race above resolves one way or the other. This is the settled case:
+    once the request is durable, nothing further may be written at all."""
+    token, user_id, _ = await _register(client)
+    await client.post("/api/v1/account/deletion", headers=_headers(token))
+
+    for path, body in [
+        ("/api/v1/financials/income",
+         {"tax_year": 2025, "income_type_code": "employment", "amount": "1.00"}),
+        ("/api/v1/analysis", {"tax_year": 2025}),
+        ("/api/v1/documents",
+         {"document_type_code": "T4", "filename": "b.pdf",
+          "mime_type": "application/pdf"}),
+    ]:
+        for _ in range(5):
+            response = await client.post(path, json=body, headers=_headers(token))
+            assert response.status_code == 403, f"{path} -> {response.status_code}"
+
+    assert not _rows_written_after_cutoff(user_id)
+
+
+# ---------------------------------------------------------------------------
+# no work reaches the broker (§35)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_a_refused_request_publishes_no_task(client, monkeypatch):
+    """§35 — zero publications after a lifecycle refusal.
+
+    `tests/unit/test_admission_wiring.py` already asserts that `app/` contains
+    no publication site at all, which is the stronger structural claim. This is
+    the runtime counterpart: it counts what actually reached the broker API
+    during refused requests, so a publication added through a path the source
+    scan does not model would still be caught.
+    """
+    import celery.app.task
+
+    from workers.celery_app import celery_app
+
+    published: list[str] = []
+
+    def _record(self, *args, **kwargs):  # noqa: ANN001
+        published.append(getattr(self, "name", "?"))
+        raise AssertionError("a task was published for a deleting account")
+
+    monkeypatch.setattr(celery.app.task.Task, "apply_async", _record, raising=False)
+    monkeypatch.setattr(
+        celery_app, "send_task",
+        lambda *a, **k: published.append(str(a[:1])) or None, raising=False)
+
+    token, _, _ = await _register(client)
+    await client.post("/api/v1/account/deletion", headers=_headers(token))
+
+    for path, body in [
+        ("/api/v1/analysis", {"tax_year": 2025}),
+        ("/api/v1/ai/ask", {"question": "why", "tax_year": 2025}),
+        ("/api/v1/documents",
+         {"document_type_code": "T4", "filename": "c.pdf",
+          "mime_type": "application/pdf"}),
+    ]:
+        assert (await client.post(path, json=body,
+                                  headers=_headers(token))).status_code == 403
+
+    assert published == [], published
+
+
+@pytest.mark.asyncio
+async def test_a_write_starting_mid_request_cannot_land_after_the_cutoff(client):
+    """The narrow window the shared lock exists for.
+
+    `clock_timestamp()` fixes the common ordering — a cutoff stamped at the
+    deletion transaction's START could precede writes that were already running.
+    It does not fix this one: between the lifecycle INSERT and the COMMIT that
+    follows it, the row is durable-to-be but invisible to everyone else. A write
+    that begins in that gap reads no lifecycle row, proceeds, and lands with a
+    timestamp after the cutoff — where a purge bounded on `requested_at` will
+    never look for it.
+
+    So the deletion is held open deliberately, and the write is issued into the
+    gap. With the shared lock the write waits for the commit and is then
+    refused; without it the write sails through and the row is orphaned.
+    """
+    token, user_id, _ = await _register(client)
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def _hold_deletion_open() -> None:
+        conn = psycopg2.connect(owner_dsn())
+        conn.autocommit = False
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_advisory_xact_lock("
+                        "identity.lifecycle_lock_key(%s))", (str(user_id),))
+            cur.execute("INSERT INTO identity.account_lifecycle (user_id, state) "
+                        "VALUES (%s, 'DELETION_REQUESTED')", (str(user_id),))
+            loop.call_soon_threadsafe(started.set)
+            # Hold the row uncommitted while the write below tries to start.
+            asyncio.run_coroutine_threadsafe(release.wait(), loop).result(timeout=30)
+            conn.commit()
+        finally:
+            conn.close()
+
+    holder = asyncio.create_task(asyncio.to_thread(_hold_deletion_open))
+    await asyncio.wait_for(started.wait(), timeout=10)
+
+    write = asyncio.create_task(client.post(
+        "/api/v1/financials/income",
+        json={"tax_year": 2025, "income_type_code": "employment",
+              "amount": "1000.00"},
+        headers=_headers(token)))
+
+    # Give the write time to reach the cutoff check and block on the lock — or,
+    # if the lock is missing, to complete outside it.
+    await asyncio.sleep(0.5)
+    blocked = not write.done()
+
+    release.set()
+    await holder
+    response = await asyncio.wait_for(write, timeout=30)
+
+    offenders = _rows_written_after_cutoff(user_id)
+    assert not offenders, (
+        f"{offenders} — a write that began while the deletion was committing "
+        "landed after the cutoff; a purge bounded on requested_at would miss it"
+    )
+    assert blocked, (
+        "the write did not wait for the deletion request, so it was only "
+        "chance that it did not commit after the cutoff"
+    )
+    assert response.status_code == 403, response.status_code

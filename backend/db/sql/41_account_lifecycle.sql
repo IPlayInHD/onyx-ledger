@@ -42,7 +42,14 @@ CREATE TABLE IF NOT EXISTS identity.account_lifecycle (
     state             text        NOT NULL,
 
     -- THE CUTOFF. Database time, set once, never moved.
-    requested_at      timestamptz NOT NULL DEFAULT now(),
+    --
+    -- clock_timestamp(), NOT now(). `now()` is the transaction START time, so a
+    -- deletion request that waited on the lock below would be stamped with the
+    -- instant it began waiting — before writes it actually waited for. The
+    -- cutoff has to be the moment the request became real, because later phases
+    -- use it to decide which rows a purge is responsible for, and a row dated
+    -- after the cutoff is a row that purge would leave behind.
+    requested_at      timestamptz NOT NULL DEFAULT clock_timestamp(),
     state_changed_at  timestamptz NOT NULL DEFAULT now(),
 
     -- Claim bookkeeping, mirroring ioe.freshness_outbox: a worker that dies
@@ -120,6 +127,49 @@ CREATE INDEX IF NOT EXISTS ix_account_lifecycle_claimable
 CREATE INDEX IF NOT EXISTS ix_account_lifecycle_claimed
     ON identity.account_lifecycle (claimed_at)
     WHERE claimed_by IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- 1a · Ordering the cutoff against writes already in flight
+--
+-- THE RACE. A write and a deletion request arrive together. The write's session
+-- reads the lifecycle state, sees nothing, and proceeds. The deletion request
+-- commits. The write commits AFTER it. The row is now dated later than the
+-- cutoff, and a purge phase bounded on `requested_at` would never claim it —
+-- so an account reported as deleted would still have data.
+--
+-- Refusing at the start of the request does not fix this: the check is correct
+-- when it runs and stale by the time the write lands. The two transactions have
+-- to be ordered against each other, and a transaction-scoped advisory lock is
+-- the cheapest way to say so:
+--
+--   every user-bound request  takes it SHARED    (they do not conflict)
+--   a deletion request        takes it EXCLUSIVE (it conflicts with all of them)
+--
+-- Whichever wins, the outcome is truthful. If writes hold it, the deletion
+-- waits and is stamped after they land. If the deletion holds it, the write
+-- waits, then reads the row it was waiting for and is refused. There is no
+-- interleaving left where a write commits after a cutoff that precedes it.
+--
+-- Advisory rather than a row lock on `user_account`: `last_login_at` is updated
+-- on that row, so a shared lock held for the length of every authenticated
+-- request would put logins behind unrelated work.
+CREATE OR REPLACE FUNCTION identity.lifecycle_lock_key(p_user_id uuid)
+RETURNS bigint
+LANGUAGE sql
+IMMUTABLE
+SET search_path = pg_catalog
+AS $$
+    -- Domain-separated so this can never collide with another advisory-lock
+    -- user in this database that happens to hash the same account id.
+    SELECT hashtextextended('onyx.account_lifecycle:' || p_user_id::text, 0)
+$$;
+
+COMMENT ON FUNCTION identity.lifecycle_lock_key(uuid) IS
+  'Advisory-lock key ordering user writes against a deletion request for the same account. Shared for ordinary work, exclusive for the request.';
+
+REVOKE ALL ON FUNCTION identity.lifecycle_lock_key(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION identity.lifecycle_lock_key(uuid)
+    TO onyx_app_rw, onyx_app_ro;
 
 -- ---------------------------------------------------------------------------
 -- 2 · Governed transitions, enforced by the database
