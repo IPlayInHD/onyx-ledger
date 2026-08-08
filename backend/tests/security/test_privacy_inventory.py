@@ -18,7 +18,7 @@ import psycopg2
 import pytest
 
 from app.privacy import LIFECYCLE, DeletionAction, PrivacyClass, SourceKind
-from app.privacy.classification import NON_RLS
+from app.privacy.classification import NON_RLS, STORAGE_SURFACES, StorageKind
 from tests.conftest import owner_dsn
 
 #: Schemas that hold no user-derived data by design: published legislation,
@@ -344,3 +344,83 @@ def test_the_admission_schema_carries_no_identifying_material():
         "a plaintext email address or IP reached admission.rate_counter; the "
         "pre-authentication scopes must store a keyed digest only"
     )
+
+
+# ---------------------------------------------------------------------------
+# Storage surfaces beyond PostgreSQL (§16)
+# ---------------------------------------------------------------------------
+def test_the_storage_surface_registry_covers_both_applications():
+    """The table registry is derived from `pg_catalog`, so it is structurally
+    blind to object storage, brokers, logs and a SECOND APPLICATION'S datastore.
+
+    The closeout pass found exactly that blind spot: this repository deploys
+    `server/` (Node/Express, Netlify Blobs), not `backend/`, and the first
+    inventory pass covered only the latter. This asserts that both applications
+    are represented, so the next omission is loud.
+    """
+    applications = {s.application for s in STORAGE_SURFACES.values()}
+    assert "backend" in applications
+    assert any(a.startswith("server") for a in applications), (
+        "the Node application's storage is missing from the surface registry"
+    )
+
+
+def test_the_deployed_node_store_is_classified():
+    """PD-14. It holds email, name, a bcrypt hash, a tax profile and documents,
+    and it is what `netlify.toml` actually deploys."""
+    blobs = STORAGE_SURFACES["Netlify Blobs"]
+    assert blobs.live_user_data and blobs.direct_identifiers
+    assert blobs.kind is StorageKind.EXTERNAL_MANAGED_STORE
+    assert not blobs.retention_in_repo, (
+        "retention for an externally managed store cannot be decided in this "
+        "repository"
+    )
+
+    local = STORAGE_SURFACES["server/data/db.json"]
+    assert local.kind is StorageKind.LOCAL_FILE
+    assert not local.live_user_data, (
+        "the local FileStore is dev/demo only; if that changes it is no longer "
+        "a local file, it is a production datastore"
+    )
+
+
+def test_the_local_node_store_is_not_tracked_by_git():
+    """It contains emails and bcrypt hashes. A privacy specification that let
+    that file be committed would be self-defeating."""
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "server/data/db.json"],
+        cwd=root, capture_output=True, text=True,
+    )
+    assert tracked.returncode != 0, (
+        "server/data/db.json is tracked by git; it holds email addresses and "
+        "password hashes"
+    )
+
+    ignored = subprocess.run(
+        ["git", "check-ignore", "server/data/db.json"],
+        cwd=root, capture_output=True, text=True,
+    )
+    assert ignored.returncode == 0, (
+        "server/data/db.json is not gitignored, so it can be committed by "
+        "accident"
+    )
+
+
+@pytest.mark.parametrize("name,surface", sorted(STORAGE_SURFACES.items()))
+def test_every_surface_states_what_it_holds_and_who_controls_it(name, surface):
+    assert surface.note.strip(), f"{name}: no description"
+    assert surface.application.strip(), f"{name}: no owning application"
+
+    if surface.kind is StorageKind.NOT_IMPLEMENTED:
+        assert not surface.live_user_data, (
+            f"{name}: marked not-implemented but holds live user data"
+        )
+    if surface.live_user_data and not surface.deletion_exists:
+        assert "PD-" in surface.note or "not implemented" in surface.note.lower(), (
+            f"{name}: holds live user data with no deletion mechanism and no "
+            "recorded gap — that combination must be a named defect"
+        )

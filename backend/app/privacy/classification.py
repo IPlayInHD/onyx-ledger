@@ -700,14 +700,201 @@ if len(NON_RLS) != len(_NON_RLS):  # pragma: no cover - construction invariant
     raise RuntimeError("duplicate table in the non-RLS justification registry")
 
 
+class StorageKind(StrEnum):
+    """A place user data can live that is NOT a PostgreSQL table.
+
+    The table registry above is derived from `pg_catalog`, which is exactly why
+    it cannot see these: object storage, a broker, a log stream and a second
+    application's datastore have no foreign keys to walk. They are enumerated by
+    hand — and the closeout pass found one that had been missed entirely, the
+    Node application's store, so this list exists to make the next omission
+    visible rather than silent.
+    """
+
+    RELATIONAL_DATABASE = "RELATIONAL_DATABASE"
+    OBJECT_STORAGE = "OBJECT_STORAGE"
+    EXTERNAL_MANAGED_STORE = "EXTERNAL_MANAGED_STORE"
+    LOCAL_FILE = "LOCAL_FILE"
+    MESSAGE_BROKER = "MESSAGE_BROKER"
+    RESULT_BACKEND = "RESULT_BACKEND"
+    LOG_STREAM = "LOG_STREAM"
+    IN_PROCESS_METRICS = "IN_PROCESS_METRICS"
+    VECTOR_INDEX = "VECTOR_INDEX"
+    EXTERNAL_PROVIDER = "EXTERNAL_PROVIDER"
+    NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
+
+
+@dataclass(frozen=True)
+class StorageSurface:
+    """One place user data can be, and what is true about it."""
+
+    name: str
+    application: str
+    kind: StorageKind
+    live_user_data: bool
+    derived_user_data: bool
+    direct_identifiers: bool
+    financial_data: bool
+    document_data: bool
+    #: Is retention decided by something in THIS repository?
+    retention_in_repo: bool
+    #: Does a deletion mechanism exist today?
+    deletion_exists: bool
+    note: str
+
+
+K = StorageKind
+
+_SURFACES: tuple[StorageSurface, ...] = (
+    StorageSurface(
+        "PostgreSQL", "backend", K.RELATIONAL_DATABASE,
+        live_user_data=True, derived_user_data=True, direct_identifiers=True,
+        financial_data=True, document_data=False,
+        retention_in_repo=False, deletion_exists=False,
+        note="148 tables, 75 user-derived. Direct identifiers in exactly three "
+             "tables. Document BYTES are not here, only metadata. No deletion "
+             "capability exists (PD-7).",
+    ),
+    StorageSurface(
+        "Object storage (documents, legislation)", "backend", K.OBJECT_STORAGE,
+        live_user_data=True, derived_user_data=False, direct_identifiers=True,
+        financial_data=False, document_data=True,
+        retention_in_repo=False, deletion_exists=False,
+        note="Adapter is an in-memory fake; a real bucket is deployment "
+             "configuration. Document keys embed the user-supplied filename "
+             "(PD-2), and the port has no delete method at all (PD-8).",
+    ),
+    StorageSurface(
+        "Netlify Blobs", "server (Node/Express)", K.EXTERNAL_MANAGED_STORE,
+        live_user_data=True, derived_user_data=True, direct_identifiers=True,
+        financial_data=False, document_data=True,
+        retention_in_repo=False, deletion_exists=True,
+        note="THE DEPLOYED STORE. Root netlify.toml deploys `server/`, which "
+             "persists email, name, bcrypt passwordHash, tax profile, documents "
+             "and an audit result per user. Absent from the first inventory "
+             "pass — PD-14. `deleteDocument` exists, which is more deletion "
+             "than the Python backend has. Whether it is live is "
+             "OPERATIONAL_REVIEW_REQUIRED.",
+    ),
+    StorageSurface(
+        "server/data/db.json", "server (Node/Express)", K.LOCAL_FILE,
+        live_user_data=False, derived_user_data=False, direct_identifiers=True,
+        financial_data=False, document_data=True,
+        retention_in_repo=False, deletion_exists=False,
+        note="The FileStore backend, used for local `npm start` and tests. "
+             "GITIGNORED AND UNTRACKED — verified with git check-ignore and "
+             "git ls-files. The working copy holds a demo session only: safe "
+             "aggregates show 7 users on one email domain inside an 8-minute "
+             "window. Contents are never read into documentation or logs.",
+    ),
+    StorageSurface(
+        "Redis - Celery broker", "backend", K.MESSAGE_BROKER,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=False, deletion_exists=False,
+        note="Task payloads are identifiers, integers and closed codes only; "
+             "two tasks carry a user_id, which is the minimum to do the work. "
+             "Broker persistence and eviction are DEPLOYMENT_REVIEW_REQUIRED.",
+    ),
+    StorageSurface(
+        "Redis - Celery result backend", "backend", K.RESULT_BACKEND,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=True, deletion_exists=False,
+        note="DISABLED in the closeout (PD-12). Before that, a failed task's "
+             "exception was serialized here verbatim, and SQLAlchemy renders a "
+             "DBAPIError as the statement plus its bound parameters — so a "
+             "database error during a financial write persisted the amount. "
+             "task_ignore_result is now on, errors are not stored even when "
+             "ignored, and result_expires is an explicit 24h rather than the "
+             "framework default it silently was.",
+    ),
+    StorageSurface(
+        "Application logs", "backend", K.LOG_STREAM,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=False, deletion_exists=False,
+        note="40 structured call sites, closed codes. Carries user_id and "
+             "request paths containing entity UUIDs — RESTRICTED_IDENTIFIER, "
+             "not harmless. Retention and access are "
+             "DEPLOYMENT_REVIEW_REQUIRED. Celery's own worker log still "
+             "receives raw exception text (PD-13).",
+    ),
+    StorageSurface(
+        "Metrics", "backend", K.IN_PROCESS_METRICS,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=True, deletion_exists=False,
+        note="In-process counters keyed on operation and reason codes. No "
+             "exporter exists, so nothing leaves the process. No user id, "
+             "hash, email or financial value appears in any label.",
+    ),
+    StorageSurface(
+        "pgvector knowledge index", "backend", K.VECTOR_INDEX,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=True, deletion_exists=True,
+        note="Written exclusively with source_type='rule_version' — published "
+             "legislation. No user document, conversation or financial value "
+             "is embedded, so there are no orphaned user-derived vectors to "
+             "delete. Re-indexing is idempotent.",
+    ),
+    StorageSurface(
+        "AI provider", "backend", K.EXTERNAL_PROVIDER,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=False, deletion_exists=False,
+        note="NONE EXISTS. get_llm_client() unconditionally returns an "
+             "in-process TemplateLlmClient; no HTTP client is present anywhere "
+             "in production code. No user data leaves the process today. "
+             "Everything about a future provider is "
+             "EXTERNAL_PROVIDER_REVIEW_REQUIRED.",
+    ),
+    StorageSurface(
+        "Temporary local files", "backend", K.NOT_IMPLEMENTED,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=True, deletion_exists=False,
+        note="None exist. No tempfile, no /tmp, no local disk write anywhere "
+             "in the request or worker path.",
+    ),
+    StorageSurface(
+        "Backups / PITR", "backend", K.NOT_IMPLEMENTED,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=False, deletion_exists=False,
+        note="Not implemented. The restore invariant is a mandatory acceptance "
+             "criterion for the future backup entry: a backup restored from "
+             "before a deletion must replay the deletion ledger before the "
+             "service accepts traffic.",
+    ),
+    StorageSurface(
+        "User data export", "backend", K.NOT_IMPLEMENTED,
+        live_user_data=False, derived_user_data=False, direct_identifiers=False,
+        financial_data=False, document_data=False,
+        retention_in_repo=False, deletion_exists=False,
+        note="Not implemented. audit.data_export_request exists and is unused; "
+             "32 tables are marked exportable in LIFECYCLE.",
+    ),
+)
+
+STORAGE_SURFACES: dict[str, StorageSurface] = {s.name: s for s in _SURFACES}
+
+if len(STORAGE_SURFACES) != len(_SURFACES):  # pragma: no cover
+    raise RuntimeError("duplicate storage surface")
+
+
 __all__ = [
     "LIFECYCLE",
     "NON_RLS",
+    "STORAGE_SURFACES",
     "DeletionAction",
     "LifecycleState",
     "NonRlsReason",
     "NonRlsTable",
     "PrivacyClass",
+    "StorageKind",
+    "StorageSurface",
     "RetentionClass",
     "SourceKind",
     "TableLifecycle",
