@@ -399,12 +399,26 @@ async def test_refresh_is_denied_and_sessions_are_revoked(client):
     ("post", "/api/v1/ai/ask", {"question": "why", "tax_year": 2025}),
     ("post", "/api/v1/ai/conversations", None),
     ("put", "/api/v1/users/me/tax-profile", {"province_code": "ON"}),
+    # The scenario routes open their own unit of work, so they never passed
+    # through `db_authed` and inherited nothing. Archiving, unarchiving and
+    # reading a scenario all write — a read persists the freshness transition
+    # it just evaluated — and all three ran happily past the cutoff until
+    # `assert_account_active` was added. The ids are syntactically valid and
+    # belong to nobody: the refusal must come before ownership is resolved,
+    # otherwise a 404 would mean the cutoff never ran.
+    ("delete", f"/api/v1/ioe/scenarios/{uuid.uuid4()}", None),
+    ("post", f"/api/v1/ioe/scenarios/{uuid.uuid4()}/unarchive", None),
+    ("get", f"/api/v1/ioe/scenarios/{uuid.uuid4()}", None),
+    ("post", "/api/v1/ioe/scenarios",
+     {"analysis_id": str(uuid.uuid4()), "levers": []}),
 ])
 async def test_no_new_user_work_is_admitted_after_the_cutoff(client, method, path, body):
-    """Every currently reachable authenticated write, refused by ONE boundary.
+    """Every currently reachable authenticated write, refused before it runs.
 
-    They are blocked by the lifecycle check on `db_authed`, which is why a route
-    added tomorrow is covered without anyone remembering.
+    Most are blocked by the lifecycle check on `db_authed`, which is why a route
+    added tomorrow inherits the cutoff without anyone remembering. The ones that
+    manage their own session take `assert_account_active` instead;
+    `tests/unit/test_lifecycle_boundaries.py` is what keeps that exhaustive.
     """
     token, _, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))

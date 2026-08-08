@@ -66,6 +66,26 @@ async def db_authed_lifecycle_exempt(
         yield session
 
 
+async def assert_account_active(user_id: uuid.UUID = Depends(current_user_id)) -> None:
+    """The cutoff for routes that do NOT take a session dependency.
+
+    Most endpoints receive their unit of work from `db_authed` and inherit the
+    check with it. A few open their own inside a service instead — the scenario
+    routes do — and those never pass through `db_authed`, so they inherited
+    nothing. Three of them wrote user data: archiving and unarchiving a
+    scenario, and reading one, which persists the freshness transition it just
+    evaluated.
+
+    This is the same check in the shape those routes can use. It costs a short
+    unit of work of its own, which is the price of the handler not having one to
+    borrow; that is why it is not simply applied everywhere.
+    """
+    from app.services.privacy.lifecycle import AccountLifecycleService
+
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        await AccountLifecycleService(session).assert_may_act(user_id)
+
+
 async def db_anon() -> AsyncIterator[AsyncSession]:
     async with unit_of_work(actor_type="system") as session:
         yield session

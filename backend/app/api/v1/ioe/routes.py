@@ -14,7 +14,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed
+from app.api.deps import assert_account_active, current_user_id, db_authed
 from app.core.exceptions import NotFound
 from app.schemas.ioe import (
     IntegrityCheckOut,
@@ -55,6 +55,7 @@ router = APIRouter(prefix="/ioe", tags=["ioe"])
 async def create_scenario(
     body: ScenarioCreateRequest,
     user_id: uuid.UUID = Depends(current_user_id),
+    _active: None = Depends(assert_account_active),
 ) -> ScenarioDetailOut:
     return await ScenarioQueryService(user_id).create(body)
 
@@ -88,6 +89,7 @@ async def list_scenarios(
 async def get_scenario(
     scenario_id: uuid.UUID,
     user_id: uuid.UUID = Depends(current_user_id),
+    _active: None = Depends(assert_account_active),
 ) -> ScenarioDetailOut:
     return await ScenarioQueryService(user_id).detail(scenario_id)
 
@@ -105,6 +107,7 @@ async def get_scenario(
 async def refresh_scenario(
     scenario_id: uuid.UUID,
     user_id: uuid.UUID = Depends(current_user_id),
+    _active: None = Depends(assert_account_active),
 ) -> ScenarioDetailOut:
     return await ScenarioQueryService(user_id).refresh(scenario_id)
 
@@ -121,6 +124,7 @@ async def refresh_scenario(
 async def archive_scenario(
     scenario_id: uuid.UUID,
     user_id: uuid.UUID = Depends(current_user_id),
+    _active: None = Depends(assert_account_active),
 ) -> None:
     await ScenarioService(user_id).archive(scenario_id)
 
@@ -129,6 +133,7 @@ async def archive_scenario(
 async def unarchive_scenario(
     scenario_id: uuid.UUID,
     user_id: uuid.UUID = Depends(current_user_id),
+    _active: None = Depends(assert_account_active),
 ) -> None:
     await ScenarioService(user_id).unarchive(scenario_id)
 
@@ -242,6 +247,7 @@ async def verify_integrity(
     entity_type: str,
     entity_id: uuid.UUID,
     user_id: uuid.UUID = Depends(current_user_id),
+    _active: None = Depends(assert_account_active),
 ) -> IntegrityCheckOut:
     # A manual replay re-executes a sealed calculation end to end. The service
     # already refuses a second verification of the SAME entity; admission bounds
