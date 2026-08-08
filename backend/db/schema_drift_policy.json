@@ -7599,6 +7599,16 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|ai|ai_message_citation|ix_ai_message_citation_message",
+      "kind": "remove_index",
+      "schema": "ai",
+      "table": "ai_message_citation",
+      "object": "ix_ai_message_citation_message",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|ai|ai_message|brin_ai_message",
       "kind": "remove_index",
       "schema": "ai",
@@ -7614,6 +7624,16 @@
       "schema": "ai",
       "table": "ai_message",
       "object": "ix_ai_message_conversation",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|ai|ai_prompt_context|ix_ai_prompt_context_message",
+      "kind": "remove_index",
+      "schema": "ai",
+      "table": "ai_prompt_context",
+      "object": "ix_ai_prompt_context_message",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -7644,6 +7664,16 @@
       "schema": "ai",
       "table": "knowledge_embedding",
       "object": "ix_embedding_year",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|analysis|analysis_assumption|ix_analysis_assumption_analysis",
+      "kind": "remove_index",
+      "schema": "analysis",
+      "table": "analysis_assumption",
+      "object": "ix_analysis_assumption_analysis",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -7704,6 +7734,16 @@
       "schema": "analysis",
       "table": "reconciliation_check",
       "object": "ix_recon_analysis",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|analysis|reconciliation_check|ix_reconciliation_check_analysis",
+      "kind": "remove_index",
+      "schema": "analysis",
+      "table": "reconciliation_check",
+      "object": "ix_reconciliation_check_analysis",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -8589,6 +8629,26 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|ioe|run_rule_snapshot|ix_run_rule_snapshot_run",
+      "kind": "remove_index",
+      "schema": "ioe",
+      "table": "run_rule_snapshot",
+      "object": "ix_run_rule_snapshot_run",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|ioe|run_rule_snapshot|ix_run_rule_snapshot_scenario",
+      "kind": "remove_index",
+      "schema": "ioe",
+      "table": "run_rule_snapshot",
+      "object": "ix_run_rule_snapshot_scenario",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|ioe|scenario_assumption|ix_ioe_scenario_assumption",
       "kind": "remove_index",
       "schema": "ioe",
@@ -8764,6 +8824,16 @@
       "schema": "reco",
       "table": "recommendation_status_event",
       "object": "ix_reco_status_event",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|reco|recommendation_status_event|ix_recommendation_status_event_recommendation",
+      "kind": "remove_index",
+      "schema": "reco",
+      "table": "recommendation_status_event",
+      "object": "ix_recommendation_status_event_recommendation",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."

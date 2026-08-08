@@ -847,7 +847,7 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 | Scenario | Control today | Required |
 |---|---|---|
 | Insider / overprivileged worker read | least-privilege roles, no `rolbypassrls`, four-eyes on rules | audit-log access controls (`DEPLOYMENT_REVIEW_REQUIRED`) |
-| Cross-tenant access | RLS on parents, ownership checks in services | **RLS on the 27 child tables (PD-1)** |
+| Cross-tenant access | RLS on parents AND on the 16 child tables (PD-1, closed in 11B1); ownership checks in services | none for the tenant boundary |
 | Deleted account in derived tables | cascades exist | orchestrated deletion (11B) |
 | Deleted document survives extraction | cascade removes fields | **object purge (no delete method exists)** |
 | Deleted user restored from backup | none | **deletion ledger replay (§16)** |
@@ -868,7 +868,7 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 |---|---|---|---|
 | **PD-4a** | `audit.log_change` wrote the Argon2 password hash into the append-only `audit.audit_log` on every registration | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in 11A** |
 | **PD-4** | `audit.audit_log` holds whole copies of financial/profile rows, has no user FK, is append-only, and account deletion *adds* to it | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in 11B0 (§32)** |
-| **PD-1** | 16 tenant-owned child tables have no RLS, including the frozen snapshot, extraction fields, AI messages and AI prompt context. (27 user-derived tables lack RLS in total; 11 of those — `identity` and `audit` — correctly cannot have it.) | `IMPLEMENTATION_GAP` | HIGH |
+| **PD-1** | 16 tenant-owned child tables have no RLS, including the frozen snapshot, extraction fields, AI messages and AI prompt context. (27 user-derived tables lack RLS in total; 11 of those — `identity` and `audit` — correctly cannot have it.) | `IMPLEMENTATION_GAP` | **HIGH — FIXED in 11B1 (§33)** |
 | **PD-2** | Document object keys embed the user-supplied filename; no `filename` column exists | `IMPLEMENTATION_GAP` | MEDIUM |
 | **PD-3** | The four `SET NULL` tables do not de-identify: `login_event` keeps `email_tried` and `ip_address`; `recommendation_status_event` keeps a free-text note | `IMPLEMENTATION_GAP` | MEDIUM |
 | **PD-5** | TKMS persists raw `str(e)` in `import_job.error`, `parse_result.error`, `dead_letter.error` (legislation path, not user data) | `IMPLEMENTATION_GAP` | LOW |
@@ -952,9 +952,9 @@ implemented; none is built in 11A.**
 > |---|---|---|
 > | **11A** | **CLOSED** | Privacy and data lifecycle specification |
 > | **11B0** | **CLOSED** | **PD-4 foundational privacy remediation** |
-> | **11B1** | **PENDING — NEXT** | PD-1 RLS remediation, 16 tables |
+> | **11B1** | **CLOSED** | PD-1 RLS remediation, 16 tables |
 > | **11B2** | **CLOSED** | Account lifecycle and deletion orchestration |
-> | **11B3+** | **PENDING** | The phases that actually delete or de-identify |
+> | **11B3+** | **PENDING — NEXT** | The phases that actually delete or de-identify |
 >
 > **A numbering correction, not a history rewrite.** The orchestration work was
 > built and merged under the label "11B1" before anyone noticed this table had
@@ -972,7 +972,7 @@ everything else unsafe come first.
 | Phase | Scope | Tables / services | Migration | Worker privilege | Idempotency | Failure recovery | Tests | External dependency |
 |---|---|---|---|---|---|---|---|---|
 | **11B0** ✅ | **PD-4** — stop `audit.audit_log` accumulating whole user rows; decide what an audit record must contain | `audit.log_change`, `audit.audit_log` | yes (function, possibly columns) | `SECURITY DEFINER`, narrowed payload | n/a | n/a | audit still proves who/what/when; no financial value persisted; Entry 3A four-eyes tests unaffected | — |
-| **11B1** ⏭ NEXT | **PD-1** — RLS on the 16 tenant-owned child tables | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | n/a | n/a | n/a | cross-tenant read denied per table; **login still works** (RLS must not reach `identity`); `NON_RLS` defect count drops to 0 | — |
+| **11B1** ✅ | **PD-1** — RLS on the 16 tenant-owned child tables | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | n/a | n/a | n/a | cross-tenant read denied per table; **login still works** (RLS must not reach `identity`); `NON_RLS` defect count drops to 0 | — |
 | **11B2** ✅ | Account lifecycle + deletion-request state machine | `audit.data_deletion_request` (**PD-9**: FK `CASCADE` → must outlive the account), new lifecycle state | yes | privileged worker, `FOR UPDATE SKIP LOCKED` keyhole; **no broad `SECURITY DEFINER`** | phase checkpoints | resume at checkpoint | state transitions; crash mid-phase resumes; `ACCESS_DISABLED` entered first | grace period `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
 | **11B3** | Source deletion + correction | `finance.*`, `profile.*`, `wealth.*` | possibly | user-authorized, ownership-checked | delete-if-exists | idempotent retry | source gone, sealed result byte-identical, dependents stale | — |
 | **11B4** | Document / object / extraction deletion | `docs.*`, `ObjectStorage.delete` (**PD-8**), `filename` column + opaque keys (**PD-2**) | yes | ownership-checked | purge-if-exists | orphan sweep | binary gone, fields gone, confirmed facts survive, provenance link marked, no orphaned object | object versioning `DEPLOYMENT_REVIEW_REQUIRED` |
@@ -1391,4 +1391,46 @@ deliberate privileged operation. Whether any real environment holds such rows is
 
 **Still open after 11B0:** PD-1 (next), PD-2, PD-3, PD-7, PD-8, PD-9, PD-14,
 PD-15; the cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
+(`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.
+
+---
+
+## 33. What Entry 11B1 changed in the running system (PD-1)
+
+Full detail in [`pd1-rls-remediation.md`](./pd1-rls-remediation.md).
+
+**PD-1 is closed.** All 16 tenant-owned child tables now carry `ENABLE` and
+`FORCE ROW LEVEL SECURITY` with one `FOR ALL` policy each, resolving ownership
+through their parent to `ref.current_app_user()` and carrying `WITH CHECK` as
+well as `USING`.
+
+The gap was reproduced before it was fixed, at the database boundary rather than
+through the API: as `onyx_app_rw` with `app.user_id` set, tenant A could read,
+update and delete tenant B's rows in all 16, insert into B's tree in all 16,
+move a child into B's tree, and — with no tenant context at all — read
+everything. 81 failures before, 98 passes after.
+
+Corrections to this document:
+
+| What was wrong | Correction |
+|---|---|
+| §22 listed "RLS on the 27 child tables (PD-1)" as an open cross-tenant risk. | The tenant boundary is now enforced on the 16 that should have it; the other 11 remain justified exceptions. |
+| §18's table of non-RLS schemas implied these children were part of a broader unprotected set. | They are protected. The remaining non-RLS classes are `identity` (authentication bootstrap), `audit` (operator stores) and `admission` (global counters). |
+
+**Two ownership traps found by deriving from the live schema** rather than
+trusting the prose: `reco.recommendation_status_event.actor_user_id` is the
+operator who changed a status, not the row's owner — using it would have keyed
+tenancy on a loosely related column — and `ioe.run_rule_snapshot` owns through
+*either* an optimization run or a scenario, enforced by a CHECK, so a
+single-branch policy would have denied every row of the other kind.
+
+**Grants are unchanged and that is deliberate.** RLS decides which rows; the
+grant decides whether the command exists. The privacy worker gained no access to
+these tables — purge authority belongs to the entry that writes the purge.
+
+**Non-RLS inventory:** 100 entries before, 84 after; PD-1 defect entries 16 → 0;
+unexplained privacy-relevant non-RLS 0 → 0.
+
+**Still open after 11B1:** PD-2, PD-3, PD-7, PD-8, PD-9, PD-14, PD-15; the
+cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
 (`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.

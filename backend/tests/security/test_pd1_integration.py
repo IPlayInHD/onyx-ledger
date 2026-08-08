@@ -137,7 +137,7 @@ def test_an_invoice_is_tenant_isolated_and_still_audited_without_values(
     # RLS: B's invoice is not reachable from A's session.
     with runtime_cursor(a.user_id) as cur:
         cur.execute("SELECT count(*) FROM billing.invoice WHERE id = %s",
-                    (b.rows["billing.invoice"],))
+                    (str(b.rows["billing.invoice"]),))
         assert cur.fetchone()[0] == 0, "an invoice crossed the tenant boundary"
 
     # PD-4: the audit row for A's own invoice exists, names its columns, and
@@ -145,8 +145,12 @@ def test_an_invoice_is_tenant_isolated_and_still_audited_without_values(
     with owner_cursor() as cur:
         cur.execute(
             "SELECT action, new_value FROM audit.audit_log "
+            # str(), because another test in this suite calls
+            # psycopg2.extras.register_uuid() — which is process-global — so a
+            # uuid column comes back as a UUID object and `text = uuid` has no
+            # operator. The cast makes this test independent of suite order.
             " WHERE entity_table = 'invoice' AND entity_id = %s",
-            (a.rows["billing.invoice"],))
+            (str(a.rows["billing.invoice"]),))
         rows = cur.fetchall()
 
     assert rows, "the invoice write was not audited"

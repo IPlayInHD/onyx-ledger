@@ -24,7 +24,7 @@ itself, and its numbering is **not** the numbering used here:
 | Phase | Scope | Status |
 |---|---|---|
 | 11B0 | PD-4 — audit log accumulating whole user rows | **closed** |
-| **11B1** | **PD-1 — RLS on the 16 tenant-owned child tables** | **open, next** |
+| 11B1 | PD-1 — RLS on the 16 tenant-owned child tables | **closed** |
 | **11B2** (this document) | Account lifecycle and deletion orchestration | **closed** |
 
 This work was merged under the label "11B1" and is now numbered **11B2**: the
@@ -38,8 +38,8 @@ in. That reasoning still stands and is untouched by this entry — but it applie
 to the phases that *delete*, and this one does not. The two tables added here
 both carry RLS from the migration that creates them.
 
-**Consequence to carry forward:** PD-4 was closed in Entry 11B0. **PD-1 remains
-open** and remains a prerequisite for 11B3 onward.
+**Consequence to carry forward:** PD-4 was closed in Entry 11B0 and PD-1 in
+Entry 11B1. Both prerequisites the 11A plan named are now met.
 
 ---
 
@@ -416,8 +416,8 @@ async with unit_of_work(actor_type="system") as session:
 ## 16. Known limitations
 
 1. **Nothing is deleted.** `PURGE_PENDING` is as far as an account gets.
-2. **PD-1 is open** (PD-4 was closed in Entry 11B0), and the 11A plan makes it
-   a prerequisite for the phases that delete.
+2. **PD-1 and PD-4 are both closed** (Entries 11B1 and 11B0). The 11A plan's
+   two named prerequisites for the deleting phases are met.
 3. **The six scenario routes narrow the in-flight race but do not close it.**
    They take `assert_account_active`, which runs in its own transaction rather
    than the one the handler later opens, so the ordering guarantee in §4.1 does
