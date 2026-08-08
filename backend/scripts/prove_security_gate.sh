@@ -104,6 +104,65 @@ prove "PUBLIC EXECUTE revocation" \
   "GRANT EXECUTE ON FUNCTION ioe.claim_freshness_events(integer, text) TO PUBLIC;" \
   "REVOKE EXECUTE ON FUNCTION ioe.claim_freshness_events(integer, text) FROM PUBLIC;"
 
+# ---- PD-1, Entry 11B1 -------------------------------------------------------
+# The sixteen tenant-owned child tables. Each case removes one property of the
+# remediation and expects the suite to notice; a case that passes means the
+# property was never load-bearing.
+
+# The policy itself, on the table holding the frozen calculation inputs.
+prove "PD-1 policy present (analysis_input_snapshot)" \
+  "DROP POLICY p_self_analysis_input_snapshot ON analysis.analysis_input_snapshot;" \
+  "CREATE POLICY p_self_analysis_input_snapshot ON analysis.analysis_input_snapshot
+     FOR ALL
+     USING (EXISTS (SELECT 1 FROM analysis.analysis_run p
+                     WHERE p.id = analysis_input_snapshot.analysis_id
+                       AND p.user_id = ref.current_app_user()))
+     WITH CHECK (EXISTS (SELECT 1 FROM analysis.analysis_run p
+                          WHERE p.id = analysis_input_snapshot.analysis_id
+                            AND p.user_id = ref.current_app_user()));"
+
+# RLS switched off on a remediated table: policies still present, no effect.
+prove "PD-1 RLS enabled (ai_message)" \
+  "ALTER TABLE ai.ai_message DISABLE ROW LEVEL SECURITY;" \
+  "ALTER TABLE ai.ai_message ENABLE ROW LEVEL SECURITY;"
+
+# FORCE removed: the owner reads every tenant again.
+prove "PD-1 FORCE RLS (docs.extraction_field)" \
+  "ALTER TABLE docs.extraction_field NO FORCE ROW LEVEL SECURITY;" \
+  "ALTER TABLE docs.extraction_field FORCE ROW LEVEL SECURITY;"
+
+# WITH CHECK weakened to USING-only. Reads stay correct and ownership forgery
+# reopens — the case a read-only test suite would never catch.
+prove "PD-1 WITH CHECK (billing.invoice)" \
+  "DROP POLICY p_self_invoice ON billing.invoice;
+   CREATE POLICY p_self_invoice ON billing.invoice
+     FOR ALL
+     USING (EXISTS (SELECT 1 FROM billing.subscription p
+                     WHERE p.id = invoice.subscription_id
+                       AND p.user_id = ref.current_app_user()));" \
+  "DROP POLICY p_self_invoice ON billing.invoice;
+   CREATE POLICY p_self_invoice ON billing.invoice
+     FOR ALL
+     USING (EXISTS (SELECT 1 FROM billing.subscription p
+                     WHERE p.id = invoice.subscription_id
+                       AND p.user_id = ref.current_app_user()))
+     WITH CHECK (EXISTS (SELECT 1 FROM billing.subscription p
+                          WHERE p.id = invoice.subscription_id
+                            AND p.user_id = ref.current_app_user()));"
+
+# A runtime privilege the read-only role must never hold.
+prove "PD-1 read-only role stays read-only" \
+  "GRANT UPDATE ON wealth.asset_valuation TO onyx_app_ro;" \
+  "REVOKE UPDATE ON wealth.asset_valuation FROM onyx_app_ro;"
+
+# A tenant-owned table that ships with CRUD and no boundary — PD-1's own shape,
+# which is what the default privileges hand a new table.
+prove "PD-1 regression guard (new unguarded tenant table)" \
+  "CREATE TABLE wealth.pd1_regression_probe (
+     id uuid PRIMARY KEY DEFAULT ref.uuid_generate_v7(),
+     user_id uuid NOT NULL REFERENCES identity.user_account(id));" \
+  "DROP TABLE wealth.pd1_regression_probe;"
+
 echo
 echo "security gate proof: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]
