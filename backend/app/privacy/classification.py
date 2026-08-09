@@ -175,6 +175,57 @@ class DeletionAction(StrEnum):
     crosses into object storage."""
 
 
+class UserDeletionAction(StrEnum):
+    """What a USER asking to remove one record does to this table.
+
+    Distinct from `DeletionAction`, which is what ACCOUNT deletion does. The two
+    are different questions and Entry 11B5 found they have different answers:
+    a user can delete one income source, and cannot delete their tax profile
+    (they can only change it — an account with no province is not a state the
+    engine can compute from).
+    """
+
+    HARD_DELETE = "HARD_DELETE"
+    """The row goes, immediately, on the user's own request."""
+
+    SOFT_DELETE = "SOFT_DELETE"
+    """`deleted_at` set; every live read already excludes it."""
+
+    CLEAR_FIELDS = "CLEAR_FIELDS"
+    """The row must continue to exist; the user can only empty what is
+    optional in it."""
+
+    NOT_USER_DELETABLE = "NOT_USER_DELETABLE"
+    """No user-facing deletion. Either it is not the user's to remove
+    (reference data, audit) or removing it individually is meaningless."""
+
+    VIA_PARENT = "VIA_PARENT"
+    """Removed when its parent is, and has no independent user operation."""
+
+
+class PurgeParticipation(StrEnum):
+    """How the account-deletion SOURCE_DATA phase treats this table."""
+
+    SET_BASED_DELETE = "SET_BASED_DELETE"
+    """One scoped statement per table (or partition parent), not one per row."""
+
+    VIA_PARENT_CASCADE = "VIA_PARENT_CASCADE"
+    """Removed by an in-scope parent's cascade; the phase does not name it, and
+    its completion is proven through the parent."""
+
+    RETAINED_BY_POLICY = "RETAINED_BY_POLICY"
+    """Deliberately survives the source phase, with a stated reason."""
+
+    PARTITION_OF_PARENT = "PARTITION_OF_PARENT"
+    """A declarative partition. Deleting from the partitioned PARENT reaches it
+    without naming it, which is what keeps the purge free of a hard-coded year
+    list. Its completion is proven through the parent."""
+
+    LATER_PHASE = "LATER_PHASE"
+    """Belongs to a privacy phase Entry 11B5 does not implement — documents,
+    audit/authentication de-identification, sealed artifacts, AI."""
+
+
 class LifecycleState(StrEnum):
     """The conceptual states user-derived data moves through.
 
@@ -213,6 +264,16 @@ class TableLifecycle:
     rls: bool = False
     #: Included in a user data export.
     exportable: bool = False
+    #: What a user removing ONE record does here. `None` means the question has
+    #: not been answered, which `test_privacy_inventory` refuses for any table
+    #: carrying mutable source data — see `SOURCE_DATA_CLASSES`.
+    on_user_deletion: UserDeletionAction | None = None
+    #: How the account-deletion SOURCE_DATA phase treats it.
+    purge: PurgeParticipation | None = None
+    #: A COUNT predicate proving the phase finished for this table. Counts only,
+    #: never values — the thing that verifies a privacy deletion must not become
+    #: a place personal data is read out to.
+    completion_predicate: str | None = None
     notes: str = ""
 
     def __post_init__(self) -> None:
@@ -240,6 +301,20 @@ P = PrivacyClass
 S = SourceKind
 R = RetentionClass
 D = DeletionAction
+U = UserDeletionAction
+G = PurgeParticipation
+
+#: The classes that make a table MUTABLE USER SOURCE DATA, and therefore make
+#: `on_user_deletion`, `purge` and `completion_predicate` mandatory.
+#:
+#: Entry 11B5 exists because a table can be added carrying a user's income with
+#: nobody deciding what deletion does to it. Tying the requirement to the
+#: CLASSIFICATION rather than to a list of table names is what makes a future
+#: `finance.some_new_user_source` fail CI instead of being quietly forgotten.
+SOURCE_DATA_CLASSES: frozenset[PrivacyClass] = frozenset({
+    PrivacyClass.FINANCIAL_SOURCE_DATA,
+    PrivacyClass.TAX_PROFILE_DATA,
+})
 
 _ENTRIES: tuple[TableLifecycle, ...] = (
     # ---------------------------------------------------------------- identity
@@ -296,20 +371,28 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
     # ----------------------------------------------------------------- profile
     _e("profile.user_profile", (P.DIRECT_IDENTIFIER, P.TAX_PROFILE_DATA),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
-       exportable=True, notes="`display_name` is a direct identifier."),
+       exportable=True, notes="`display_name` is a direct identifier.",
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.SET_BASED_DELETE,
+       completion_predicate="SELECT count(*) FROM profile.user_profile WHERE user_id = :subject"),
     _e("profile.tax_profile", (P.TAX_PROFILE_DATA, P.USER_FREE_TEXT),
        S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        exportable=True,
        notes="`employer_name` is user free text and an employment identifier. "
-             "NOT present in the frozen snapshot — see §10."),
+             "NOT present in the frozen snapshot — see §10.",
+       on_user_deletion=U.CLEAR_FIELDS, purge=G.SET_BASED_DELETE,
+       completion_predicate="SELECT count(*) FROM profile.tax_profile WHERE user_id = :subject"),
     _e("profile.spouse_profile", (P.TAX_PROFILE_DATA, P.FINANCIAL_SOURCE_DATA),
        S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        exportable=True,
        notes="Third-party data: describes someone who is not the account "
-             "holder and cannot consent through this account."),
+             "holder and cannot consent through this account.",
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.SET_BASED_DELETE,
+       completion_predicate="SELECT count(*) FROM profile.spouse_profile WHERE user_id = :subject"),
     _e("profile.dependent", (P.TAX_PROFILE_DATA, P.USER_FREE_TEXT),
        S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
-       exportable=True, notes="Third-party data, frequently about children."),
+       exportable=True, notes="Third-party data, frequently about children.",
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.SET_BASED_DELETE,
+       completion_predicate="SELECT count(*) FROM profile.dependent WHERE user_id = :subject"),
     _e("profile.user_preference", (P.ACCOUNT_IDENTITY,),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        exportable=True),
@@ -319,37 +402,72 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "of what the user consented to — LEGAL_REVIEW_REQUIRED."),
 
     # ----------------------------------------------------------------- finance
+    # The partitioned PARENT and its partitions are listed separately because
+    # Entry 11B5 gives them different answers. Deletion names the parent and
+    # PostgreSQL routes it; the partitions must never be named, or the purge
+    # acquires a hard-coded year list that a 2026 partition silently escapes.
+    _e("finance.income_source", (P.FINANCIAL_SOURCE_DATA, P.USER_FREE_TEXT),
+       S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
+       exportable=True,
+       on_user_deletion=U.HARD_DELETE, purge=G.SET_BASED_DELETE,
+       completion_predicate=(
+           "SELECT count(*) FROM finance.income_source WHERE user_id = :subject"),
+       notes="`source_name` and `notes` are user free text; the amount is "
+             "financial source data. HARD delete rather than a tombstone: the "
+             "row's CONTENT is the personal data, so a tombstone would retain "
+             "exactly what deletion is for, and no sealed artifact references "
+             "it (replay reads the frozen snapshot). Deleting it cascades "
+             "`docs.document_link`, which is correct — that edge's subject is "
+             "the confirmed fact being removed. Partitioned by tax year, so "
+             "tax-year deletion is a partition-scoped operation."),
     *(_e(t, (P.FINANCIAL_SOURCE_DATA, P.USER_FREE_TEXT),
          S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
          exportable=True,
-         notes="`source_name` and `notes` are user free text; the amount is "
-               "financial source data. Partitioned by tax year, so tax-year "
-               "deletion is a partition-scoped operation.")
-      for t in ("finance.income_source", "finance.income_source_default",
+         on_user_deletion=U.VIA_PARENT, purge=G.PARTITION_OF_PARENT,
+         notes="Partition of `finance.income_source`. Never named by the "
+               "purge; reached by routing from the parent.")
+      for t in ("finance.income_source_default",
                 "finance.income_source_y2024", "finance.income_source_y2025")),
+    _e("finance.expense_record", (P.FINANCIAL_SOURCE_DATA, P.USER_FREE_TEXT),
+       S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
+       exportable=True,
+       on_user_deletion=U.HARD_DELETE, purge=G.SET_BASED_DELETE,
+       completion_predicate=(
+           "SELECT count(*) FROM finance.expense_record WHERE user_id = :subject"),
+       notes="`description` and `notes` are user free text. Hard delete, for "
+             "the same reasons as `finance.income_source`."),
     *(_e(t, (P.FINANCIAL_SOURCE_DATA, P.USER_FREE_TEXT),
          S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
          exportable=True,
-         notes="`description` and `notes` are user free text.")
-      for t in ("finance.expense_record", "finance.expense_record_default",
+         on_user_deletion=U.VIA_PARENT, purge=G.PARTITION_OF_PARENT,
+         notes="Partition of `finance.expense_record`. Never named by the "
+               "purge; reached by routing from the parent.")
+      for t in ("finance.expense_record_default",
                 "finance.expense_record_y2024", "finance.expense_record_y2025")),
 
     # ------------------------------------------------------------------ wealth
     _e("wealth.asset", (P.FINANCIAL_SOURCE_DATA, P.USER_FREE_TEXT),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
-       exportable=True),
+       exportable=True,
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.SET_BASED_DELETE,
+       completion_predicate="SELECT count(*) FROM wealth.asset WHERE user_id = :subject"),
     _e("wealth.asset_valuation", (P.FINANCIAL_SOURCE_DATA,),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True, exportable=True,
-       notes="NO RLS: reachable only through `wealth.asset`. See defect PD-1."),
+       notes="Reachable only through `wealth.asset`; RLS since Entry 11B1 (PD-1 closed). Removed by that parent's cascade during the source purge.",
+       on_user_deletion=U.VIA_PARENT, purge=G.VIA_PARENT_CASCADE),
     _e("wealth.liability", (P.FINANCIAL_SOURCE_DATA, P.USER_FREE_TEXT),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
-       exportable=True),
+       exportable=True,
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.SET_BASED_DELETE,
+       completion_predicate="SELECT count(*) FROM wealth.liability WHERE user_id = :subject"),
     _e("wealth.liability_balance", (P.FINANCIAL_SOURCE_DATA,),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True, exportable=True,
-       notes="NO RLS. See defect PD-1."),
+       notes="RLS since Entry 11B1 (PD-1 closed). Removed by `wealth.liability`'s cascade during the source purge.",
+       on_user_deletion=U.VIA_PARENT, purge=G.VIA_PARENT_CASCADE),
     _e("wealth.registered_account_detail", (P.FINANCIAL_SOURCE_DATA, P.TAX_PROFILE_DATA),
        S.SOURCE, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True, exportable=True,
-       notes="RRSP/TFSA contribution room. NO RLS. See defect PD-1."),
+       notes="RRSP/TFSA contribution room. RLS since Entry 11B1 (PD-1 closed). Removed by `wealth.asset`'s cascade during the source purge.",
+       on_user_deletion=U.VIA_PARENT, purge=G.VIA_PARENT_CASCADE),
 
     # -------------------------------------------------------------- documents
     _e("docs.document",
@@ -385,7 +503,8 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "it (RLS through the parent extraction; PD-1 closed). Purged "
              "explicitly by DocumentService.delete_document, because the "
              "document row is tombstoned rather than deleted and no cascade "
-             "fires."),
+             "fires.",
+       on_user_deletion=U.VIA_PARENT, purge=G.LATER_PHASE),
     _e("docs.document_link", (P.PSEUDONYMOUS_IDENTIFIER,),
        S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        notes="Provenance edge from a confirmed fact back to its document. "
@@ -407,7 +526,8 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        notes="THE frozen snapshot: 27 engine inputs plus its hash. Contains no "
              "identifier and no free text (§10), but every financial figure. "
              "Erasing it makes replay impossible — see §40. NO RLS: defect "
-             "PD-1, and the highest-value row in that finding."),
+             "PD-1, and the highest-value row in that finding.",
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.LATER_PHASE),
     _e("analysis.analysis_line_item", (P.DERIVED_TAX_RESULT,),
        S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        replay_dependency=True, exportable=True,
@@ -486,7 +606,8 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        notes="JSONB holding the verified figures that were put in front of the "
              "model — taxable income, tax, savings, marginal rate. A debugging "
              "artifact holding financial data with NO RLS. See PD-1; a strong "
-             "candidate for the shortest retention in the system."),
+             "candidate for the shortest retention in the system.",
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.LATER_PHASE),
     _e("ai.ai_message_citation", (P.PSEUDONYMOUS_IDENTIFIER,),
        S.DERIVED, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        notes="Links a message to rule versions and to an analysis. Its FK to "
@@ -501,7 +622,8 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
     _e("billing.invoice", (P.FINANCIAL_SOURCE_DATA, P.PSEUDONYMOUS_IDENTIFIER),
        S.AUDIT, R.RETAINED_PENDING_REVIEW, D.RETAIN, rls=True, exportable=True,
        notes="Amounts and a provider invoice id. NO RLS. Almost certainly "
-             "subject to a statutory retention period — LEGAL_REVIEW_REQUIRED."),
+             "subject to a statutory retention period — LEGAL_REVIEW_REQUIRED.",
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.RETAINED_BY_POLICY),
     _e("billing.entitlement", (P.ACCOUNT_IDENTITY,),
        S.DERIVED, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True),
     _e("billing.payment_method_ref", (P.PSEUDONYMOUS_IDENTIFIER,),

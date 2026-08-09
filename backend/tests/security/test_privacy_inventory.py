@@ -459,3 +459,68 @@ def test_every_surface_states_what_it_holds_and_who_controls_it(name, surface):
             f"{name}: holds live user data with no deletion mechanism and no "
             "recorded gap — that combination must be a named defect"
         )
+
+
+# ---------------------------------------------------------------------------
+# Entry 11B5 — deletion lifecycle coverage for mutable source data
+# ---------------------------------------------------------------------------
+def test_every_source_data_table_declares_a_deletion_lifecycle():
+    """A table can be added carrying a user's income with nobody deciding what
+    deletion does to it. That is the whole reason Entry 11B5 exists, and the
+    guard against it repeating is tied to the CLASSIFICATION rather than to a
+    list of table names: a future `finance.some_new_user_source` classed
+    FINANCIAL_SOURCE_DATA fails here until someone answers three questions.
+
+    Deliberately NOT a count. Asserting "21 source tables" would pass by
+    accident the moment one table is added and another removed.
+    """
+    from app.privacy.classification import SOURCE_DATA_CLASSES
+
+    missing = sorted(
+        f"{table}: {', '.join(gap)}"
+        for table, entry in LIFECYCLE.items()
+        if SOURCE_DATA_CLASSES & set(entry.classes)
+        and (gap := [
+            name for name, value in (
+                ("on_user_deletion", entry.on_user_deletion),
+                ("purge", entry.purge),
+            ) if value is None
+        ])
+    )
+    assert not missing, "\n  ".join([
+        "these tables hold mutable user source data and do not say what "
+        "deletion does to them:", *missing,
+    ])
+
+
+def test_a_table_the_purge_must_empty_says_how_completeness_is_proven():
+    """`SET_BASED_DELETE` is a claim that the phase can empty this table. The
+    phase may not mark itself complete on the strength of statements executed,
+    so each such table owes a COUNT predicate that proves it."""
+    from app.privacy.classification import PurgeParticipation
+
+    missing = sorted(
+        table for table, entry in LIFECYCLE.items()
+        if entry.purge is PurgeParticipation.SET_BASED_DELETE
+        and not entry.completion_predicate
+    )
+    assert not missing, (
+        "purged by the source phase with no completion predicate: "
+        f"{missing}"
+    )
+
+
+def test_no_completion_predicate_reads_a_value():
+    """The thing that verifies a privacy deletion must not become a place
+    personal data is read out to. Counts only — never a column, never a row."""
+    offenders = []
+    for table, entry in LIFECYCLE.items():
+        predicate = entry.completion_predicate
+        if not predicate:
+            continue
+        normalized = " ".join(predicate.lower().split())
+        if not normalized.startswith("select count(*)"):
+            offenders.append(f"{table}: {predicate}")
+        if ":subject" not in predicate:
+            offenders.append(f"{table}: not scoped to the deletion subject")
+    assert not offenders, "\n  ".join(["unsafe completion predicates:", *offenders])
