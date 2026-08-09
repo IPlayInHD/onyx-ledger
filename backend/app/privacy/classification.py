@@ -380,13 +380,21 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        (P.DOCUMENT_EXTRACTED_DATA, P.FINANCIAL_SOURCE_DATA),
        S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True, exportable=True,
        notes="`value_number` carries amounts read off a tax slip; "
-             "`bounding_box` locates them on the page. NO RLS — this is the "
-             "most sensitive unprotected table. See defect PD-1."),
+             "`bounding_box` locates them on the page — Entry 11A called this "
+             "the most sensitive unprotected table, and Entry 11B1 protected "
+             "it (RLS through the parent extraction; PD-1 closed). Purged "
+             "explicitly by DocumentService.delete_document, because the "
+             "document row is tombstoned rather than deleted and no cascade "
+             "fires."),
     _e("docs.document_link", (P.PSEUDONYMOUS_IDENTIFIER,),
        S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        notes="Provenance edge from a confirmed fact back to its document. "
-             "Deleting a document must decide this edge's fate explicitly — "
-             "an orphaned link claims evidence that no longer exists."),
+             "Entry 11B4 decided its fate: the edge is RETAINED and the "
+             "document it points at becomes a tombstone. Deleting the edge "
+             "would leave a confirmed tax figure looking unsourced, which is "
+             "worse than an edge whose target is marked deleted — and the "
+             "tombstone keeps `content_hash`, so the edge still resolves to a "
+             "specific document."),
 
     # --------------------------------------------------------------- analysis
     _e("analysis.analysis_run", (P.DERIVED_TAX_RESULT,),
