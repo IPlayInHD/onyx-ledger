@@ -21,6 +21,7 @@ celery_app = Celery(
     include=[
         "workers.tasks.analysis",
         "workers.tasks.maintenance",
+        "workers.tasks.privacy",
         "workers.tasks.tkms",
         "workers.tasks.ioe",
     ],

@@ -425,3 +425,97 @@ __all__ = [
     "lifecycle_metrics",
     "reset_lifecycle_metrics",
 ]
+
+
+class SourceDataPhase(StrEnum):
+    """The closed set of privacy phases with durable progress (Entry 11B5).
+
+    Only `SOURCE_DATA` is implemented. The others are named because the phase
+    table's CHECK constraint names them, and because a dispatcher that branched
+    on free-form strings would let a typo become a silently skipped phase.
+    """
+
+    SOURCE_DATA = "SOURCE_DATA"
+    DOCUMENTS = "DOCUMENTS"
+    AUDIT_AUTH_DEIDENTIFICATION = "AUDIT_AUTH_DEIDENTIFICATION"
+
+
+@dataclass(frozen=True)
+class PhaseOutcome:
+    """What one phase run achieved. Identifiers and closed codes only — no
+    table contents, no counts of anything but rows, no exception text."""
+
+    user_id: uuid.UUID
+    phase: SourceDataPhase
+    completed: bool
+    remaining: int
+    failure_code: str | None = None
+
+
+class SourceDataPurgeService:
+    """Drives the SOURCE_DATA phase through the Entry 11B5C keyhole.
+
+    Owns NO deletion SQL. Every statement that removes a row lives in
+    `identity.purge_source_data`, which takes one subject, is authorised by the
+    claim token, and executes under the subject's own row-level security. This
+    class decides WHEN to call it and what to believe afterwards.
+
+    THE COMPLETION CONDITION IS NOT WHAT THE DELETE REPORTED. `purge_source_data`
+    returns per-table row counts, and they are useful for an operator and
+    worthless as proof: a table the purge forgot reports nothing at all, which
+    looks identical to a table that was already empty. Completion is decided by
+    `count_remaining_source_data`, and the database refuses to record it while
+    that count is non-zero — so a bug here cannot assert the phase done.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.s = session
+
+    async def run(
+        self, claimed: ClaimedLifecycle, *, worker_id: str,
+        phase: SourceDataPhase = SourceDataPhase.SOURCE_DATA,
+    ) -> PhaseOutcome:
+        started = await self.s.scalar(
+            text("SELECT identity.start_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        )
+        if not started:
+            # The claim expired and someone else holds the subject. Not a
+            # failure: the other worker is doing this work.
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=-1, failure_code="CLAIM_LOST")
+
+        await self.s.execute(
+            text("SELECT identity.purge_source_data(:u, :t, :w)"),
+            {"u": claimed.user_id, "t": claimed.claim_token, "w": worker_id},
+        )
+
+        remaining = int(await self.s.scalar(
+            text("SELECT identity.count_remaining_source_data(:u)"),
+            {"u": claimed.user_id},
+        ) or 0)
+        if remaining:
+            # Refuse rather than let the database refuse for us. Both refuse —
+            # `complete_lifecycle_phase` raises on a non-zero count — but a
+            # worker that only found out by catching an exception would have no
+            # way to distinguish "work remains" from "something broke".
+            await self.s.execute(
+                text("SELECT identity.fail_lifecycle_phase(:u, :p, :t, :c, :w)"),
+                {"u": claimed.user_id, "p": phase.value,
+                 "t": claimed.claim_token, "c": "SOURCE_DATA_INCOMPLETE",
+                 "w": worker_id},
+            )
+            DELETION_PHASE[f"{phase.value}:incomplete"] += 1
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=remaining,
+                                failure_code="SOURCE_DATA_INCOMPLETE")
+
+        completed = bool(await self.s.scalar(
+            text("SELECT identity.complete_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        ))
+        DELETION_PHASE[f"{phase.value}:{'completed' if completed else 'claim_lost'}"] += 1
+        return PhaseOutcome(claimed.user_id, phase, completed=completed,
+                            remaining=0)
