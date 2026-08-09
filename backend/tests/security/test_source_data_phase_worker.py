@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.database.models import IncomeSource, UserAccount
+from app.database.privacy_session import privacy_unit_of_work
 from app.database.session import unit_of_work
 from app.services.financial.service import FinancialService
 from app.services.privacy import (
@@ -28,9 +29,16 @@ from tests.conftest import owner_dsn
 @pytest.fixture(autouse=True)
 async def _dispose_engine():
     yield
+    from app.database.privacy_session import dispose_privacy_engine
     from app.database.session import engine
 
     await engine.dispose()
+    # The privacy engine is a module-level singleton too, and it holds POOLED
+    # connections. Disposing only the application engine left them bound to a
+    # dead event loop, so the next test failed on the loop rather than on
+    # anything it asserted — the same trap `test_freshness_outbox_boundary.py`
+    # documents, arriving through the second engine this slice introduced.
+    await dispose_privacy_engine()
 
 
 def _owner_cursor():
@@ -139,7 +147,7 @@ async def test_the_phase_purges_every_governed_source_class_and_completes():
     claimed = await _walk_to_purging(user)
     assert claimed is not None
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         outcome = await SourceDataPurgeService(s).run(
             claimed, worker_id="test-worker")
 
@@ -157,7 +165,7 @@ async def test_source_data_completing_does_not_complete_the_account():
     user = await _subject_with_source_data()
     claimed = await _walk_to_purging(user)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         outcome = await SourceDataPurgeService(s).run(
             claimed, worker_id="test-worker")
 
@@ -174,7 +182,7 @@ async def test_the_purge_reaches_every_tax_year_partition():
     user = await _subject_with_source_data()
     claimed = await _walk_to_purging(user)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         await SourceDataPurgeService(s).run(claimed, worker_id="test-worker")
 
     conn = _owner_cursor()
@@ -198,7 +206,7 @@ async def test_purging_one_subject_leaves_another_untouched():
     assert before > 0
 
     claimed = await _walk_to_purging(victim)
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         await SourceDataPurgeService(s).run(claimed, worker_id="test-worker")
 
     assert _remaining(victim) == 0
@@ -234,7 +242,7 @@ async def test_completion_is_refused_while_one_governed_row_remains():
 
     assert _remaining(user) == 1
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         outcome = await SourceDataPurgeService(s).run(
             claimed, worker_id="test-worker")
 
@@ -285,7 +293,7 @@ async def test_a_crash_after_the_purge_converges_on_retry():
     assert _remaining(user) == 0
     assert _phase_row(user) is None, "no phase progress was recorded"
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         outcome = await SourceDataPurgeService(s).run(
             claimed, worker_id="retry-worker")
 
@@ -299,11 +307,11 @@ async def test_running_a_completed_phase_again_is_not_destructive():
     user = await _subject_with_source_data()
     claimed = await _walk_to_purging(user)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         assert (await SourceDataPurgeService(s).run(
             claimed, worker_id="test-worker")).completed
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         again = await SourceDataPurgeService(s).run(
             claimed, worker_id="test-worker")
 
@@ -323,7 +331,7 @@ async def test_a_lost_claim_is_reported_rather_than_forced():
         requested_at=claimed.requested_at, claim_token=uuid.uuid4(),
         revision=claimed.revision)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         outcome = await SourceDataPurgeService(s).run(
             stale, worker_id="impostor")
 
@@ -343,7 +351,7 @@ async def test_the_phase_record_carries_no_source_content():
     user = await _subject_with_source_data()
     claimed = await _walk_to_purging(user)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         await SourceDataPurgeService(s).run(claimed, worker_id="test-worker")
 
     row = _phase_row(user)
@@ -362,7 +370,7 @@ async def test_income_rows_are_gone_from_the_orm_view_too():
     user = await _subject_with_source_data()
     claimed = await _walk_to_purging(user)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         await SourceDataPurgeService(s).run(claimed, worker_id="test-worker")
 
     async with unit_of_work(user_id=user, actor_type="user") as s:

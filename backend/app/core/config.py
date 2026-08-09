@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # --- database (async URL for the app; sync URL for Alembic) ---
     database_url: str = "postgresql+asyncpg://onyx_app_rw@localhost:5432/onyx"
     database_url_sync: str = "postgresql+psycopg2://onyx_migrator@localhost:5432/onyx"
+    #: The PRIVILEGED privacy-worker connection. Deliberately optional and
+    #: deliberately NOT defaulted to `database_url`: the whole point of PD-16's
+    #: remediation is that the process able to purge an account is not the
+    #: process serving HTTP. A silent fallback would collapse the boundary back
+    #: to `onyx_app_rw` on any host where the operator forgot to set it, and it
+    #: would do so invisibly. Absent means the privacy worker refuses to run.
+    privacy_database_url: str | None = None
     db_pool_size: int = 10
     db_max_overflow: int = 20
 

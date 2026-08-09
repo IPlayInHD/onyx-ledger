@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 
 from app.core.logging import get_logger
-from app.database.session import unit_of_work
+from app.database.privacy_session import privacy_unit_of_work
 from app.services.privacy import (
     AccountLifecycleService,
     LifecycleState,
@@ -53,7 +53,7 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
 
     async def _run() -> dict[str, int]:
         totals = {"claimed": 0, "advanced": 0, "purged": 0, "incomplete": 0}
-        async with unit_of_work(actor_type="system") as session:
+        async with privacy_unit_of_work() as session:
             claimed = await AccountLifecycleService(session).claim(
                 worker_id=worker_id, batch_size=_BATCH)
         totals["claimed"] = len(claimed)
@@ -63,7 +63,7 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
             # fails must not roll back the purge of the subject before it —
             # that is the difference between a phase that converges on retry
             # and one that starts over.
-            async with unit_of_work(actor_type="system") as session:
+            async with privacy_unit_of_work() as session:
                 lifecycle = AccountLifecycleService(session)
 
                 # Walk the cheap states forward. ACCESS_DISABLED and

@@ -40,6 +40,8 @@ GRANT onyx_privacy_worker TO onyx_privacy_test;
 SQL
 
 export ONYX_DATABASE_URL="postgresql+asyncpg://onyx_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
+# The privileged worker connects as its OWN login, modelling production.
+export ONYX_PRIVACY_DATABASE_URL="postgresql+asyncpg://onyx_privacy_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
 export ONYX_JWT_SECRET="test-secret-at-least-32-bytes-long-000"
 
 # Arguments REPLACE the default target rather than adding to it. `tests/ $@`
