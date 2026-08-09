@@ -250,3 +250,91 @@ def test_the_delete_outcomes_are_a_closed_set():
     assert {o.value for o in DeleteOutcome} == {
         "DELETED", "ALREADY_ABSENT", "RETRYABLE_FAILURE", "PERMANENT_FAILURE",
     }
+
+
+# ---------------------------------------------------------------------------
+# regression guards (§46)
+# ---------------------------------------------------------------------------
+def test_the_key_builder_takes_no_user_supplied_argument():
+    """§46 — the structural guarantee behind PD-2.
+
+    A key builder that cannot SEE a filename cannot leak one. Asserted on the
+    signature rather than on the output, because an output test only covers the
+    filenames somebody thought to try.
+    """
+    import inspect
+
+    parameters = list(
+        inspect.signature(_opaque_object_key).parameters.values()
+    )
+    assert [p.name for p in parameters] == ["user_id", "document_id"], (
+        "the object-key builder gained an argument. If it is user-supplied, "
+        "the key can carry user content again (PD-2)."
+    )
+    for parameter in parameters:
+        assert parameter.annotation in (uuid.UUID, "uuid.UUID"), (
+            f"{parameter.name} is not a UUID, so it may carry free text"
+        )
+
+
+def test_no_production_code_builds_a_document_key_from_a_filename():
+    """The other half: the builder is safe, and nothing bypasses it.
+
+    A future `f"{user_id}/{uuid4()}/{filename}"` somewhere else would reopen
+    PD-2 while every test above kept passing.
+    """
+    import pathlib
+    import re
+
+    app_root = pathlib.Path(__file__).resolve().parents[2] / "app"
+    pattern = re.compile(r"object_key\s*=\s*f?[\"'].*\{filename\}")
+    offenders = [
+        f"{path.relative_to(app_root.parent)}:{number}"
+        for path in app_root.rglob("*.py")
+        if "__pycache__" not in path.parts
+        for number, line in enumerate(path.read_text().splitlines(), 1)
+        if pattern.search(line)
+    ]
+    assert not offenders, (
+        f"{offenders} build a document object key from a filename (PD-2)"
+    )
+
+
+def test_the_document_service_deletes_through_the_port():
+    """§42 — a delete method that exists but is unused does not close PD-8.
+
+    Asserted on the service source: the production lifecycle must actually
+    reach the storage boundary, not merely be able to.
+    """
+    import inspect
+
+    from app.services.document_processing.service import DocumentService
+
+    body = inspect.getsource(DocumentService.delete_document)
+    assert "self.storage.delete(" in body, (
+        "DocumentService.delete_document does not call the storage port, so "
+        "the binary survives the document (PD-8)"
+    )
+    assert "doc.bucket" in body and "doc.object_key" in body, (
+        "the deletion does not resolve bucket and key from the OWNED row; a "
+        "client-supplied key would be authority to delete an arbitrary object"
+    )
+
+
+def test_the_delete_route_never_accepts_a_bucket_or_key():
+    """§7 — object identity is server-authoritative.
+
+    The route takes a document id and nothing else. A caller able to name its
+    own key could ask the platform to delete an arbitrary object, and the
+    ownership check would never see it.
+    """
+    import inspect
+
+    from app.api.v1.documents import routes
+
+    signature = inspect.signature(routes.delete_document)
+    assert set(signature.parameters) == {"document_id", "user_id", "session"}, (
+        f"the delete route accepts {sorted(signature.parameters)} — a bucket "
+        "or key parameter would make the client the authority on what to "
+        "delete"
+    )

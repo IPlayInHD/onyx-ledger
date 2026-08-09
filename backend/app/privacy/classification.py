@@ -353,16 +353,29 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
 
     # -------------------------------------------------------------- documents
     _e("docs.document",
-       (P.DOCUMENT_BINARY, P.USER_FREE_TEXT, P.PSEUDONYMOUS_IDENTIFIER),
+       (P.DOCUMENT_BINARY, P.PSEUDONYMOUS_IDENTIFIER),
        S.SOURCE, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
        exportable=True,
-       notes="The row is metadata; the bytes are in object storage and are NOT "
-             "removed by any database cascade. `object_key` embeds the "
-             "user-supplied filename — see defect PD-2. `deleted_at` exists "
-             "and is unused."),
+       notes="The row is metadata; the bytes are in object storage. Entry "
+             "11B4 gave the storage port a delete (PD-8) and made "
+             "DocumentService.delete_document use it, so the binary IS now "
+             "reachable — but only through that service, never by a database "
+             "cascade. `object_key` is opaque since 11B4 "
+             "({user_id}/v2/{document_id}); it no longer carries the "
+             "user-supplied filename (PD-2), which is why USER_FREE_TEXT is "
+             "gone from this entry. Document deletion TOMBSTONES the row: "
+             "`deleted_at` is set, the extraction is purged, and "
+             "`content_hash` and `object_key` are RETAINED because they prove "
+             "which document was deleted. Rows created before 11B4 may still "
+             "carry a filename-bearing key — see "
+             "scripts/document_storage_audit.py."),
     _e("docs.document_extraction", (P.DOCUMENT_EXTRACTED_DATA,),
        S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
-       notes="NO RLS. See defect PD-1."),
+       notes="RLS since Entry 11B1. Purged explicitly by "
+             "DocumentService.delete_document rather than left to the cascade: "
+             "the document row is tombstoned, not deleted, so no cascade "
+             "fires and the extraction would otherwise outlive the binary it "
+             "describes."),
     _e("docs.extraction_field",
        (P.DOCUMENT_EXTRACTED_DATA, P.FINANCIAL_SOURCE_DATA),
        S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True, exportable=True,
