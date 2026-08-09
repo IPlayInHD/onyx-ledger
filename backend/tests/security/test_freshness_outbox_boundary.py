@@ -62,6 +62,76 @@ async def _claim(worker: str, batch: int = 10) -> list[dict]:
         return [dict(r._mapping) for r in rows]
 
 
+async def _claim_mine(worker: str, event_id: uuid.UUID,
+                      rounds: int = _DRAIN_ROUNDS) -> dict:
+    """Claim until THIS event belongs to `worker`, or fail loudly.
+
+    Same reason as the drain in the concurrency test above. `_claim` takes a
+    BOUNDED batch ORDERED oldest-first, so calling it once and expecting your
+    own event back is an assertion about how much unrelated work is queued —
+    and every ownership, retry, recovery and audit test below needs its event
+    claimed by a named worker before it can test anything at all. None of them
+    is testing batch position.
+
+    Reproduced rather than assumed: with claimed rows ageing past
+    `ioe.freshness_claim_timeout()` DURING a run — which is what the gate proof
+    does, since it reruns this suite for twenty-odd minutes in one database —
+    recovered rows re-enter the queue ahead of anything new, and the fourth run
+    failed `test_a_different_worker_cannot_complete_someone_elses_claim` and
+    `test_a_different_worker_cannot_fail_someone_elses_claim` together.
+    """
+    for _ in range(rounds):
+        rows = await _claim(worker, batch=50)
+        if not rows:
+            raise AssertionError(
+                f"the queue emptied before {worker} reached the event under "
+                f"test; it is not claimable"
+            )
+        for row in rows:
+            if row["id"] == event_id:
+                return row
+    raise AssertionError(f"{worker} never claimed the event under test")
+
+
+async def _never_claimed(worker: str, event_id: uuid.UUID,
+                         rounds: int = _DRAIN_ROUNDS) -> None:
+    """The opposite, and it needs draining for the opposite reason: asserting
+    an event is absent from ONE bounded batch is satisfied by the batch simply
+    not reaching it. Drain, then assert it never appeared."""
+    for _ in range(rounds):
+        rows = await _claim(worker, batch=50)
+        if not rows:
+            return
+        assert event_id not in {r["id"] for r in rows}, (
+            "a terminal event was handed out again"
+        )
+
+
+async def _was_recovered(event_id: uuid.UUID) -> bool:
+    """Did this event legitimately return to the queue between two claims?
+
+    A second worker holding an event a first worker already had is a defect
+    ONLY if the event never went back to the queue. `claim_freshness_events`
+    recovers claims older than `ioe.freshness_claim_timeout()`, and a recovered
+    event being handed to someone else is the abandoned-worker path working
+    exactly as designed — the thing
+    `test_an_abandoned_claim_is_recovered_and_audited` asserts must happen.
+
+    The recovery writes a `claim_recovered` audit row, so the two cases are
+    distinguishable from evidence rather than from timing. Without this, a
+    recovery landing inside the drain loop reads as a double claim; a ten
+    minute timeout makes that rare in reality and certain under a harness that
+    ages claims deliberately.
+    """
+    async with unit_of_work(actor_type="system") as s:
+        return bool(await s.scalar(
+            select(func.count())
+            .select_from(FreshnessOutboxAudit)
+            .where(FreshnessOutboxAudit.event_id == event_id,
+                   FreshnessOutboxAudit.transition == "claim_recovered")
+        ))
+
+
 async def _state(event_id: uuid.UUID) -> tuple[str, str | None, int]:
     async with unit_of_work(actor_type="system") as s:
         row = await s.execute(
@@ -113,11 +183,13 @@ async def test_two_workers_never_claim_the_same_event():
     owner: dict[uuid.UUID, str] = {}
     for worker in ("worker-a", "worker-b") * _DRAIN_ROUNDS:
         for row in await _claim(worker, batch=50):
-            if row["id"] in ids:
-                assert row["id"] not in owner, (
+            if row["id"] not in ids:
+                continue
+            if row["id"] in owner and not await _was_recovered(row["id"]):
+                raise AssertionError(
                     f"event claimed by {owner[row['id']]} and again by {worker}"
                 )
-                owner[row["id"]] = worker
+            owner[row["id"]] = worker
 
     assert set(owner) == ids, (
         f"only {len(owner)} of {len(ids)} events were claimed after "
@@ -161,8 +233,7 @@ async def test_claim_ordering_is_deterministic():
 @pytest.mark.asyncio
 async def test_a_different_worker_cannot_complete_someone_elses_claim():
     event_id = await _pending_event()
-    claimed = {r["id"] for r in await _claim("worker-owner", batch=50)}
-    assert event_id in claimed
+    await _claim_mine("worker-owner", event_id)
 
     async with unit_of_work(actor_type="system") as s:
         stolen = await s.scalar(
@@ -179,7 +250,7 @@ async def test_a_different_worker_cannot_complete_someone_elses_claim():
 @pytest.mark.asyncio
 async def test_a_different_worker_cannot_fail_someone_elses_claim():
     event_id = await _pending_event()
-    await _claim("worker-owner", batch=50)
+    await _claim_mine("worker-owner", event_id)
 
     async with unit_of_work(actor_type="system") as s:
         stolen = await s.scalar(
@@ -194,7 +265,7 @@ async def test_a_different_worker_cannot_fail_someone_elses_claim():
 async def test_duplicate_acknowledgement_is_a_no_op_not_an_error():
     """At-least-once delivery guarantees this happens, so it must be harmless."""
     event_id = await _pending_event()
-    await _claim("worker-dupe", batch=50)
+    await _claim_mine("worker-dupe", event_id)
 
     async with unit_of_work(actor_type="system") as s:
         first = await s.scalar(
@@ -225,7 +296,7 @@ async def test_a_failure_code_must_be_enumerated():
     """Exception text carries SQL fragments and row values. A queue record is
     not the place for either."""
     event_id = await _pending_event()
-    await _claim("worker-fail", batch=50)
+    await _claim_mine("worker-fail", event_id)
 
     for bad in ("could not connect: user 42 balance 1234.56", "lower case", ""):
         async with unit_of_work(actor_type="system") as s:
@@ -240,7 +311,7 @@ async def test_a_failure_code_must_be_enumerated():
 @pytest.mark.asyncio
 async def test_a_failure_below_the_ceiling_returns_the_event_to_the_queue():
     event_id = await _pending_event()
-    await _claim("worker-retry", batch=50)
+    await _claim_mine("worker-retry", event_id)
 
     async with unit_of_work(actor_type="system") as s:
         await s.execute(
@@ -262,7 +333,7 @@ async def test_a_failure_at_the_ceiling_terminates():
             text("UPDATE ioe.freshness_outbox SET attempts = 4 WHERE id = :id"),
             {"id": event_id},
         )
-    await _claim("worker-terminal", batch=50)      # attempts becomes 5
+    await _claim_mine("worker-terminal", event_id)   # attempts becomes 5
 
     async with unit_of_work(actor_type="system") as s:
         await s.execute(
@@ -273,8 +344,7 @@ async def test_a_failure_at_the_ceiling_terminates():
     assert state == "failed"
 
     # and it is not handed out again
-    reclaimed = {r["id"] for r in await _claim("worker-terminal", batch=50)}
-    assert event_id not in reclaimed
+    await _never_claimed("worker-terminal", event_id)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +354,7 @@ async def test_a_failure_at_the_ceiling_terminates():
 async def test_an_abandoned_claim_is_recovered_and_audited():
     """A worker that dies mid-event must not strand it forever."""
     event_id = await _pending_event()
-    await _claim("worker-that-dies", batch=50)
+    await _claim_mine("worker-that-dies", event_id)
     assert (await _state(event_id))[0] == "claimed"
 
     # age the claim past the timeout
@@ -294,8 +364,7 @@ async def test_an_abandoned_claim_is_recovered_and_audited():
             {"old": datetime.now(tz=UTC) - timedelta(hours=2), "id": event_id},
         )
 
-    reclaimed = {r["id"] for r in await _claim("worker-that-lives", batch=50)}
-    assert event_id in reclaimed, "an abandoned claim was never recovered"
+    await _claim_mine("worker-that-lives", event_id)
 
     state, owner, _ = await _state(event_id)
     assert state == "claimed"
@@ -316,13 +385,13 @@ async def test_an_abandoned_claim_is_recovered_and_audited():
 async def test_a_worker_whose_claim_was_recovered_cannot_acknowledge_late():
     """The late acknowledgement must not overwrite whoever picked the work up."""
     event_id = await _pending_event()
-    await _claim("worker-slow", batch=50)
+    await _claim_mine("worker-slow", event_id)
     async with unit_of_work(actor_type="system") as s:
         await s.execute(
             text("UPDATE ioe.freshness_outbox SET claimed_at = :old WHERE id = :id"),
             {"old": datetime.now(tz=UTC) - timedelta(hours=2), "id": event_id},
         )
-    await _claim("worker-fast", batch=50)
+    await _claim_mine("worker-fast", event_id)
 
     async with unit_of_work(actor_type="system") as s:
         late = await s.scalar(
@@ -340,7 +409,7 @@ async def test_a_worker_whose_claim_was_recovered_cannot_acknowledge_late():
 @pytest.mark.asyncio
 async def test_every_claim_and_terminal_transition_is_audited():
     event_id = await _pending_event()
-    await _claim("worker-audited", batch=50)
+    await _claim_mine("worker-audited", event_id)
     async with unit_of_work(actor_type="system") as s:
         await s.execute(
             text("SELECT ioe.complete_freshness_event(:id, :w)"),
