@@ -75,3 +75,55 @@ class FinancialService:
             )
         )
         return list(rows)
+
+    async def delete_income_source(
+        self, user_id: uuid.UUID, income_id: uuid.UUID, tax_year: int,
+    ) -> bool:
+        """Remove one owned income source. Returns False if it was already gone.
+
+        HARD DELETE, not a tombstone. The row's CONTENT is the personal data —
+        the amount, `source_name`, `notes` — so a tombstone would retain
+        precisely what deletion is for. Nothing sealed needs the live row: no
+        foreign key from `analysis.*` or `ioe.*` points at any source table,
+        which is why replay reads the frozen snapshot instead.
+
+        Deleting it cascades `docs.document_link`, and that is correct rather
+        than incidental. This row IS the confirmed fact; the link is provenance
+        FOR it. Entry 11B4 retained that edge when the DOCUMENT was deleted,
+        because the fact outlived its source document — here the fact itself is
+        going, and an edge whose subject no longer exists claims evidence for
+        nothing.
+
+        The tax year is required and is not a convenience: `finance.income_source`
+        is partitioned by it, and the primary key is (id, tax_year). Naming it
+        lets PostgreSQL prune to one partition rather than scan them all.
+        """
+        row = await self.s.get(IncomeSource, (income_id, tax_year))
+        # NotFound-as-False for someone else's row as well as a missing one: a
+        # distinguishable "forbidden" would confirm the id exists.
+        if row is None or row.user_id != user_id or row.deleted_at is not None:
+            return False
+
+        await self.s.delete(row)
+        await self.s.flush()
+        # Same transaction as the delete, so the event and the removal share one
+        # fate. The row id is the change token: deleting the same row twice
+        # cannot emit twice, because the second call finds nothing.
+        await on_financial_data_changed(
+            self.s, user_id, tax_year, change_token=f"income-deleted:{income_id}")
+        return True
+
+    async def delete_expense(
+        self, user_id: uuid.UUID, expense_id: uuid.UUID, tax_year: int,
+    ) -> bool:
+        """Remove one owned expense. See `delete_income_source` — same contract,
+        same reasoning, same partitioned primary key."""
+        row = await self.s.get(ExpenseRecord, (expense_id, tax_year))
+        if row is None or row.user_id != user_id or row.deleted_at is not None:
+            return False
+
+        await self.s.delete(row)
+        await self.s.flush()
+        await on_financial_data_changed(
+            self.s, user_id, tax_year, change_token=f"expense-deleted:{expense_id}")
+        return True

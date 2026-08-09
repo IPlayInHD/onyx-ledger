@@ -59,3 +59,51 @@ async def add_expense(
             user_id, body.tax_year, body.expense_category_code, body.amount, body.description
         )
         return {"id": str(row.id), "tax_year": row.tax_year, "amount": str(row.amount)}
+
+
+@router.delete("/income/{income_id}", status_code=status.HTTP_200_OK)
+async def delete_income(
+    income_id: uuid.UUID,
+    tax_year: int = Query(..., ge=1900, le=2200),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> dict:
+    """Delete one owned income source.
+
+    The tax year is a required query parameter rather than something the server
+    looks up, because the table is partitioned on it and the primary key is
+    (id, tax_year). Supplying it prunes to one partition; without it the server
+    would have to scan every year to find a row the caller already knows the
+    year of.
+
+    It is NOT authorization — ownership is checked against the row, and a wrong
+    year simply finds nothing.
+
+    NORMAL_WRITE admission: cheap per call, but it is a mutation and an
+    unbounded caller should not be able to drive deletions in a loop for free.
+    """
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        deleted = await FinancialService(session).delete_income_source(
+            user_id, income_id, tax_year)
+        # Minimal by design: no row count, no partition, no freshness event id.
+        # "deleted" is true whether this call did the work or found it already
+        # done — the caller asked for a state, not for a history.
+        return {"status": "deleted", "already_deleted": not deleted}
+
+
+@router.delete("/expenses/{expense_id}", status_code=status.HTTP_200_OK)
+async def delete_expense(
+    expense_id: uuid.UUID,
+    tax_year: int = Query(..., ge=1900, le=2200),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> dict:
+    """Delete one owned expense. Same contract as `delete_income`."""
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        deleted = await FinancialService(session).delete_expense(
+            user_id, expense_id, tax_year)
+        return {"status": "deleted", "already_deleted": not deleted}
