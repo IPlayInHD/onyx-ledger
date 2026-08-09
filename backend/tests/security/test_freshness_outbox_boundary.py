@@ -25,6 +25,12 @@ from tests.conftest import owner_dsn
 
 OWNER_DSN = owner_dsn()
 
+#: Alternating claim rounds per worker when draining. Bounded on purpose — a
+#: `while True` here would hang rather than fail if the claim ever stopped
+#: making progress. Twenty rounds of 50 is 2000 events, far past any backlog a
+#: suite rerun can build.
+_DRAIN_ROUNDS = 20
+
 
 @pytest.fixture(autouse=True)
 async def _dispose_engine():
@@ -74,17 +80,49 @@ async def _state(event_id: uuid.UUID) -> tuple[str, str | None, int]:
 @pytest.mark.asyncio
 async def test_two_workers_never_claim_the_same_event():
     """FOR UPDATE SKIP LOCKED plus the pending predicate: an event belongs to
-    exactly one worker."""
+    exactly one worker.
+
+    THE CLAIM IS DRAINED RATHER THAN TAKEN ONCE, and that is not a stylistic
+    preference. `claim_freshness_events` takes a BOUNDED batch ORDERED
+    oldest-first, so what a single claim returns depends on how much unrelated
+    work is already queued. Two 50-row claims against an empty queue happen to
+    contain the six events this test just created; against a queue with fifty
+    older rows in it they contain none of them, and the original assertion
+    ("worker A claimed nothing") failed for a reason that had nothing to do
+    with exclusivity.
+
+    That is not hypothetical. `scripts/prove_security_gate.sh` reruns this
+    suite around twenty-three times in ONE database, each run leaves claimed
+    rows behind, and after ten minutes `ioe.freshness_claim_timeout()` recovers
+    them to pending — ahead of anything new, because they are older. The test
+    failed from the third run onward before Entry 11B4 and from the second run
+    after it, which is what brought it inside the harness's window.
+
+    Draining makes the assertion say what it means: every event this test
+    created is claimed by exactly one worker, whatever else is in the queue.
+
+    THE ROUNDS RUN TO COMPLETION rather than stopping once all six are owned.
+    Stopping early made this test robust to the DEFECT as well as to the
+    backlog — the first worker took all six, the loop exited, and the second
+    worker never got the chance to take them a second time. Verified by
+    injection: with the pending predicate widened to `IN ('pending','claimed')`
+    the early-exit version passed. It has to keep asking.
+    """
     ids = {await _pending_event() for _ in range(6)}
 
-    first = await _claim("worker-a", batch=50)
-    second = await _claim("worker-b", batch=50)
+    owner: dict[uuid.UUID, str] = {}
+    for worker in ("worker-a", "worker-b") * _DRAIN_ROUNDS:
+        for row in await _claim(worker, batch=50):
+            if row["id"] in ids:
+                assert row["id"] not in owner, (
+                    f"event claimed by {owner[row['id']]} and again by {worker}"
+                )
+                owner[row["id"]] = worker
 
-    claimed_a = {r["id"] for r in first} & ids
-    claimed_b = {r["id"] for r in second} & ids
-    assert claimed_a, "worker A claimed nothing"
-    assert not (claimed_a & claimed_b), "two workers claimed the same event"
-    assert claimed_a | claimed_b == ids or claimed_a == ids
+    assert set(owner) == ids, (
+        f"only {len(owner)} of {len(ids)} events were claimed after "
+        f"{2 * _DRAIN_ROUNDS} bounded claims"
+    )
 
 
 @pytest.mark.asyncio
