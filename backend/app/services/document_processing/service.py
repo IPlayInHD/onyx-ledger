@@ -6,13 +6,14 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.exceptions import NotFound, ValidationError
+from app.core.exceptions import DomainError, NotFound, ValidationError
 from app.database.models import (
     Document,
     DocumentExtraction,
@@ -24,6 +25,7 @@ from app.database.models import (
     IncomeSource,
     IncomeType,
 )
+from app.domain.ports import DeleteOutcome
 from app.integrations.storage import get_object_storage
 from app.services.admission.limits import MAX_DOCUMENT_BYTES
 from app.services.document_processing.ocr import FIELD_FACT, FIELD_TARGET, extract_fields
@@ -59,6 +61,38 @@ def _opaque_object_key(user_id: uuid.UUID, document_id: uuid.UUID) -> str:
     the orphan check in §39 compare the two sets at all.
     """
     return f"{user_id}/{OBJECT_KEY_VERSION}/{document_id}"
+
+
+class DocumentDeletionFailed(DomainError):
+    """Object storage would not release the binary.
+
+    503 rather than 500: the request was valid and the platform could not
+    complete it right now, so a client retrying later is the correct behaviour
+    — and the deletion genuinely is retryable, because nothing in the database
+    was changed.
+
+    Carries the CLOSED outcome, never a provider message. Entry 11A proved
+    exception text carries values a privacy store must not keep, and the detail
+    below is a code rather than anything the provider said.
+    """
+
+    status_code = 503
+    error_type = "https://onyx.ledger/errors/document-deletion-failed"
+    title = "Document Deletion Failed"
+
+    def __init__(self, outcome: DeleteOutcome) -> None:
+        self.outcome = outcome
+        super().__init__(f"document object deletion failed: {outcome.value}")
+
+
+@dataclass(frozen=True)
+class DocumentDeletionOutcome:
+    """What one deletion achieved. Identifiers and closed codes only."""
+
+    document_id: uuid.UUID
+    storage: DeleteOutcome
+    extractions_purged: int
+    already_deleted: bool
 
 
 class DocumentService:
@@ -218,3 +252,103 @@ class DocumentService:
         # a different fact with its own reason.
         await on_document_status_changed(self.s, user_id, document_id, "confirmed")
         return created
+
+    async def delete_document(
+        self, user_id: uuid.UUID, document_id: uuid.UUID
+    ) -> DocumentDeletionOutcome:
+        """Delete one owned document: purge the binary, purge the extraction,
+        tombstone the row. THE authoritative document-deletion operation.
+
+        Routes do not delete objects and workers do not invent their own
+        semantics — both call this, so authorization, storage, purge and
+        provenance stay in one place. Entry 11A's contract (§8) decides what
+        happens to each artifact:
+
+            binary            → purged
+            extraction fields → deleted with the document
+            content hash      → RETAINED in the tombstone; it proves WHICH
+                                document was deleted
+            confirmed facts   → SURVIVE; the user asserted them and they are
+                                the tax input
+            provenance edge   → retained as a broken link, so a confirmed
+                                figure never looks unsourced
+            sealed analysis   → untouched
+
+        WHY THE ROW IS TOMBSTONED RATHER THAN DELETED
+        Hard-deleting it would cascade `docs.document_link` away, and the
+        specification is explicit that the provenance edge must survive. It
+        would also throw away the content hash the tombstone exists to keep.
+        `deleted_at` is the mechanism the schema already provides and every
+        read path already honours — Entry 11A called it an implementation
+        affordance, "read by every query path, written by none". This is what
+        starts writing it.
+
+        THE OBJECT KEY IS NOT CLEARED. It is opaque since Entry 11B4 — an
+        account id, a version and a document id — so it identifies the object
+        that was removed without saying anything about the person. Keeping it
+        is what lets the orphan check tell "deleted on purpose" from "vanished".
+
+        ORDERING, AND WHY THERE IS NO OUTBOX
+        Object storage and PostgreSQL are not one transaction, so one of them
+        commits first and a crash between them is possible. The storage delete
+        goes FIRST and is idempotent, which makes retry converge without a
+        state machine:
+
+            storage fails       → nothing in the database changed, retry
+            storage succeeds,
+            database fails      → binary gone, row still live; a retry deletes
+                                  again (ALREADY_ABSENT) and finishes the
+                                  database work
+
+        The residual risk is a document that shows as live with no binary if
+        nobody ever retries. That is reported by the orphan check rather than
+        prevented, and it is the honest limit of not building a durable job
+        here — recorded in docs/privacy/pd2-pd8-document-lifecycle.md.
+        """
+        doc = await self.s.get(Document, document_id)
+        # NotFound for someone else's document as well as a missing one: a
+        # distinct "forbidden" would confirm the id exists.
+        if not doc or doc.user_id != user_id:
+            raise NotFound("Document not found")
+
+        if doc.deleted_at is not None:
+            # Already a tombstone. Idempotent by design: a retry must converge,
+            # not fail because the work is done.
+            return DocumentDeletionOutcome(
+                document_id=doc.id, storage=DeleteOutcome.ALREADY_ABSENT,
+                extractions_purged=0, already_deleted=True,
+            )
+
+        # 1. The binary. First, because it is the irreversible part and the one
+        #    with no transaction to roll back.
+        storage_outcome = self.storage.delete(doc.bucket, doc.object_key)
+        if storage_outcome in (
+            DeleteOutcome.RETRYABLE_FAILURE, DeleteOutcome.PERMANENT_FAILURE
+        ):
+            # No database change. The caller retries; nothing is marked done.
+            raise DocumentDeletionFailed(storage_outcome)
+
+        # 2. Derived extraction data. Set-based rather than row-by-row: a
+        #    document with many fields should cost two statements, not N.
+        extraction_ids = list(await self.s.scalars(
+            select(DocumentExtraction.id)
+            .where(DocumentExtraction.document_id == doc.id)
+        ))
+        if extraction_ids:
+            await self.s.execute(
+                delete(ExtractionField)
+                .where(ExtractionField.extraction_id.in_(extraction_ids))
+            )
+            await self.s.execute(
+                delete(DocumentExtraction)
+                .where(DocumentExtraction.id.in_(extraction_ids))
+            )
+
+        # 3. The tombstone. `content_hash` and `object_key` deliberately stay.
+        doc.deleted_at = datetime.now(tz=UTC)
+        await self.s.flush()
+
+        return DocumentDeletionOutcome(
+            document_id=doc.id, storage=storage_outcome,
+            extractions_purged=len(extraction_ids), already_deleted=False,
+        )

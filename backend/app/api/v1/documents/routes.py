@@ -175,6 +175,41 @@ async def confirm(
         return {"created": created}
 
 
+@router.delete("/{document_id}", status_code=status.HTTP_200_OK)
+async def delete_document(
+    document_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> dict:
+    """Delete one owned document: binary, extraction and all.
+
+    The document is named by ID and the object key is resolved SERVER-SIDE from
+    the owned row. A client never supplies a bucket or a key — a caller able to
+    name its own key could ask the platform to delete an arbitrary object,
+    including another tenant's, and the ownership check would never see it.
+
+    Synchronous, and deliberately so. The work is one object deletion and two
+    bounded statements, all of which comfortably fit inside a request; a 202
+    with a background job would add a durable queue, a worker and a state
+    machine to defer something that already finished. If object deletion ever
+    becomes slow enough to matter — a versioned bucket needing per-version
+    deletes — this returns 202 and grows the job then, on evidence.
+
+    NORMAL_WRITE admission: cheap per call, but it is a mutation and an
+    unbounded caller should not be able to drive object-store deletions in a
+    loop for free.
+    """
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        outcome = await DocumentService(session).delete_document(user_id, document_id)
+        # Minimal by design (§36): no object key, no bucket, no provider
+        # response, no internal phase. "deleted" is true whether this call did
+        # the work or found it already done — the caller asked for a state, not
+        # for a history.
+        return {"status": "deleted", "already_deleted": outcome.already_deleted}
+
+
 @router.get("")
 async def list_documents(
     user_id: uuid.UUID = Depends(current_user_id),
