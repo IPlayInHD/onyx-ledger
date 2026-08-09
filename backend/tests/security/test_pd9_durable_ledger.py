@@ -68,6 +68,39 @@ def _request_deletion(cur, account: uuid.UUID) -> None:
         "VALUES (%s, 'DELETION_REQUESTED')", (str(account),))
 
 
+def _claim_until_found(cur, account: uuid.UUID, worker: str,
+                       columns: str, rounds: int = 20):
+    """Claim repeatedly until this account appears, or give up.
+
+    `claim_account_lifecycle` caps its batch at 50 and orders oldest-first,
+    which is right for a worker draining a backlog and wrong for a test that
+    claims once and expects its OWN account: that is really an assertion that
+    fewer than 50 claimable lifecycles exist. True on a fresh database, false
+    on one `scripts/prove_security_gate.sh` has run the suite against twenty
+    times — and the gate proof failed there, in these two tests, on a restore
+    run with no defect injected at all.
+
+    The same helper and the same reasoning as `test_account_lifecycle.py`,
+    which reached this conclusion first. This file kept a single bounded claim
+    because it drives the ledger through a psycopg2 owner cursor rather than
+    the service, and the fix did not follow it across.
+
+    The invariant under test is that the worker CAN claim this subject after
+    its account row is gone. Its position in the queue is not part of it.
+    """
+    for _ in range(rounds):
+        cur.execute(
+            f"SELECT {columns} "  # noqa: S608
+            "  FROM identity.claim_account_lifecycle(50, %s)", (worker,))
+        rows = cur.fetchall()
+        if not rows:
+            return None
+        for row in rows:
+            if str(row[0]) == str(account):
+                return row
+    return None
+
+
 def _ledger_rows(cur, account: uuid.UUID) -> int:
     cur.execute(f"SELECT count(*) FROM {LEDGER} WHERE user_id = %s",  # noqa: S608
                 (str(account),))
@@ -310,16 +343,15 @@ def test_the_worker_can_claim_a_lifecycle_whose_account_no_longer_exists():
         cur.execute("DELETE FROM identity.user_account WHERE id = %s",
                     (str(account),))
 
-        cur.execute(
-            "SELECT out_user_id, out_state, out_requested_at, out_claim_token "
-            "  FROM identity.claim_account_lifecycle(50, 'pd9-worker')")
-        claimed = {str(r[0]): r for r in cur.fetchall()}
+        claimed = _claim_until_found(
+            cur, account, "pd9-worker",
+            "out_user_id, out_state, out_requested_at, out_claim_token")
 
-    assert str(account) in claimed, (
+    assert claimed is not None, (
         "the worker cannot claim a lifecycle whose account has been removed, "
         "so no phase after account removal could ever run"
     )
-    _, state, requested_at, token = claimed[str(account)]
+    _, state, requested_at, token = claimed
     assert state == "DELETION_REQUESTED"
     assert requested_at is not None, "the cutoff did not survive"
     assert token is not None, "no claim token was issued"
@@ -333,9 +365,10 @@ def test_the_worker_can_advance_and_fail_a_subject_with_no_account():
         cur.execute("DELETE FROM identity.user_account WHERE id = %s",
                     (str(account),))
 
-        cur.execute("SELECT out_user_id, out_claim_token "
-                    "  FROM identity.claim_account_lifecycle(50, 'pd9-worker')")
-        token = next(t for u, t in cur.fetchall() if str(u) == str(account))
+        claimed = _claim_until_found(cur, account, "pd9-worker",
+                                     "out_user_id, out_claim_token")
+        assert claimed is not None, "the subject was never claimable"
+        token = claimed[1]
 
         cur.execute("SELECT identity.advance_account_lifecycle("
                     "  %s, %s, 'ACCESS_DISABLED', 'pd9-worker')",
