@@ -85,3 +85,65 @@ def test_public_cannot_execute_the_privacy_keyholes():
         """)
         leaked = [r[0] for r in cur.fetchall()]
     assert not leaked, f"PUBLIC can execute privacy keyholes: {leaked}"
+
+
+# ---------------------------------------------------------------------------
+# The other half: the dedicated privacy runtime CAN do what the app cannot
+# ---------------------------------------------------------------------------
+#: A login that models the production privacy worker: member of the capability
+#: role and of nothing else. Not a member of `onyx_app_rw`.
+PRIVACY_DSN = (
+    "postgresql://onyx_privacy_test:test@/onyx_test"
+    "?host=/var/run/postgresql&port=5432"
+)
+
+
+def _privacy_session():
+    conn = psycopg2.connect(PRIVACY_DSN)
+    conn.autocommit = True
+    return conn
+
+
+def test_the_privacy_runtime_is_not_an_application_role():
+    """Without this the positive proofs below could be passing because the
+    privacy login happens to inherit ordinary application rights, which is
+    exactly the topology this separation exists to prevent."""
+    with _privacy_session() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT session_user, "
+            "pg_has_role(session_user, 'onyx_privacy_worker', 'MEMBER'), "
+            "pg_has_role(session_user, 'onyx_app_rw', 'MEMBER')")
+        session_user, has_capability, has_app = cur.fetchone()
+    assert session_user == "onyx_privacy_test"
+    assert has_capability, "the privacy runtime lacks its own capability"
+    assert not has_app, "the privacy runtime inherits application privileges"
+
+
+def test_the_privacy_runtime_can_execute_every_keyhole_the_worker_needs():
+    """The exact 11B5 contract, no wider. Asserted as effective privilege from
+    a genuine login rather than read off the GRANT statements."""
+    needed = ("count_remaining_source_data", "purge_source_data",
+              "start_lifecycle_phase", "complete_lifecycle_phase",
+              "fail_lifecycle_phase", "claim_account_lifecycle")
+    with _privacy_session() as conn:
+        cur = conn.cursor()
+        for fn in needed:
+            cur.execute(
+                "SELECT has_function_privilege(session_user, p.oid, 'EXECUTE') "
+                "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                " WHERE n.nspname = 'identity' AND p.proname = %s LIMIT 1", (fn,))
+            row = cur.fetchone()
+            assert row is not None, f"identity.{fn} does not exist"
+            assert row[0] is True, f"the privacy runtime cannot execute {fn}"
+
+
+def test_the_privacy_runtime_holds_no_dangerous_role_attributes():
+    with _privacy_session() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole "
+                    "  FROM pg_roles WHERE rolname = session_user")
+        superuser, bypassrls, createdb, createrole = cur.fetchone()
+    assert not superuser, "the privacy runtime is a superuser"
+    assert not bypassrls, "the privacy runtime bypasses row-level security"
+    assert not createdb and not createrole

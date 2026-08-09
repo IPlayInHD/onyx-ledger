@@ -20,9 +20,23 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_test') THEN
     CREATE ROLE onyx_test LOGIN PASSWORD 'test' IN ROLE onyx_app_rw;
   END IF;
+  -- A SEPARATE LOGIN FOR THE PRIVACY WORKER, modelling production topology.
+  --
+  -- The point of the whole exercise is that the process which can purge an
+  -- account is not the process serving HTTP. A test suite that obtained the
+  -- capability by connecting as `onyx_test` would prove the opposite, and
+  -- would make PD-16's one-line shortcut look acceptable.
+  --
+  -- Deliberately NOT `IN ROLE onyx_app_rw`: the privacy runtime gets its
+  -- capability and nothing else, so a test that needs ordinary CRUD has to
+  -- use the application login and cannot drift into using this one.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_privacy_test') THEN
+    CREATE ROLE onyx_privacy_test LOGIN PASSWORD 'test' IN ROLE onyx_privacy_worker;
+  END IF;
 END
 $$;
 GRANT onyx_app_rw TO onyx_test;
+GRANT onyx_privacy_worker TO onyx_privacy_test;
 SQL
 
 export ONYX_DATABASE_URL="postgresql+asyncpg://onyx_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
