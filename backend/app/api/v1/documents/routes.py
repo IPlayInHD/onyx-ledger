@@ -184,4 +184,8 @@ async def list_documents(
         select(Document).where(Document.user_id == user_id, Document.deleted_at.is_(None))
         .order_by(Document.created_at.desc())
     )
-    return [{"id": str(d.id), "status": d.status, "object_key": d.object_key} for d in rows]
+    # The object key is deliberately NOT returned. It is infrastructure, it is
+    # not authorization, and until Entry 11B4 it carried the user's filename
+    # straight into every client that listed their documents (PD-2). A caller
+    # identifies a document by its id; the key is resolved server-side.
+    return [{"id": str(d.id), "status": d.status} for d in rows]

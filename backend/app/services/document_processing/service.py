@@ -34,6 +34,32 @@ from app.services.ioe.freshness_producers import (
 
 LOW_CONFIDENCE = 0.75
 
+#: The object-key version. Present so a future format change is distinguishable
+#: from the legacy filename-bearing keys without parsing them, and so
+#: `test_pd2_object_keys` can assert on the shape rather than on a regex over
+#: everything that has ever existed.
+OBJECT_KEY_VERSION = "v2"
+
+
+def _opaque_object_key(user_id: uuid.UUID, document_id: uuid.UUID) -> str:
+    """A server-authoritative document key that carries no user content.
+
+    Every component is an internal identifier this system generated:
+
+        {user_id}/v2/{document_id}
+
+    NO filename, no extension, no title, no tax-year description. The MIME type
+    lives in `docs.document.mime_type`, which is the right place for it — a
+    content type in a path is decoration, and the moment an extension is
+    allowed the argument for allowing the stem follows.
+
+    Deriving the key from the document's OWN id rather than a fresh uuid4 means
+    the authoritative pointer and the row identify each other: given a row the
+    key is recomputable, and given a key the row is findable. That is what lets
+    the orphan check in §39 compare the two sets at all.
+    """
+    return f"{user_id}/{OBJECT_KEY_VERSION}/{document_id}"
+
 
 class DocumentService:
     def __init__(self, session: AsyncSession):
@@ -58,15 +84,31 @@ class DocumentService:
         if not dtype:
             raise ValidationError(f"Unknown document type '{doc_type_code}'")
         bucket = self.settings.s3_bucket_documents
-        key = f"{user_id}/{uuid.uuid4()}/{filename}"
         doc = Document(
             user_id=user_id, document_type_id=dtype.id, tax_year=tax_year,
-            bucket=bucket, object_key=key, mime_type=mime_type, status="uploaded",
+            bucket=bucket, object_key="", mime_type=mime_type, status="uploaded",
         )
         self.s.add(doc)
         await self.s.flush()
+        # PD-2: the key USED to be f"{user_id}/{uuid4()}/{filename}".
+        #
+        # A filename is user free text and routinely contains a person's name,
+        # their employer, or what the document is about — "Ali Abbas 2025 T4
+        # medical.pdf". Object keys surface in bucket listings, CDN and access
+        # logs, support tooling and provider consoles: places with entirely
+        # different access control from the RLS-protected row, and none of them
+        # reached by a deletion. The key is server-generated and opaque now.
+        #
+        # `filename` is still accepted and still validated by the route, and is
+        # then deliberately NOT stored anywhere — see `_opaque_object_key`.
+        #
+        # The `{user_id}/` prefix stays, on Entry 11A's recommendation: it is an
+        # internal UUID rather than a name, and it makes account-level purge of
+        # object storage a single prefix operation instead of a row-by-row walk.
+        doc.object_key = _opaque_object_key(user_id, doc.id)
+        await self.s.flush()
         presigned = self.storage.presign_put(
-            bucket, key, mime_type or "application/octet-stream",
+            bucket, doc.object_key, mime_type or "application/octet-stream",
             max_bytes=min(declared_bytes or MAX_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES),
         )
         return doc, presigned

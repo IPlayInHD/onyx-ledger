@@ -21,6 +21,7 @@ condition — see the production adapter sketch below.
 from __future__ import annotations
 
 from app.core.exceptions import ValidationError
+from app.domain.ports import DeleteOutcome
 
 _FAKE_BLOBS: dict[str, bytes] = {}
 #: Per-key ceiling recorded when the upload was authorized.
@@ -78,6 +79,26 @@ class LocalObjectStorage:
     def get(self, bucket: str, key: str) -> bytes:
         return _FAKE_BLOBS.get(f"{bucket}/{key}", b"")
 
+    def delete(self, bucket: str, key: str) -> DeleteOutcome:
+        """Remove one object, idempotently (PD-8).
+
+        The distinction between DELETED and ALREADY_ABSENT is real information
+        — it tells an operator whether a retry did the work or found it done —
+        but both let the lifecycle advance. A deletion phase that failed
+        because the object was already gone would never converge, and the one
+        thing worse than a binary that outlives its document is a lifecycle
+        that can never finish removing it.
+
+        The per-key upload ceiling goes too. It is authorization state for an
+        upload that can no longer happen, and leaving it behind would let a
+        replayed presign inherit a bound from a deleted object.
+        """
+        path = f"{bucket}/{key}"
+        _FAKE_LIMITS.pop(path, None)
+        if _FAKE_BLOBS.pop(path, None) is None:
+            return DeleteOutcome.ALREADY_ABSENT
+        return DeleteOutcome.DELETED
+
 
 # Production adapter (requires boto3 + real credentials). Note that the size
 # bound is a POLICY CONDITION, not something this process checks — S3 rejects
@@ -98,6 +119,29 @@ class LocalObjectStorage:
 #     def presign_get(self, bucket, key):
 #         return self.c.generate_presigned_url(
 #             "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=self.ttl)
+#     def delete(self, bucket, key):
+#         # S3 DeleteObject is already idempotent — deleting a missing key
+#         # returns 204 — so ALREADY_ABSENT cannot be distinguished without a
+#         # preceding HEAD, and paying a round trip to learn it is not worth it.
+#         # Report DELETED and let the lifecycle converge either way.
+#         #
+#         # VERSIONING: on a versioned bucket this writes a delete marker and the
+#         # previous versions REMAIN. That is not erasure. Either versioning is
+#         # off, or this must enumerate and delete every version. The repository
+#         # cannot see the deployed bucket configuration —
+#         # DEPLOYMENT_REVIEW_REQUIRED, recorded as PD-10.
+#         try:
+#             self.c.delete_object(Bucket=bucket, Key=key)
+#             return DeleteOutcome.DELETED
+#         except ClientError as exc:
+#             # A closed code, never the provider message: Entry 11A proved
+#             # exception text carries values a privacy store must not keep.
+#             code = exc.response.get("Error", {}).get("Code", "")
+#             if code in ("NoSuchKey", "NoSuchBucket"):
+#                 return DeleteOutcome.ALREADY_ABSENT
+#             if code in ("AccessDenied", "InvalidBucketName"):
+#                 return DeleteOutcome.PERMANENT_FAILURE
+#             return DeleteOutcome.RETRYABLE_FAILURE
 
 
 def get_object_storage() -> LocalObjectStorage:
