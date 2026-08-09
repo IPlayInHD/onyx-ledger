@@ -741,6 +741,11 @@ access control from the RLS-protected row. There is **no `filename` column** on
 `docs.document`, so the filename exists *only* inside the key; fixing this needs
 a column plus an opaque key, which is an Entry 11B migration.
 
+**FIXED in 11B4 (§35)** — and the prediction in that last sentence was wrong in
+both halves. No column was needed, because the right answer was to stop storing
+the filename rather than move it, and no migration was needed, because the key
+is generated in the application. The key is now `{user_id}/v2/{document_id}`.
+
 The `{user_id}/` prefix is deliberately **kept** in the recommendation: it is an
 internal UUID, and it makes account deletion of object storage a single prefix
 delete — an operational asset for 11B.
@@ -869,12 +874,12 @@ never be scattered as literals; Entry 10's `_COUNTER_RETENTION` /
 | **PD-4a** | `audit.log_change` wrote the Argon2 password hash into the append-only `audit.audit_log` on every registration | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in 11A** |
 | **PD-4** | `audit.audit_log` holds whole copies of financial/profile rows, has no user FK, is append-only, and account deletion *adds* to it | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in 11B0 (§32)** |
 | **PD-1** | 16 tenant-owned child tables have no RLS, including the frozen snapshot, extraction fields, AI messages and AI prompt context. (27 user-derived tables lack RLS in total; 11 of those — `identity` and `audit` — correctly cannot have it.) | `IMPLEMENTATION_GAP` | **HIGH — FIXED in 11B1 (§33)** |
-| **PD-2** | Document object keys embed the user-supplied filename; no `filename` column exists | `IMPLEMENTATION_GAP` | MEDIUM |
+| **PD-2** | Document object keys embed the user-supplied filename; no `filename` column exists | `IMPLEMENTATION_GAP` | **MEDIUM — FIXED in 11B4 (§35)**. No `filename` column was added: the fix is to stop storing it, not to relocate it. |
 | **PD-3** | The four `SET NULL` tables do not de-identify: `login_event` keeps `email_tried` and `ip_address`; `recommendation_status_event` keeps a free-text note | `IMPLEMENTATION_GAP` | MEDIUM |
 | **PD-5** | TKMS persists raw `str(e)` in `import_job.error`, `parse_result.error`, `dead_letter.error` (legislation path, not user data) | `IMPLEMENTATION_GAP` | LOW |
 | **PD-6** | Failed logins record nothing: `AuthService` adds a `login_event` then raises, so the row rolls back | `PRIVACY_DEFECT_NOW` (security-audit) | MEDIUM |
 | **PD-7** | No deletion capability exists at all — no account, document, financial-record or conversation delete endpoint | `IMPLEMENTATION_GAP` | HIGH |
-| **PD-8** | `ObjectStorage` port has no `delete` method; binaries are unreachable by any cascade | `IMPLEMENTATION_GAP` | HIGH |
+| **PD-8** | `ObjectStorage` port has no `delete` method; binaries are unreachable by any cascade | `IMPLEMENTATION_GAP` | **HIGH — FIXED in 11B4 (§35)** |
 | **PD-9** | `audit.data_deletion_request` FK is `CASCADE`, so the deletion record dies with the account it must outlive | `IMPLEMENTATION_GAP` | **MEDIUM — FIXED in 11B3 (§34)**. The wording named a table that was never used; the live ledger `identity.account_lifecycle` had the same defect in a stronger form. |
 | **PD-10** | Object-store encryption, versioning, TLS and backup config absent from the repository | `DEPLOYMENT_CONFIGURATION_REQUIRED` | — |
 | **PD-12** | Celery serialized failed-task exceptions — statement and bound parameters included — into the Redis result backend | `PRIVACY_DEFECT_NOW` | **HIGH — FIXED in closeout (§29.2)** |
@@ -976,7 +981,7 @@ everything else unsafe come first.
 | **11B1** ✅ | **PD-1** — RLS on the 16 tenant-owned child tables | `analysis` (4), `docs` (3), `ai` (3), `wealth` (3), `billing` (1), `ioe.run_rule_snapshot`, `reco.recommendation_status_event` | yes (policies) | n/a | n/a | n/a | cross-tenant read denied per table; **login still works** (RLS must not reach `identity`); `NON_RLS` defect count drops to 0 | — |
 | **11B2** ✅ | Account lifecycle + deletion-request state machine | `audit.data_deletion_request` (**PD-9**: FK `CASCADE` → must outlive the account), new lifecycle state | yes | privileged worker, `FOR UPDATE SKIP LOCKED` keyhole; **no broad `SECURITY DEFINER`** | phase checkpoints | resume at checkpoint | state transitions; crash mid-phase resumes; `ACCESS_DISABLED` entered first | grace period `PRIVACY_COUNSEL_REVIEW_REQUIRED` |
 | **11B3** | Source deletion + correction | `finance.*`, `profile.*`, `wealth.*` | possibly | user-authorized, ownership-checked | delete-if-exists | idempotent retry | source gone, sealed result byte-identical, dependents stale | — |
-| **11B4** | Document / object / extraction deletion | `docs.*`, `ObjectStorage.delete` (**PD-8**), `filename` column + opaque keys (**PD-2**) | yes | ownership-checked | purge-if-exists | orphan sweep | binary gone, fields gone, confirmed facts survive, provenance link marked, no orphaned object | object versioning `DEPLOYMENT_REVIEW_REQUIRED` |
+| **11B4** — **DONE (§35)** | Document / object / extraction deletion | `docs.*`, `ObjectStorage.delete` (**PD-8**), ~~`filename` column +~~ opaque keys (**PD-2**) | **no** — the key is generated in the application | ownership-checked | purge-if-exists | idempotent retry; **orphan sweep NOT built** — reported by `scripts/document_storage_audit.py`, not prevented | binary gone, fields gone, confirmed facts survive, provenance link marked | object versioning `DEPLOYMENT_REVIEW_REQUIRED`; legacy keys `OPERATIONAL_REVIEW_REQUIRED` |
 | **11B5** | Sealed-snapshot erasure semantics | `analysis.*`, `ioe.*`, new `SOURCE_ERASED_BY_PRIVACY_LIFECYCLE` reason | yes (enum/check) | privileged erasure path; **ordinary immutability triggers untouched** | idempotent | resumable | replay reports erasure, never `verified` | erasure exceptions `LEGAL_REVIEW_REQUIRED` |
 | **11B6** | AI conversation + external provider lifecycle | `ai.*`, conversation delete endpoint, provider deletion hook | no | user-scoped | idempotent | retry | conversation deleted; `ai_prompt_context` gets the shortest retention in the system | `EXTERNAL_PROVIDER_REVIEW_REQUIRED` |
 | **11B7** | Operational / audit retention | `freshness_outbox*`, `integrity_check`, admission (already done) | possibly | scheduled worker | age-based | next run | de-identification checklist passes in full | windows `LEGAL_REVIEW_REQUIRED` |
@@ -1253,7 +1258,7 @@ concern.
 | Surface | Live user data | Derived | Direct id | Financial | Document | Retention in repo | Deletion exists |
 |---|---|---|---|---|---|---|---|
 | PostgreSQL (`backend/`) | yes | yes | yes (3 tables) | yes | metadata | partial | no (PD-7) |
-| Object storage | yes | — | in the key (PD-2) | — | **yes** | no | **no method** (PD-8) |
+| Object storage | yes | — | ~~in the key (PD-2)~~ opaque since 11B4 | — | **yes** | no | ~~**no method** (PD-8)~~ `delete`, per document |
 | Netlify Blobs (`server/`) | **yes** | yes | **yes** | — | yes | no | `deleteDocument` only |
 | Local `server/data/db.json` | dev only | — | yes | — | yes | n/a | n/a — gitignored |
 | Celery broker (Redis) | identifiers | — | no | no | no | broker-controlled | n/a |
@@ -1472,4 +1477,54 @@ itself is not implemented and is not claimed.**
 
 **Still open after 11B3:** PD-2, PD-3, PD-7, PD-8, PD-14, PD-15; the
 cancellation policy (`POLICY_DECISION_REQUIRED`); the grace period
+(`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.
+
+## 35. What Entry 11B4 changed in the running system (PD-2 + PD-8)
+
+Full detail in [`pd2-pd8-document-lifecycle.md`](./pd2-pd8-document-lifecycle.md).
+
+**PD-2 and PD-8 are closed.** A user-owned document can now be deleted through a
+governed service, the binary is actually removed, and no new object key contains
+anything the user supplied.
+
+**The remedy this specification predicted for PD-2 was wrong in both halves.**
+§17 called for "a column plus an opaque key, which is an Entry 11B migration."
+No column was added — the right answer to a filename that should not be in the
+key is to stop storing it, not to relocate it — and no migration was needed,
+because the key is generated in the application. Zero schema change.
+
+**The tombstone was already in the schema and nothing had ever written it.**
+This specification described `deleted_at` as an affordance "read by every query
+path, written by none". Entry 11B4 is the first thing to write it, and the
+reasons it is a tombstone rather than a row deletion are this document's own:
+hard-deleting would cascade the provenance edge away and discard the content
+hash.
+
+**A race test found a real defect before any code was written to prevent it.**
+Processing and deletion were unordered, and the first run of the §25 test caught
+a document reporting deleted while holding the extracted contents of the binary
+that had been removed. Fixed with a transaction-scoped advisory lock keyed on
+the document — the same shape Entry 11B2 used for the deletion cutoff.
+
+**The orphan sweep in the roadmap is not built.** The crash window between the
+object deletion and the database work is *reported* by
+`scripts/document_storage_audit.py`, not prevented. Closing it needs a durable
+job or a bucket listing, and the port has neither. Stated rather than implied.
+
+**Object versioning and legacy keys remain environment questions.** No commit in
+this repository's history has ever wired a persistent object store — the S3
+adapter is a commented sketch and `get_object_storage()` returns the in-memory
+one unconditionally — so no bucket object with a filename-bearing key was ever
+created by this code. That is a statement about the repository and not a
+guarantee about any environment: versioning stays `DEPLOYMENT_REVIEW_REQUIRED`
+(PD-10) and legacy keys stay `OPERATIONAL_REVIEW_REQUIRED`, with a counting
+script as the instrument for deciding.
+
+**PD-2 and PD-8 do not apply to `server/`** — it has no object storage at all —
+but it persists the original filename *and* the full document text in the user
+record, and deleting a document there leaves the derived audit intact. Recorded
+against **PD-14**, not fixed here.
+
+**Still open after 11B4:** PD-3, PD-7, PD-10, PD-14, PD-15; the cancellation
+policy (`POLICY_DECISION_REQUIRED`); the grace period
 (`PRIVACY_COUNSEL_REVIEW_REQUIRED`); every retention window in §24.
