@@ -345,6 +345,20 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "`ip_address` remain in the clear, so severing user_id alone does "
              "NOT de-identify it. See specification §25 and defect PD-3."),
 
+    _e("identity.account_lifecycle_phase",
+       (P.ACCOUNT_IDENTITY, P.AUDIT_SECURITY_RECORD, P.PSEUDONYMOUS_IDENTIFIER),
+       S.AUDIT, R.BOUNDED_AUDIT, D.RETAIN, rls=True, exportable=True,
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.RETAINED_BY_POLICY,
+       notes="Entry 11B5. Durable per-phase progress for one account "
+             "deletion: which phase is pending, running, complete or owed a "
+             "retry. RETAIN for the same reason as the lifecycle row itself — "
+             "it IS part of the deletion record, and a worker that crashed "
+             "mid-purge needs it to know which half it had done. Carries a "
+             "phase name, a status, an attempt count and a closed failure "
+             "code; no financial value, no email, no exception text. Its "
+             "foreign key points at `account_lifecycle`, NOT at "
+             "`user_account`, so a purge that ends by removing the account "
+             "does not destroy the record of the phases still owed (PD-9)."),
     _e("identity.account_lifecycle",
        (P.ACCOUNT_IDENTITY, P.AUDIT_SECURITY_RECORD, P.PSEUDONYMOUS_IDENTIFIER),
        S.AUDIT, R.BOUNDED_AUDIT, D.RETAIN, rls=True, exportable=True,

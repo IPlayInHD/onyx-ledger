@@ -100,6 +100,7 @@ from app.database.models.ioe import (  # noqa: F401
 from app.database.models.lifecycle import (  # noqa: F401
     AccountLifecycle,
     AccountLifecycleEvent,
+    AccountLifecyclePhase,
 )
 from app.database.models.profile import (  # noqa: F401
     Dependent,

@@ -104,3 +104,47 @@ class AccountLifecycleEvent(Base):
 
 
 __all__ = ["AccountLifecycle", "AccountLifecycleEvent"]
+
+
+class AccountLifecyclePhase(Base):
+    """Durable per-phase progress for one account deletion (Entry 11B5).
+
+    `account_lifecycle.state` is one scalar, and privacy deletion is several
+    phases. A worker that crashed between purging expenses and purging income
+    would restart unable to say which half it had done — and the two honest
+    options without this table are to redo everything or to guess.
+
+    The account stays in `PURGING`; a row here says which phase is pending,
+    running, complete or owed a retry.
+    """
+
+    __tablename__ = "account_lifecycle_phase"
+    __table_args__ = {
+        "schema": "identity",
+        "comment": (
+            "Durable per-phase progress for one account deletion. The account "
+            "stays in PURGING; this says which phase is pending, running, done "
+            "or owed a retry."
+        ),
+    }
+
+    #: Subject of the deletion. The foreign key points at `account_lifecycle`,
+    #: NOT at `identity.user_account` — PD-9. A purge phase ends by removing the
+    #: account row and the phases after it still have work to do.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True)
+    phase: Mapped[str] = mapped_column(Text, primary_key=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="PENDING")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_failure_code: Mapped[str | None] = mapped_column(
+        Text,
+        comment=(
+            "Closed failure code, never an exception message — the same rule "
+            "the lifecycle row itself follows."
+        ),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = created_at_col()
+    updated_at: Mapped[datetime] = updated_at_col()
