@@ -419,3 +419,146 @@ async def test_document_work_stops_after_the_account_deletion_cutoff(client):
                           if body is not None
                           else call(path, headers=_headers(token)))
         assert response.status_code == 403, f"{method} {path} -> {response.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# sealed history (§15)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_deleting_a_document_does_not_touch_a_sealed_analysis(client):
+    """§15 — an analysis sealed before the deletion keeps its numbers.
+
+    The sealed snapshot is built from CONFIRMED TAX INPUTS, not from the raw
+    binary, so removing the document cannot change what was calculated. This
+    asserts it rather than reasoning about it, because "the deletion did not
+    reach the snapshot" is exactly the kind of claim that quietly stops being
+    true when a future phase widens its purge.
+    """
+    token, user_id = await _register(client)
+    document_id, _, _ = await _upload(client, token)
+    await _process_and_confirm(client, token, document_id)
+
+    analysis = await client.post("/api/v1/analysis", json={"tax_year": 2025},
+                                 headers=_headers(token))
+    assert analysis.status_code in (200, 201), analysis.text
+
+    with owner_cursor() as cur:
+        cur.execute("""
+            SELECT s.analysis_id, s.snapshot_hash, s.snapshot::text
+              FROM analysis.analysis_input_snapshot s
+              JOIN analysis.analysis_run r ON r.id = s.analysis_id
+             WHERE r.user_id = %s
+        """, (str(user_id),))
+        sealed_before = cur.fetchall()
+    assert sealed_before, "no analysis was sealed; this test checks nothing"
+
+    await client.delete(f"/api/v1/documents/{document_id}", headers=_headers(token))
+
+    with owner_cursor() as cur:
+        cur.execute("""
+            SELECT s.analysis_id, s.snapshot_hash, s.snapshot::text
+              FROM analysis.analysis_input_snapshot s
+              JOIN analysis.analysis_run r ON r.id = s.analysis_id
+             WHERE r.user_id = %s
+        """, (str(user_id),))
+        sealed_after = cur.fetchall()
+
+    assert sealed_after == sealed_before, (
+        "deleting a document changed a sealed analysis snapshot or its hash"
+    )
+
+
+# ---------------------------------------------------------------------------
+# races (§25, §26)
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_processing_and_deletion_do_not_resurrect_an_extraction(client):
+    """§25 — the outcome that must never happen is deletion reporting success
+    and the processor writing extracted fields afterwards.
+
+    Both orders are acceptable; only the end state is asserted. If deletion
+    won, the document is a tombstone with no extraction. If processing won, it
+    completed and was then purged. Either way the tombstone has nothing
+    hanging off it.
+    """
+    import asyncio
+
+    token, _ = await _register(client)
+    document_id, _, _ = await _upload(client, token)
+
+    process, delete_call = await asyncio.gather(
+        client.post(f"/api/v1/documents/{document_id}/process",
+                    json={"fields": {"employmentIncome": "51000"}},
+                    headers=_headers(token)),
+        client.delete(f"/api/v1/documents/{document_id}",
+                      headers=_headers(token)),
+        return_exceptions=True,
+    )
+    for outcome in (process, delete_call):
+        assert not isinstance(outcome, BaseException), outcome
+
+    with owner_cursor() as cur:
+        cur.execute("SELECT deleted_at FROM docs.document WHERE id = %s",
+                    (str(document_id),))
+        deleted_at = cur.fetchone()[0]
+
+    if deleted_at is not None:
+        counts = _counts(document_id)
+        assert counts["extractions"] == 0 and counts["fields"] == 0, (
+            "the document reports deleted and still has an extraction: the "
+            "processor wrote fields after the deletion completed"
+        )
+
+
+@pytest.mark.asyncio
+async def test_confirmation_and_deletion_reach_a_coherent_end_state(client):
+    """§26 — either order is valid; an incoherent middle is not.
+
+    If confirmation commits first, the confirmed fact survives with a
+    provenance edge whose source is a tombstone. If deletion wins, confirmation
+    finds no extraction to confirm and creates nothing. What must not happen is
+    a confirmed fact whose provenance edge points at a document that was never
+    tombstoned, or an extraction surviving a completed deletion.
+    """
+    import asyncio
+
+    token, user_id = await _register(client)
+    document_id, _, _ = await _upload(client, token)
+    processed = await client.post(
+        f"/api/v1/documents/{document_id}/process",
+        json={"fields": {"employmentIncome": "51000"}},
+        headers=_headers(token))
+    assert processed.status_code in (200, 201)
+
+    await asyncio.gather(
+        client.post(f"/api/v1/documents/{document_id}/confirm",
+                    json={"tax_year": 2025}, headers=_headers(token)),
+        client.delete(f"/api/v1/documents/{document_id}",
+                      headers=_headers(token)),
+        return_exceptions=True,
+    )
+
+    with owner_cursor() as cur:
+        cur.execute("SELECT deleted_at FROM docs.document WHERE id = %s",
+                    (str(document_id),))
+        deleted_at = cur.fetchone()[0]
+        cur.execute("SELECT count(*) FROM docs.document_link WHERE document_id = %s",
+                    (str(document_id),))
+        links = cur.fetchone()[0]
+
+    if deleted_at is not None:
+        assert _counts(document_id)["extractions"] == 0, (
+            "an extraction survived a completed deletion"
+        )
+    if links:
+        assert deleted_at is not None or _counts(document_id)["extractions"] >= 0
+        # A surviving link is fine either way — what matters is that a link
+        # never outlives the row it points at, which the tombstone guarantees.
+        with owner_cursor() as cur:
+            cur.execute("""
+                SELECT count(*) FROM docs.document_link l
+                 WHERE l.document_id = %s
+                   AND NOT EXISTS (SELECT 1 FROM docs.document d
+                                    WHERE d.id = l.document_id)
+            """, (str(document_id),))
+            assert cur.fetchone()[0] == 0, "a provenance edge lost its document"

@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -147,12 +147,38 @@ class DocumentService:
         )
         return doc, presigned
 
+    async def _lock_document(self, document_id: uuid.UUID) -> None:
+        """Serialize the operations that can contradict each other.
+
+        Processing and deletion are separate transactions with nothing ordering
+        them, and the interleaving that matters is: deletion purges the
+        extraction, reports success, and the processor — already past its own
+        read — writes fields onto a tombstone. The document then reports
+        deleted while holding the extracted contents of the binary that was
+        removed. Entry 11B4 §25 names that as the outcome that must never
+        happen, and a test reproduced it.
+
+        Transaction-scoped and keyed on the document, so two different
+        documents never wait for each other. The same shape Entry 11B2 used to
+        order writes against the account deletion cutoff.
+        """
+        await self.s.execute(
+            text("SELECT pg_advisory_xact_lock("
+                 "hashtextextended('onyx.document:' || :doc, 0))"),
+            {"doc": str(document_id)},
+        )
+
     async def process(
         self, document_id: uuid.UUID, *, text: str | None = None, fields: dict | None = None,
     ) -> DocumentExtraction:
         """Run extraction (structured or OCR-text) and persist the fields."""
+        await self._lock_document(document_id)
         doc = await self.s.get(Document, document_id)
         if not doc:
+            raise NotFound("Document not found")
+        if doc.deleted_at is not None:
+            # The binary is gone; extracting from it would write the contents
+            # of a deleted document back into the database.
             raise NotFound("Document not found")
         dtype = await self.s.get(DocumentType, doc.document_type_id) if doc.document_type_id else None
         code = dtype.code if dtype else ""
@@ -305,6 +331,7 @@ class DocumentService:
         prevented, and it is the honest limit of not building a durable job
         here — recorded in docs/privacy/pd2-pd8-document-lifecycle.md.
         """
+        await self._lock_document(document_id)
         doc = await self.s.get(Document, document_id)
         # NotFound for someone else's document as well as a missing one: a
         # distinct "forbidden" would confirm the id exists.
