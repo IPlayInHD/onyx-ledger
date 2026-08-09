@@ -283,6 +283,22 @@ def main() -> int:
     for d in differences:
         if d.kind in NEVER_GOVERNED or d.key not in policy:
             unexpected.append(d)
+        elif policy[d.key].get("detail", "") != d.detail:
+            # THE DETAIL IS PART OF THE MATCH, not decoration.
+            #
+            # `TYPE_AFFINITY` has always claimed that "the recorded type pair is
+            # part of this entry's identity, so a change to a DIFFERENT type is
+            # not covered by it". It was not: `key` is kind|schema|table|object,
+            # the type pair lived only in `detail`, and `detail` was never
+            # compared. Proven by injection — a column governed as
+            # `TIMESTAMP->DateTime` was silently re-typed to `String` and the
+            # gate reported zero unexpected drift.
+            #
+            # Entry 11B5 found this because two finance `deleted_at` columns
+            # were governed as `TIMESTAMP->Date`, which is not an affinity
+            # difference at all: it silently truncated the time of day off every
+            # deletion stamp this entry was about to start writing.
+            unexpected.append(d)
         else:
             governed.append(d)
 

@@ -2449,16 +2449,6 @@
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },
     {
-      "key": "modify_type|finance|expense_record|deleted_at",
-      "kind": "modify_type",
-      "schema": "finance",
-      "table": "expense_record",
-      "object": "deleted_at",
-      "detail": "TIMESTAMP->Date",
-      "class": "TYPE_AFFINITY",
-      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
-    },
-    {
       "key": "modify_type|finance|expense_record|tax_year",
       "kind": "modify_type",
       "schema": "finance",
@@ -2495,16 +2485,6 @@
       "table": "income_source",
       "object": "currency_code",
       "detail": "TEXT->String",
-      "class": "TYPE_AFFINITY",
-      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
-    },
-    {
-      "key": "modify_type|finance|income_source|deleted_at",
-      "kind": "modify_type",
-      "schema": "finance",
-      "table": "income_source",
-      "object": "deleted_at",
-      "detail": "TIMESTAMP->Date",
       "class": "TYPE_AFFINITY",
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },

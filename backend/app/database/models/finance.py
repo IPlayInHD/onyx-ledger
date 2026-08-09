@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text, text
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,7 +37,14 @@ class IncomeSource(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
-    deleted_at: Mapped[datetime | None] = mapped_column(Date)
+    # `Date` here silently truncated the time of day: the column is
+    # timestamptz, and writing 14:37:42Z stored 00:00:00Z. Nothing had ever
+    # written it, so nothing had noticed. Entry 11B5 is what starts writing
+    # it, and a deletion stamp that rounds to midnight orders WRONGLY
+    # against identity.account_lifecycle.requested_at — a row deleted at
+    # 14:37 would appear to predate a deletion requested at 09:00 the same
+    # day, which is exactly the comparison the purge cutoff makes.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ExpenseRecord(Base):
@@ -64,4 +71,11 @@ class ExpenseRecord(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
-    deleted_at: Mapped[datetime | None] = mapped_column(Date)
+    # `Date` here silently truncated the time of day: the column is
+    # timestamptz, and writing 14:37:42Z stored 00:00:00Z. Nothing had ever
+    # written it, so nothing had noticed. Entry 11B5 is what starts writing
+    # it, and a deletion stamp that rounds to midnight orders WRONGLY
+    # against identity.account_lifecycle.requested_at — a row deleted at
+    # 14:37 would appear to predate a deletion requested at 09:00 the same
+    # day, which is exactly the comparison the purge cutoff makes.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

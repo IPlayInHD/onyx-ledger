@@ -75,6 +75,24 @@ prove "changed type" \
   "ALTER TABLE ioe.scenario ALTER COLUMN label TYPE text;" \
   "modify_type"
 
+# A type change on a column that IS governed, to a DIFFERENT pair.
+#
+# The case above covers an ungoverned column, which is the easy half. This is
+# the half TYPE_AFFINITY actually claims: "the recorded type pair is part of
+# this entry's identity, so a change to a DIFFERENT type is not covered by it".
+# It was not true. `key` is kind|schema|table|object and the pair lived only in
+# `detail`, which was never compared — so a policy entry blessed every future
+# type change on its column. Entry 11B5 proved it by re-typing a governed
+# `deleted_at` to `String` and watching the gate report zero drift.
+#
+# `ai.ai_conversation.deleted_at` is governed as TIMESTAMP->DateTime. Making it
+# a DATE keeps the key and changes the pair, which is exactly the case that used
+# to slip through.
+prove "changed type on a GOVERNED column" \
+  "ALTER TABLE ai.ai_conversation ALTER COLUMN deleted_at TYPE date;" \
+  "ALTER TABLE ai.ai_conversation ALTER COLUMN deleted_at TYPE timestamptz;" \
+  "modify_type"
+
 # Nullability is not globally suppressed: relaxing NOT NULL is caught.
 prove "unexpected nullable change" \
   "ALTER TABLE ioe.scenario ALTER COLUMN workflow_status DROP NOT NULL;" \
