@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import DomainError, NotFound, ValidationError
+from app.database.base import uuid7
 from app.database.models import (
     Document,
     DocumentExtraction,
@@ -118,12 +119,22 @@ class DocumentService:
         if not dtype:
             raise ValidationError(f"Unknown document type '{doc_type_code}'")
         bucket = self.settings.s3_bucket_documents
+        # The id is assigned HERE rather than read back from the server default.
+        #
+        # The key is derived from the document's own id, so the id has to exist
+        # before the key can be computed — and letting the database supply it
+        # means INSERT, then UPDATE the key: a second round trip on every upload
+        # forever, to fix a defect about what the key CONTAINS. Measured at
+        # +1 statement and +0.66 ms p50 (scripts/probe_document_lifecycle_cost.py).
+        #
+        # `uuid7()` produces the same value shape as `ref.uuid_generate_v7()` —
+        # byte for byte, per its docstring — so a row written this way is
+        # indistinguishable from one written by the default and sorts with it.
+        # The column keeps its server default for every other writer.
         doc = Document(
-            user_id=user_id, document_type_id=dtype.id, tax_year=tax_year,
+            id=uuid7(), user_id=user_id, document_type_id=dtype.id, tax_year=tax_year,
             bucket=bucket, object_key="", mime_type=mime_type, status="uploaded",
         )
-        self.s.add(doc)
-        await self.s.flush()
         # PD-2: the key USED to be f"{user_id}/{uuid4()}/{filename}".
         #
         # A filename is user free text and routinely contains a person's name,
@@ -140,6 +151,7 @@ class DocumentService:
         # internal UUID rather than a name, and it makes account-level purge of
         # object storage a single prefix operation instead of a row-by-row walk.
         doc.object_key = _opaque_object_key(user_id, doc.id)
+        self.s.add(doc)
         await self.s.flush()
         presigned = self.storage.presign_put(
             bucket, doc.object_key, mime_type or "application/octet-stream",
