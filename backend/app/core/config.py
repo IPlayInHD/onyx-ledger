@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     #: to `onyx_app_rw` on any host where the operator forgot to set it, and it
     #: would do so invisibly. Absent means the privacy worker refuses to run.
     privacy_database_url: str | None = None
+    #: The PRIVILEGED freshness-relay connection. Same contract and same reason
+    #: as `privacy_database_url`: PD-16 is precisely this capability being
+    #: reachable from the application identity.
+    freshness_database_url: str | None = None
     db_pool_size: int = 10
     db_max_overflow: int = 20
 

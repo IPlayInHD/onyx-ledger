@@ -596,3 +596,15 @@ def test_authorization_is_decided_from_rule_data_alone():
         requested_horizon=10,
     )
     assert decision.horizon_years == 3
+
+@pytest.fixture(autouse=True)
+async def _dispose_worker_engines():
+    """The relay now authenticates its privileged calls through a SECOND
+    engine. Leaving it undisposed strands pooled connections on a dead event
+    loop, and the next test fails on the loop rather than on anything it
+    asserted — the defect Entry 11B5E5 hit, arriving through the engine PD-16's
+    fix introduces. Generalized so a third runtime cannot be forgotten."""
+    yield
+    from app.database.privacy_session import dispose_worker_engines
+
+    await dispose_worker_engines()

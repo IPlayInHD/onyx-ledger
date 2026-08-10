@@ -33,15 +33,22 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_privacy_test') THEN
     CREATE ROLE onyx_privacy_test LOGIN PASSWORD 'test' IN ROLE onyx_privacy_worker;
   END IF;
+  -- Same architecture for the freshness relay: its privileged calls must not
+  -- run as the role that serves HTTP. That is PD-16.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_freshness_test') THEN
+    CREATE ROLE onyx_freshness_test LOGIN PASSWORD 'test' IN ROLE onyx_freshness_worker;
+  END IF;
 END
 $$;
 GRANT onyx_app_rw TO onyx_test;
 GRANT onyx_privacy_worker TO onyx_privacy_test;
+GRANT onyx_freshness_worker TO onyx_freshness_test;
 SQL
 
 export ONYX_DATABASE_URL="postgresql+asyncpg://onyx_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
 # The privileged worker connects as its OWN login, modelling production.
 export ONYX_PRIVACY_DATABASE_URL="postgresql+asyncpg://onyx_privacy_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
+export ONYX_FRESHNESS_DATABASE_URL="postgresql+asyncpg://onyx_freshness_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
 export ONYX_JWT_SECRET="test-secret-at-least-32-bytes-long-000"
 
 # Arguments REPLACE the default target rather than adding to it. `tests/ $@`

@@ -38,6 +38,9 @@ async def _dispose_engine():
     from app.database.session import engine
 
     await engine.dispose()
+    from app.database.privacy_session import dispose_worker_engines
+
+    await dispose_worker_engines()
 
 
 async def _pending_event(tax_year: int = 2025) -> uuid.UUID:

@@ -37,6 +37,7 @@ from sqlalchemy import CursorResult, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.database.privacy_session import freshness_unit_of_work
 from app.database.session import unit_of_work
 from app.services.ioe.domain.scenario import FreshnessStatus, StaleReason
 
@@ -114,8 +115,11 @@ class FreshnessRelay:
         report = RelayReport()
 
         # The claim runs in its own short transaction so a slow tenant apply
-        # does not hold the queue.
-        async with unit_of_work(actor_type="system") as session:
+        # does not hold the queue — and under the DEDICATED freshness runtime,
+        # not the role that serves HTTP. That separation is PD-16's fix: the
+        # capability to move queue rows across tenants must not be reachable
+        # from the application identity.
+        async with freshness_unit_of_work() as session:
             events = await self.claim(session, batch_size=batch_size)
         report.claimed = len(events)
 
@@ -225,7 +229,9 @@ class FreshnessRelay:
 
     # -- fan-out and step 6 ---------------------------------------------------
     async def _fan_out(self, event: ClaimedEvent) -> int:
-        async with unit_of_work(actor_type="system") as session:
+        # Privileged, like claim and acknowledge: it moves queue rows the
+        # calling tenant does not own.
+        async with freshness_unit_of_work() as session:
             count = await session.scalar(
                 text("SELECT ioe.fan_out_freshness_event(:id, :worker)"),
                 {"id": event.event_id, "worker": self.worker_id},
@@ -234,7 +240,7 @@ class FreshnessRelay:
 
     async def _acknowledge(self, event: ClaimedEvent, error_code: str | None) -> bool:
         """Step 6. Idempotent: a redelivered acknowledgement is a no-op."""
-        async with unit_of_work(actor_type="system") as session:
+        async with freshness_unit_of_work() as session:
             if error_code is None:
                 ok = await session.scalar(
                     text("SELECT ioe.complete_freshness_event(:id, :worker)"),

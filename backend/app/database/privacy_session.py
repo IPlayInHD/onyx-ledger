@@ -28,11 +28,15 @@ from sqlalchemy.ext.asyncio import (
 from app.core.config import get_settings
 from app.core.exceptions import DomainError
 
-_engine: AsyncEngine | None = None
-_factory: async_sessionmaker[AsyncSession] | None = None
+#: One engine per privileged runtime, keyed by name. A REGISTRY rather than a
+#: global per runtime, because Entry 11B5E5 proved what a forgotten engine
+#: costs: pooled connections outlive their event loop and an unrelated test
+#: fails later in the suite. `dispose_worker_engines()` cannot miss one.
+_engines: dict[str, AsyncEngine] = {}
+_factories: dict[str, async_sessionmaker[AsyncSession]] = {}
 
 
-class PrivacyRuntimeUnavailable(DomainError):
+class WorkerRuntimeUnavailable(DomainError):
     """The privileged connection is not configured.
 
     A closed code and no detail: the message travels into logs and task failure
@@ -44,19 +48,23 @@ class PrivacyRuntimeUnavailable(DomainError):
     error_type = "https://onyx.ledger/errors/privacy-runtime-unavailable"
     title = "Privacy Runtime Unavailable"
 
-    def __init__(self) -> None:
-        super().__init__("privacy worker database runtime is not configured")
+    def __init__(self, runtime: str = "privacy") -> None:
+        # The runtime NAME, never the DSN. A connection string carries a host,
+        # a database and a role name, and this reaches logs and failure records.
+        self.runtime = runtime
+        super().__init__(f"{runtime} worker database runtime is not configured")
 
 
-def get_privacy_engine() -> AsyncEngine:
-    """Build (once) the engine the privileged worker authenticates through."""
-    global _engine, _factory
+def get_worker_engine(runtime: str) -> AsyncEngine:
+    """Build (once) the engine a privileged runtime authenticates through."""
     settings = get_settings()
-    if not settings.privacy_database_url:
-        raise PrivacyRuntimeUnavailable()
-    if _engine is None:
-        _engine = create_async_engine(
-            settings.privacy_database_url,
+    dsn = {"privacy": settings.privacy_database_url,
+           "freshness": settings.freshness_database_url}[runtime]
+    if not dsn:
+        raise WorkerRuntimeUnavailable(runtime)
+    if runtime not in _engines:
+        _engines[runtime] = create_async_engine(
+            dsn,
             # A small pool on purpose. This is one background worker draining a
             # queue, not a request tier; sizing it like the API would hold
             # privileged connections open for no reason.
@@ -65,9 +73,9 @@ def get_privacy_engine() -> AsyncEngine:
             pool_pre_ping=True,
             future=True,
         )
-        _factory = async_sessionmaker(
-            _engine, expire_on_commit=False, class_=AsyncSession)
-    return _engine
+        _factories[runtime] = async_sessionmaker(
+            _engines[runtime], expire_on_commit=False, class_=AsyncSession)
+    return _engines[runtime]
 
 
 @contextlib.asynccontextmanager
@@ -79,9 +87,8 @@ async def privacy_unit_of_work() -> AsyncIterator[AsyncSession]:
     tenant context themselves for exactly one subject. A worker that set the
     GUC here would be asserting an authorization it does not have.
     """
-    get_privacy_engine()
-    assert _factory is not None
-    session = _factory()
+    get_worker_engine("privacy")
+    session = _factories["privacy"]()
     try:
         yield session
         await session.commit()
@@ -92,8 +99,44 @@ async def privacy_unit_of_work() -> AsyncIterator[AsyncSession]:
         await session.close()
 
 
+@contextlib.asynccontextmanager
+async def freshness_unit_of_work() -> AsyncIterator[AsyncSession]:
+    """A unit of work authenticated as the dedicated freshness runtime.
+
+    ONLY for the privileged keyholes — claim, complete, fail, fan-out. APPLYING
+    an event to a tenant's rows deliberately keeps the ordinary application
+    engine under that tenant's own `app.user_id`: that step is not privileged
+    and must not become so just because its neighbours are. Converting the
+    whole relay would be the same mistake PD-16 is, one layer up.
+    """
+    get_worker_engine("freshness")
+    session = _factories["freshness"]()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+
+
+async def dispose_worker_engines() -> None:
+    """Dispose every privileged runtime engine. One call, none forgotten."""
+    for engine in list(_engines.values()):
+        await engine.dispose()
+    _engines.clear()
+    _factories.clear()
+
+
 async def dispose_privacy_engine() -> None:
-    global _engine, _factory
-    if _engine is not None:
-        await _engine.dispose()
-        _engine, _factory = None, None
+    """Retained for call sites written before the registry existed."""
+    await dispose_worker_engines()
+
+
+#: Retained alias for the same reason.
+PrivacyRuntimeUnavailable = WorkerRuntimeUnavailable
+
+
+def get_privacy_engine() -> AsyncEngine:
+    return get_worker_engine("privacy")
