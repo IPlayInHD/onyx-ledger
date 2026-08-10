@@ -5,7 +5,7 @@ be called repeatedly in one process. This file certifies the MECHANISM those
 tasks now depend on, because a helper that six production entry points route
 through is a single point of failure and deserves to be pinned directly.
 
-Three things have to hold, and only the first is obvious:
+Five things have to hold, and only the first is obvious:
 
   1. a body that succeeds returns its value to the caller unchanged;
   2. a body that RAISES still gets its engines disposed — otherwise a failing
@@ -14,7 +14,12 @@ Three things have to hold, and only the first is obvious:
   3. the exception the body raised is the exception the caller sees — same
      object, not wrapped, not replaced by whatever disposal might raise on the
      way out. A `finally` that swallowed the error would turn a purge failure
-     into a silent success, and `acks_late` would then ack the message.
+     into a silent success, and `acks_late` would then ack the message;
+  4. when DISPOSAL ITSELF fails, the task does not report success, and if the
+     body failed too the body's failure stays primary while the cleanup
+     failure is still recorded;
+  5. nothing recorded about a cleanup failure carries its message. A disposal
+     error comes from the driver, and the driver knows the connection string.
 
 Disposal is proved twice over: once by observing the real engine's pool object
 being replaced (`Engine.dispose()` swaps the pool), and once by a spy, so the
@@ -30,6 +35,45 @@ from workers.runtime import run_task
 
 class _TaskBodyExploded(RuntimeError):
     """Distinctive type — a generic RuntimeError could come from the loop."""
+
+
+@pytest.fixture(autouse=True)
+def _force_release_engines():
+    """Undo what the cleanup-failure tests deliberately break.
+
+    Several tests below stop disposal from running, which is exactly the state
+    the whole entry is about: the application engine keeps a connection bound
+    to a loop that `asyncio.run` has since closed, and the NEXT test to touch
+    it fails inside `asyncpg` rather than in its own assertions. That happened
+    on the first run of this file and is the sharpest evidence there is that a
+    failed disposal leaves a poisoned process — but it belongs in an assertion,
+    not in an unrelated test's traceback.
+
+    Reaches for `engine.dispose` and `dispose_worker_engines` directly rather
+    than `dispose_all_engines`, because that name is the one the tests replace.
+    """
+    yield
+
+    import asyncio
+    import contextlib
+
+    from app.database import privacy_session
+    from app.database.session import engine
+
+    async def _release() -> None:
+        # `close=False`: the pool may hold connections belonging to a loop that
+        # has already closed, and asking to close those gracefully is what
+        # raises "attached to a different loop" — the very state being cleaned
+        # up. Dropping the pool without touching them is the documented way out.
+        with contextlib.suppress(Exception):
+            await engine.dispose(close=False)
+        for name in list(privacy_session._engines):
+            worker_engine = privacy_session._engines.pop(name)
+            privacy_session._factories.pop(name, None)
+            with contextlib.suppress(Exception):
+                await worker_engine.dispose(close=False)
+
+    asyncio.run(_release())
 
 
 def _app_pool_id() -> int:
@@ -149,6 +193,158 @@ def test_disposal_runs_on_both_paths_and_before_the_loop_closes(monkeypatch):
         run_task(_fail)
     assert len(calls) == 2, (
         f"failure path did not dispose — total disposals {len(calls)}, expected 2")
+
+
+# ---------------------------------------------------------------------------
+# When the cleanup itself fails
+# ---------------------------------------------------------------------------
+# Disposal closes sockets, so it can fail on its own — and then the helper has
+# to choose which failure the caller is told about. Measured behaviour of the
+# plain `try/finally` this started as:
+#
+#   body succeeded, disposal raised    disposal error propagates    (correct)
+#   body raised, disposal raised       DISPOSAL error propagates,
+#                                      the body's error demoted to
+#                                      `__context__`               (wrong)
+#
+# The second row is the one these tests pin. A caller writing
+# `except SourceDataPurge...` stops matching when an unrelated socket close
+# loses a race, and Celery records the wrong reason for the retry.
+
+
+class _DisposalExploded(RuntimeError):
+    """Synthetic, and deliberately carrying no DSN or credential material —
+    the point of the message is that it must NOT reach a log."""
+
+
+def _break_disposal(monkeypatch) -> None:
+    from app.database import privacy_session
+
+    async def _fail() -> None:
+        raise _DisposalExploded(
+            "synthetic disposal failure with no connection string in it")
+
+    monkeypatch.setattr(privacy_session, "dispose_all_engines", _fail)
+
+
+def test_a_task_whose_cleanup_fails_does_not_report_success(monkeypatch):
+    """A successful body plus a failed disposal is NOT a successful task.
+
+    Returning normally here would ack the message and leave the next
+    invocation in this process holding whatever the failed disposal left
+    behind — the original defect, reached by a different route.
+    """
+    _break_disposal(monkeypatch)
+
+    with pytest.raises(_DisposalExploded):
+        run_task(_touch_every_engine)
+
+
+def test_the_body_s_failure_stays_primary_when_disposal_also_fails(monkeypatch):
+    """Which of the two failures is the task's outcome.
+
+    The body's exception answers "did the work happen"; the disposal exception
+    says the pool is untidy. The first is the one a caller catches on and the
+    one Celery records, so it stays primary — and the second is still carried,
+    because a disposal that fails every run is its own defect.
+    """
+    original = _TaskBodyExploded("ORIGINAL_ERROR: the purge did not finish")
+
+    async def _fail() -> str:
+        raise original
+
+    _break_disposal(monkeypatch)
+
+    with pytest.raises(_TaskBodyExploded) as caught:
+        run_task(_fail)
+
+    assert caught.value is original, (
+        f"a failed disposal replaced the task's own failure: {caught.value!r}")
+    notes = getattr(caught.value, "__notes__", [])
+    assert any("_DisposalExploded" in note for note in notes), (
+        f"the cleanup failure vanished without evidence; notes = {notes}")
+
+
+def test_a_failed_disposal_is_not_reported_as_a_clean_runtime(monkeypatch):
+    """`cleanup attempted` is not `cleanup completed`, and the difference is
+    observable rather than rhetorical.
+
+    `dispose_worker_engines` stops at the first engine that raises and never
+    reaches `_engines.clear()`, so after a failed disposal engines really are
+    still registered and their pooled connections really are still open. The
+    first run of this file proved it the hard way: the test that followed one
+    of these was handed the dead-loop connection and failed inside `asyncpg`.
+
+    So both halves are checked — what the process looks like afterwards, and
+    that the note says only what the process can back up.
+    """
+    original = _TaskBodyExploded("ORIGINAL_ERROR")
+    live_before: set[str] = set()
+
+    async def _use_the_engines_then_fail() -> str:
+        await _touch_every_engine()
+        live_before.update(_worker_runtimes())
+        raise original
+
+    _break_disposal(monkeypatch)
+    app_pool = _app_pool_id()
+
+    with pytest.raises(_TaskBodyExploded) as caught:
+        run_task(_use_the_engines_then_fail)
+
+    assert live_before, "the body did not open any privileged engine"
+    assert _worker_runtimes() == live_before, (
+        "the registry was emptied even though disposal failed — the note below "
+        f"would then be understating: {sorted(_worker_runtimes())}")
+    assert _app_pool_id() == app_pool, (
+        "the application pool was replaced even though disposal failed")
+
+    note = " ".join(getattr(caught.value, "__notes__", []))
+    assert "ATTEMPTED, not completed" in note, (
+        f"the note claims more than the runtime can guarantee: {note!r}")
+    for claim in ("successfully", "cleanup completed", "engines released",
+                  "runtime clean"):
+        assert claim not in note.lower(), (
+            f"the note asserts a clean runtime the process cannot back up "
+            f"({claim!r}): {note!r}")
+
+
+def test_the_cleanup_failure_is_recorded_without_its_message(monkeypatch):
+    """Entry 11A, applied to the one exception most likely to hold a DSN.
+
+    A disposal failure comes from the driver, and asyncpg's messages carry the
+    host, database and role it was connecting as. Only the class name and a
+    closed reason code may be recorded — no message, and no `exc_info`, which
+    would render the whole traceback through structlog's formatter.
+    """
+    import workers.runtime as runtime
+
+    events: list[tuple[str, dict[str, object]]] = []
+
+    class _Recorder:
+        def error(self, event: str, **fields: object) -> None:
+            events.append((event, fields))
+
+        def __getattr__(self, _name: str):        # info/warning, unused here
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(runtime, "log", _Recorder())
+    _break_disposal(monkeypatch)
+
+    with pytest.raises(_DisposalExploded):
+        run_task(_touch_every_engine)
+
+    assert len(events) == 1, f"expected one record, got {events}"
+    event, fields = events[0]
+    assert fields["reason"] == "ENGINE_DISPOSE_FAILED", fields
+    assert fields["error_type"] == "_DisposalExploded", fields
+    assert "exc_info" not in fields, "the whole traceback would be rendered"
+
+    rendered = " ".join([event, *(f"{k}={v}" for k, v in fields.items())])
+    assert "synthetic disposal failure" not in rendered, (
+        f"the exception MESSAGE was recorded: {rendered!r}")
+    assert "postgresql" not in rendered.lower() and "@" not in rendered, (
+        f"connection-string material reached the log: {rendered!r}")
 
 
 # ---------------------------------------------------------------------------
