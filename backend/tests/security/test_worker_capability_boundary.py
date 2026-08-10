@@ -256,3 +256,209 @@ def test_the_freshness_runtime_has_no_direct_queue_table_access():
         select_, update_, delete_ = cur.fetchone()
     assert not select_ and not update_ and not delete_, (
         "the freshness runtime gained direct table access to the queue")
+
+
+# ---------------------------------------------------------------------------
+# Failure injection — prove the guards above would actually catch a regression
+# ---------------------------------------------------------------------------
+# A guard nobody has watched fail is a guard nobody knows works. Each case here
+# recreates the unsafe topology, proves INDEPENDENTLY that it now exists (the
+# guard-on-the-guard, without which a broken injection produces a vacuous
+# pass), asserts the boundary is breached, and restores the secure state in a
+# `finally` so a failing assertion cannot leave an escalation applied.
+#
+# The migrator is used ONLY to inject and revert catalog state. Every
+# authorization CLAIM is re-proven from a fresh connection whose `session_user`
+# is the genuine runtime login, because PostgreSQL derives SET ROLE authority
+# from `session_user` — a migrator-mediated check would show that a superuser
+# can assume anything and prove nothing about the application.
+OWNER_DSN_ADMIN = (
+    "postgresql://onyx_migrator@/onyx_test?host=/var/run/postgresql&port=5432"
+)
+
+
+def _admin():
+    conn = psycopg2.connect(OWNER_DSN_ADMIN)
+    conn.autocommit = True
+    return conn
+
+
+def _app_can_assume(capability: str) -> bool:
+    """Ask from a GENUINE application login, not through the migrator."""
+    with _app_session() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SET ROLE {capability}")
+            return True
+        except psycopg2.Error:
+            return False
+
+
+@pytest.mark.parametrize("capability", ["onyx_privacy_worker",
+                                        "onyx_freshness_worker"])
+def test_granting_a_worker_capability_to_the_app_role_is_detectable(capability):
+    """The exact one-line regression this whole sub-entry exists to prevent.
+
+    `GRANT onyx_privacy_worker TO onyx_app_rw` turns the SOURCE_DATA worker
+    suite green in a single line and hands every request path account-purge
+    authority. PD-16 is the same grant, already shipped, for freshness.
+    """
+    assert not _app_can_assume(capability), "topology was already unsafe"
+
+    admin = _admin()
+    try:
+        admin.cursor().execute(f"GRANT {capability} TO onyx_app_rw")
+        # Guard on the guard: prove the unsafe condition really exists now.
+        assert _app_can_assume(capability), (
+            f"the injection did not actually grant {capability}; a failure to "
+            "detect it below would have been vacuous"
+        )
+        # And prove the reachability check sees it too, not only SET ROLE.
+        with _app_session() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT pg_has_role('onyx_app_rw', %s, 'USAGE')",
+                        (capability,))
+            assert cur.fetchone()[0] is True
+    finally:
+        admin.cursor().execute(f"REVOKE {capability} FROM onyx_app_rw")
+        admin.close()
+
+    # Restored: the secure topology holds again.
+    assert not _app_can_assume(capability), (
+        f"{capability} survived the revert — the suite left an escalation in "
+        "place"
+    )
+
+
+def test_granting_public_execute_on_a_keyhole_is_detectable():
+    fn = "ioe.claim_freshness_events(integer, text)"
+    admin = _admin()
+    try:
+        admin.cursor().execute(f"GRANT EXECUTE ON FUNCTION {fn} TO PUBLIC")
+        with _app_session() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT has_function_privilege('public', p.oid, 'EXECUTE') "
+                "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                " WHERE n.nspname = 'ioe' AND p.proname = "
+                "'claim_freshness_events' LIMIT 1")
+            assert cur.fetchone()[0] is True, "the injection did not take"
+    finally:
+        admin.cursor().execute(f"REVOKE EXECUTE ON FUNCTION {fn} FROM PUBLIC")
+        admin.close()
+
+    with _app_session() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT has_function_privilege('public', p.oid, 'EXECUTE') "
+            "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            " WHERE n.nspname = 'ioe' AND p.proname = 'claim_freshness_events' "
+            "LIMIT 1")
+        assert cur.fetchone()[0] is False, "PUBLIC EXECUTE survived the revert"
+
+
+def test_granting_the_freshness_worker_direct_table_access_is_detectable():
+    """The tempting fix when a test hits `permission denied for table
+    freshness_outbox`. It would work, and it would turn the keyhole into a
+    door: reaching queue rows only through the narrow SECURITY DEFINER function
+    is the entire control."""
+    admin = _admin()
+    try:
+        admin.cursor().execute(
+            "GRANT SELECT ON ioe.freshness_outbox TO onyx_freshness_worker")
+        with _freshness_session() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT has_table_privilege(session_user, "
+                        "'ioe.freshness_outbox', 'SELECT')")
+            assert cur.fetchone()[0] is True, "the injection did not take"
+    finally:
+        admin.cursor().execute(
+            "REVOKE SELECT ON ioe.freshness_outbox FROM onyx_freshness_worker")
+        admin.close()
+
+    with _freshness_session() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT has_table_privilege(session_user, "
+                    "'ioe.freshness_outbox', 'SELECT')")
+        assert cur.fetchone()[0] is False, "table access survived the revert"
+
+
+def test_neither_worker_runtime_can_assume_the_other_capability():
+    with _privacy_session() as conn:
+        cur = conn.cursor()
+        with pytest.raises(psycopg2.Error):
+            cur.execute("SET ROLE onyx_freshness_worker")
+    with _freshness_session() as conn:
+        cur = conn.cursor()
+        with pytest.raises(psycopg2.Error):
+            cur.execute("SET ROLE onyx_privacy_worker")
+
+
+def test_the_read_only_role_holds_no_worker_capability():
+    """Read-only is not the same as safe: these keyholes MUTATE."""
+    with _app_session() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT pg_has_role('onyx_app_ro', 'onyx_privacy_worker', "
+                    "'USAGE'), pg_has_role('onyx_app_ro', "
+                    "'onyx_freshness_worker', 'USAGE')")
+        privacy, freshness = cur.fetchone()
+    assert not privacy and not freshness
+
+
+def test_no_worker_runtime_owns_a_user_table():
+    """Workers enter through keyholes, not ownership. An owner can ALTER the
+    table's policies, which would make RLS advisory."""
+    with _app_session() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT n.nspname || '.' || c.relname
+              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_roles r ON r.oid = c.relowner
+             WHERE r.rolname IN ('onyx_privacy_worker', 'onyx_freshness_worker',
+                                 'onyx_privacy_test', 'onyx_freshness_test')
+               AND c.relkind IN ('r', 'p')
+        """)
+        owned = [row[0] for row in cur.fetchall()]
+    assert not owned, f"a worker role owns tables: {owned}"
+
+
+def test_a_missing_worker_dsn_fails_closed_rather_than_falling_back():
+    """Exercised through the real session-construction path, not the docs.
+
+    A fallback to `database_url` would mean the purge quietly runs as
+    `onyx_app_rw` on any host where the operator forgot the setting —
+    reintroducing PD-16 by configuration rather than by grant.
+    """
+    import asyncio
+
+    from app.core.config import get_settings
+    from app.database.privacy_session import (
+        WorkerRuntimeUnavailable,
+        get_worker_engine,
+    )
+
+    settings = get_settings()
+    saved = (settings.privacy_database_url, settings.freshness_database_url)
+    try:
+        settings.privacy_database_url = None
+        settings.freshness_database_url = None
+        asyncio.run(_expect_unavailable(get_worker_engine,
+                                        WorkerRuntimeUnavailable))
+    finally:
+        settings.privacy_database_url, settings.freshness_database_url = saved
+
+
+async def _expect_unavailable(get_worker_engine, unavailable) -> None:
+    for runtime in ("privacy", "freshness"):
+        try:
+            get_worker_engine(runtime)
+        except unavailable as exc:
+            # A closed code and no DSN: the message reaches logs and task
+            # failure records, and a connection string names a host, a
+            # database and a role.
+            assert "postgresql" not in str(exc).lower()
+            assert "@" not in str(exc)
+        else:
+            raise AssertionError(
+                f"{runtime} runtime built an engine with no DSN configured — "
+                "it fell back instead of failing closed")
