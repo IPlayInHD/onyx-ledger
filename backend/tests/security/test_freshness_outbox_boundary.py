@@ -1,5 +1,18 @@
 """The privileged outbox interface is a keyhole, not a door.
 
+WHO RUNS WHAT, AND WHY IT IS TWO PRINCIPALS
+Keyhole calls — claim, complete, fail, fan-out — run as the dedicated
+freshness runtime, exactly as the production relay does. Direct reads of
+`ioe.freshness_outbox` and its audit table run as the ORDINARY application
+session, because `onyx_freshness_worker` holds EXECUTE on the functions and
+deliberately no table privileges: reaching queue rows only through the narrow
+function is the entire point of a SECURITY DEFINER keyhole.
+
+Until Entry 11B5E6 these tests did both through one application-authenticated
+session, which worked only because `onyx_app_rw` inherited the capability —
+that inheritance is PD-16. Granting the worker table access would have made
+them pass and dismantled the keyhole; splitting the principals is the fix.
+
 The relay needs to cross tenants, so it gets exactly enough privilege to move
 rows in one queue table between four states — and these tests are what hold that
 "exactly". They check the boundary from both sides: that the interface behaves
@@ -18,6 +31,7 @@ import pytest
 from sqlalchemy import func, select, text
 
 from app.database.models import FreshnessOutbox, FreshnessOutboxAudit
+from app.database.privacy_session import freshness_unit_of_work
 from app.database.session import unit_of_work
 from app.services.ioe.freshness_events import FreshnessEvent, emit
 from app.services.ioe.freshness_relay import FreshnessRelay
@@ -54,7 +68,7 @@ async def _pending_event(tax_year: int = 2025) -> uuid.UUID:
 
 
 async def _claim(worker: str, batch: int = 10) -> list[dict]:
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         rows = await s.execute(
             text(
                 "SELECT out_event_id AS id, out_claim_token AS token "
@@ -204,7 +218,7 @@ async def test_two_workers_never_claim_the_same_event():
 async def test_a_claim_is_bounded_however_large_a_batch_is_requested():
     for _ in range(5):
         await _pending_event()
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         rows = await s.execute(
             text(
                 "SELECT count(*) FROM ioe.claim_freshness_events(:b, :w)"
@@ -238,7 +252,7 @@ async def test_a_different_worker_cannot_complete_someone_elses_claim():
     event_id = await _pending_event()
     await _claim_mine("worker-owner", event_id)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         stolen = await s.scalar(
             text("SELECT ioe.complete_freshness_event(:id, :w)"),
             {"id": event_id, "w": "worker-impostor"},
@@ -255,7 +269,7 @@ async def test_a_different_worker_cannot_fail_someone_elses_claim():
     event_id = await _pending_event()
     await _claim_mine("worker-owner", event_id)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         stolen = await s.scalar(
             text("SELECT ioe.fail_freshness_event(:id, :w, :e)"),
             {"id": event_id, "w": "worker-impostor", "e": "SOME_CODE"},
@@ -270,7 +284,7 @@ async def test_duplicate_acknowledgement_is_a_no_op_not_an_error():
     event_id = await _pending_event()
     await _claim_mine("worker-dupe", event_id)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         first = await s.scalar(
             text("SELECT ioe.complete_freshness_event(:id, :w)"),
             {"id": event_id, "w": "worker-dupe"},
@@ -286,7 +300,7 @@ async def test_duplicate_acknowledgement_is_a_no_op_not_an_error():
 
 @pytest.mark.asyncio
 async def test_acknowledging_an_unknown_event_is_refused_not_fatal():
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         result = await s.scalar(
             text("SELECT ioe.complete_freshness_event(:id, :w)"),
             {"id": uuid.uuid4(), "w": "worker-x"},
@@ -302,7 +316,7 @@ async def test_a_failure_code_must_be_enumerated():
     await _claim_mine("worker-fail", event_id)
 
     for bad in ("could not connect: user 42 balance 1234.56", "lower case", ""):
-        async with unit_of_work(actor_type="system") as s:
+        async with freshness_unit_of_work() as s:
             with pytest.raises(Exception, match="enumerated code"):
                 await s.execute(
                     text("SELECT ioe.fail_freshness_event(:id, :w, :e)"),
@@ -316,7 +330,7 @@ async def test_a_failure_below_the_ceiling_returns_the_event_to_the_queue():
     event_id = await _pending_event()
     await _claim_mine("worker-retry", event_id)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         await s.execute(
             text("SELECT ioe.fail_freshness_event(:id, :w, :e)"),
             {"id": event_id, "w": "worker-retry", "e": "TENANT_APPLY_FAILED"},
@@ -338,7 +352,7 @@ async def test_a_failure_at_the_ceiling_terminates():
         )
     await _claim_mine("worker-terminal", event_id)   # attempts becomes 5
 
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         await s.execute(
             text("SELECT ioe.fail_freshness_event(:id, :w, :e)"),
             {"id": event_id, "w": "worker-terminal", "e": "TENANT_APPLY_FAILED"},
@@ -396,7 +410,7 @@ async def test_a_worker_whose_claim_was_recovered_cannot_acknowledge_late():
         )
     await _claim_mine("worker-fast", event_id)
 
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         late = await s.scalar(
             text("SELECT ioe.complete_freshness_event(:id, :w)"),
             {"id": event_id, "w": "worker-slow"},
@@ -413,7 +427,7 @@ async def test_a_worker_whose_claim_was_recovered_cannot_acknowledge_late():
 async def test_every_claim_and_terminal_transition_is_audited():
     event_id = await _pending_event()
     await _claim_mine("worker-audited", event_id)
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         await s.execute(
             text("SELECT ioe.complete_freshness_event(:id, :w)"),
             {"id": event_id, "w": "worker-audited"},
@@ -607,7 +621,7 @@ async def test_the_relay_applies_events_under_ordinary_tenant_context():
 @pytest.mark.asyncio
 async def test_the_claim_payload_carries_no_financial_columns():
     await _pending_event()
-    async with unit_of_work(actor_type="system") as s:
+    async with freshness_unit_of_work() as s:
         result = await s.execute(
             text("SELECT * FROM ioe.claim_freshness_events(:b, :w)"),
             {"b": 5, "w": "payload-worker"},
