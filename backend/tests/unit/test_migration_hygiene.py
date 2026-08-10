@@ -98,3 +98,39 @@ def test_every_applied_sql_file_is_referenced_by_a_revision() -> None:
     schema_files = {p.name for p in SQL_DIR.glob("*.sql") if not p.name.startswith("9")}
     unreferenced = sorted(schema_files - referenced)
     assert not unreferenced, f"SQL files no revision applies: {unreferenced}"
+
+
+def test_no_revision_id_exceeds_the_alembic_version_column() -> None:
+    """Entry 11B5 shipped `0052_lifecycle_claim_purge_states` — 33 characters
+    against a 32-character column — and it survived review, a WIP commit and a
+    focused test run.
+
+    It survived because the failure mode is late and quiet. Alembic can create
+    the revision, import it and RUN its body; the error only appears when it
+    writes the identifier back:
+
+        StringDataRightTruncation: value too long for type character varying(32)
+        UPDATE alembic_version SET version_num='0052_lifecycle_claim_purge_states'
+
+    So a database that already recorded an earlier head never exercised it, and
+    only walking the chain from base did. A convention in a comment would not
+    have caught it; this does.
+
+    The limit is read from alembic's own `MigrationContext`, not hard-coded to
+    32, so a future alembic that widens the column does not make this test lie
+    in either direction.
+    """
+    from alembic.runtime.migration import MigrationContext
+
+    limit = getattr(MigrationContext, "_version_num_length", None) or 32
+
+    too_long = sorted(
+        f"{revision} ({len(revision)} > {limit})"
+        for _, module in _revision_modules()
+        for revision in [module.revision]
+        if len(revision) > limit
+    )
+    assert not too_long, "\n  ".join([
+        "these revision identifiers cannot be stored in "
+        f"alembic_version.version_num (varchar({limit})):", *too_long,
+    ])
