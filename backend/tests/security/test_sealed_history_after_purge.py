@@ -275,6 +275,28 @@ def _artifact_counts(cur, uid, analysis_id, run_id) -> dict[str, int]:
     return counts
 
 
+def _claim_subject(cur, worker: str, uid, rounds: int = 20):
+    """Claim until THIS subject appears, then return its token.
+
+    `claim_account_lifecycle` caps the batch at 50 and orders oldest-first, so
+    claiming once and picking your subject out of the result is really an
+    assertion that fewer than 50 claimable lifecycles exist. On the security
+    gate's database — the suite run fifteen times without re-provisioning —
+    that is false, and `next(...)` raised StopIteration while the code under
+    test was correct.
+    """
+    for _ in range(rounds):
+        cur.execute("SELECT out_user_id, out_claim_token "
+                    "  FROM identity.claim_account_lifecycle(50, %s)", (worker,))
+        batch = cur.fetchall()
+        if not batch:
+            break
+        for claimed_uid, token in batch:
+            if str(claimed_uid) == str(uid):
+                return token
+    raise AssertionError(f"{worker} could not claim the subject under test")
+
+
 def _purge_account(cur, uid) -> None:
     cur.execute("INSERT INTO identity.account_lifecycle (user_id, state) "
                 "VALUES (%s, 'DELETION_REQUESTED')", (str(uid),))
@@ -575,9 +597,7 @@ async def test_sealed_evidence_survives_purge_lease_loss_and_retry():
             cur.execute("UPDATE identity.account_lifecycle SET state = %s "
                         " WHERE user_id = %s", (state, str(uid)))
 
-        cur.execute("SELECT out_user_id, out_claim_token "
-                    "  FROM identity.claim_account_lifecycle(50, 'h3-a')")
-        a_token = next(t for u, t in cur.fetchall() if str(u) == str(uid))
+        a_token = _claim_subject(cur, 'h3-a', uid)
         cur.execute("SELECT identity.start_lifecycle_phase(%s, %s, %s, 'h3-a')",
                     (str(uid), PHASE, str(a_token)))
         cur.execute("SELECT identity.purge_source_data(%s, %s, 'h3-a')",
@@ -589,9 +609,7 @@ async def test_sealed_evidence_survives_purge_lease_loss_and_retry():
                     "   SET claimed_at = now() - identity.lifecycle_claim_timeout() "
                     "                  - interval '1 minute' WHERE user_id = %s",
                     (str(uid),))
-        cur.execute("SELECT out_user_id, out_claim_token "
-                    "  FROM identity.claim_account_lifecycle(50, 'h3-b')")
-        b_token = next(t for u, t in cur.fetchall() if str(u) == str(uid))
+        b_token = _claim_subject(cur, 'h3-b', uid)
 
         cur.execute("SELECT identity.purge_source_data(%s, %s, 'h3-b')",
                     (str(uid), str(b_token)))

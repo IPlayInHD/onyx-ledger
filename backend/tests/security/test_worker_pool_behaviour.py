@@ -90,9 +90,19 @@ def test_many_workers_claiming_many_subjects_each_land_once():
             try:
                 c = conn.cursor()
                 start.wait(timeout=20)
-                c.execute("SELECT out_user_id FROM "
-                          "identity.claim_account_lifecycle(50, %s)", (name,))
-                mine = [str(r[0]) for r in c.fetchall()]
+                # Drain in rounds rather than claiming once. The batch is capped
+                # at 50 and ordered oldest-first, so on a database with a
+                # backlog this test's subjects — the newest rows — would never
+                # be reached, and "each subject claimed exactly once" would fail
+                # for a reason that has nothing to do with concurrency.
+                mine: list[str] = []
+                for _ in range(20):
+                    c.execute("SELECT out_user_id FROM "
+                              "identity.claim_account_lifecycle(50, %s)", (name,))
+                    batch = [str(r[0]) for r in c.fetchall()]
+                    if not batch:
+                        break
+                    mine.extend(batch)
                 with lock:
                     for subject in mine:
                         claims.setdefault(subject, []).append(name)
