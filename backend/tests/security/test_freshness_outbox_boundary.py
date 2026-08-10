@@ -79,6 +79,27 @@ async def _claim(worker: str, batch: int = 10) -> list[dict]:
         return [dict(r._mapping) for r in rows]
 
 
+async def _quiesce(limit: int = 200) -> None:
+    """Drain until the outbox stops yielding work.
+
+    `FreshnessRelay.drain()` is bounded — `max_passes=10` — and deliberately
+    so: a producer emitting faster than the relay drains must not be able to
+    spin there forever. That bound is correct for production and wrong for a
+    test that needs an empty queue, because the security gate's database
+    carries a backlog far larger than ten passes will clear. Measured there:
+    over a thousand events pending, against a drain that clears ten passes.
+
+    So the loop lives here, in the test, and production keeps its bound. The
+    exit is a pass that claims nothing; `limit` is only a runaway guard.
+    """
+    for _ in range(limit):
+        report = await FreshnessRelay("tenant-context-drain").drain()
+        if report.claimed == 0:
+            return
+    raise AssertionError(
+        "the outbox never went quiet; the relay is not making progress")
+
+
 async def _claim_mine(worker: str, event_id: uuid.UUID,
                       rounds: int = _DRAIN_ROUNDS) -> dict:
     """Claim until THIS event belongs to `worker`, or fail loudly.
@@ -593,22 +614,29 @@ async def test_the_relay_applies_events_under_ordinary_tenant_context():
 
     uid_a, analysis_a = await _user_with_analysis()
     uid_b, analysis_b = await _user_with_analysis()
+
+    # QUIESCE THE QUEUE BEFORE THE SUBJECTS EXIST, not after.
+    #
+    # `drain()` processes the outbox, and a tax-year-scoped event left pending
+    # by any earlier test fans out to every tenant holding results in that year
+    # — including B. That is the relay working correctly, but it makes "B is
+    # still current" a statement about the shared queue rather than about
+    # tenant scoping. On a fresh database the queue happens to be empty and the
+    # assertion held; under the security gate, which runs this suite against
+    # one database many times, 63 year-scoped events were pending and B was
+    # legitimately staled by one of them.
+    #
+    # Draining AFTER creating the scenarios — the first attempt at this fix —
+    # is not enough, and Entry 11B5J's third gate run failed on exactly that:
+    # the backlog is then applied to scenarios that already exist, so B is
+    # staled by the drain itself and the guard below fails with "tenant B is
+    # not current before the event under test is emitted". Creating the
+    # scenarios AFTER quiescence means no pending event can reach them, and the
+    # only event that touches them is the one this test emits.
+    await _quiesce()
+
     scenario_a = await ScenarioService(uid_a).simulate(analysis_a, _spec())
     scenario_b = await ScenarioService(uid_b).simulate(analysis_b, _spec())
-
-    # DRAIN THE QUEUE TO QUIESCENCE FIRST, and only then emit the event under
-    # test. `drain()` processes the WHOLE outbox, and a tax-year-scoped event
-    # left pending by any earlier test fans out to every tenant holding results
-    # in that year — including B. That is the relay working correctly, but it
-    # makes "B is still current" a statement about the shared queue rather than
-    # about tenant scoping.
-    #
-    # On a fresh database the queue happens to be empty and the assertion held;
-    # under the security gate, which runs this suite fifteen times against one
-    # database, 63 year-scoped events were pending and B was legitimately
-    # staled by one of them. The test failed with "the relay reached across
-    # tenants" while the relay had done nothing of the sort.
-    await FreshnessRelay("tenant-context-drain").drain()
 
     async with unit_of_work(user_id=uid_b, actor_type="user") as s:
         before = await s.get(Scenario, scenario_b.scenario_id)
