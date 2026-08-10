@@ -1,4 +1,4 @@
-"""Entry 11B5J — the deletion worker must survive being called twice.
+"""Entry 11B5J — every 11B5 worker must survive being called twice.
 
 A Celery worker calls a task many times in one process. `asyncio.run` creates a
 fresh event loop per invocation and closes it on the way out, but the engines
@@ -143,3 +143,63 @@ def test_repeated_runs_after_completion_stay_idempotent():
         assert cur.fetchone()[0] == 1, "repeated runs duplicated the phase record"
     finally:
         admin.close()
+
+
+# ---------------------------------------------------------------------------
+# Every recurring task the Entry 11B5 architecture depends on
+# ---------------------------------------------------------------------------
+def test_every_entry_11b5_task_survives_repeated_invocation_in_one_process():
+    """The generalised guard, covering the whole 11B5-required task set.
+
+    Fixing only the deletion worker left the freshness relay — scheduled every
+    minute — still failing on its second call in a process, and the integrity
+    verifier failing on its first and third. All of them are load-bearing for
+    Entry 11B5: the relay drives freshness convergence, the sweep is its
+    fallback, the invalidators are the event path, and the verifier is the
+    replay/integrity path H3 certifies.
+
+    Measured before the shared `workers.runtime.run_task` helper, three calls
+    each in one process:
+
+        privacy.run_account_deletion_phases   call 2 failed
+        ioe.relay_freshness_outbox            call 2 failed
+        ioe.sweep_scenario_freshness          call 2 failed
+        ioe.verify_sealed_integrity           calls 1 and 3 failed
+
+    Not a clean alternation — it depends which pooled connection is handed
+    out — which is why it reads as flakiness rather than as a defect.
+    """
+    import uuid as _uuid
+
+    from workers.tasks.ioe import (
+        invalidate_scenarios_for_analysis,
+        invalidate_scenarios_for_tax_year,
+        relay_freshness_outbox,
+        sweep_scenario_freshness,
+        verify_sealed_integrity,
+    )
+    from workers.tasks.privacy import run_account_deletion_phases
+
+    cases = {
+        "privacy.run_account_deletion_phases": lambda: run_account_deletion_phases.run(),
+        "ioe.relay_freshness_outbox": lambda: relay_freshness_outbox.run(),
+        "ioe.sweep_scenario_freshness": lambda: sweep_scenario_freshness.run(),
+        "ioe.verify_sealed_integrity": lambda: verify_sealed_integrity.run(),
+        "ioe.invalidate_scenarios_for_tax_year":
+            lambda: invalidate_scenarios_for_tax_year.run(2025, "BASELINE_INPUTS_CHANGED"),
+        "ioe.invalidate_scenarios_for_analysis":
+            lambda: invalidate_scenarios_for_analysis.run(
+                str(_uuid.uuid4()), "BASELINE_INPUTS_CHANGED"),
+    }
+
+    failures: list[str] = []
+    for name, call in cases.items():
+        for attempt in (1, 2, 3):
+            try:
+                call()
+            except Exception as exc:                       # noqa: BLE001
+                failures.append(f"{name} call {attempt}: {type(exc).__name__}: {exc}")
+
+    assert not failures, (
+        "these Entry 11B5 tasks cannot be called repeatedly in one Celery "
+        "worker process:\n  " + "\n  ".join(f[:160] for f in failures))

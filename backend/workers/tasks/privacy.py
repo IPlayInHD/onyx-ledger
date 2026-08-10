@@ -19,8 +19,6 @@ subject's own row-level security. The worker cannot express "every user".
 """
 from __future__ import annotations
 
-import asyncio
-
 from app.core.logging import get_logger
 from app.database.privacy_session import privacy_unit_of_work
 from app.services.privacy import (
@@ -30,6 +28,7 @@ from app.services.privacy import (
     SourceDataPurgeService,
 )
 from workers.celery_app import celery_app
+from workers.runtime import run_task
 
 log = get_logger("onyx.worker.privacy")
 
@@ -114,27 +113,7 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
                          reason=outcome.failure_code or "OK")
         return totals
 
-    async def _run_and_release() -> dict[str, int]:
-        # DISPOSE BEFORE THE LOOP CLOSES.
-        #
-        # `asyncio.run` creates a fresh event loop per invocation and closes it
-        # on the way out, but the engines are module-level and their pools are
-        # not. A connection opened under this loop goes back into the pool, the
-        # loop dies, and the NEXT invocation in the same worker process gets
-        # that connection handed to it — "got Future ... attached to a different
-        # loop". Measured on this task and on the beat-scheduled freshness
-        # relay: call 1 succeeds, call 2 raises, call 3 succeeds once the
-        # poisoned connection has been evicted.
-        #
-        # A Celery worker calls a task many times in one process, so for the
-        # deletion worker that is roughly every other run failing — and the
-        # phase it abandons is a purge. Releasing the connections while the loop
-        # that owns them is still alive is what makes the task re-entrant.
-        try:
-            return await _run()
-        finally:
-            from app.database.privacy_session import dispose_all_engines
-
-            await dispose_all_engines()
-
-    return asyncio.run(_run_and_release())
+    # Engine lifecycle lives in workers.runtime: a Celery worker calls this
+    # task many times in one process, and `asyncio.run` closes a loop the
+    # module-level pools outlive. See workers/runtime.py for the measurements.
+    return run_task(_run)

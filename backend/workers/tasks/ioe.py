@@ -34,6 +34,7 @@ from app.services.ioe.scenario.freshness_service import (
     ScenarioFreshnessService,
 )
 from workers.celery_app import celery_app
+from workers.runtime import run_task
 
 log = get_logger("onyx.worker.ioe")
 
@@ -126,7 +127,7 @@ def invalidate_scenarios_for_analysis(self: Task, analysis_id: str, reason_code:
             )
 
     try:
-        count = asyncio.run(_run())
+        count = run_task(_run)
         log.info("ioe_freshness_invalidated", analysis_id=analysis_id, count=count)
         return count
     except ValueError as exc:
@@ -155,7 +156,7 @@ def invalidate_scenarios_for_tax_year(self: Task, tax_year: int, reason_code: st
             )
 
     try:
-        count = asyncio.run(_run())
+        count = run_task(_run)
         log.info("ioe_freshness_invalidated_year", tax_year=tax_year, count=count)
         return count
     except ValueError as exc:
@@ -198,7 +199,7 @@ def relay_freshness_outbox(self: Task, batch_size: int = 50) -> int:
         return report.completed
 
     try:
-        return asyncio.run(_run())
+        return run_task(_run)
     except Exception as exc:  # noqa: BLE001
         if self.request.retries >= MAX_RETRIES:
             log.error("ioe_freshness_relay_failed", error_code=ERROR_RETRIES_EXHAUSTED)
@@ -225,7 +226,7 @@ def sweep_scenario_freshness(self: Task, limit: int = SWEEP_BATCH_SIZE) -> int:
             return sum(1 for t in transitions if t.changed)
 
     try:
-        changed = asyncio.run(_run())
+        changed = run_task(_run)
         log.info("ioe_freshness_sweep", changed=changed, limit=limit)
         return changed
     except Exception as exc:  # noqa: BLE001
@@ -288,7 +289,7 @@ def verify_sealed_integrity(self: Task, batch_size: int | None = None) -> dict:
         return metrics
 
     try:
-        return asyncio.run(_run())
+        return run_task(_run)
     except Exception as exc:  # noqa: BLE001
         if self.request.retries >= 2:
             log.error(
