@@ -33,8 +33,21 @@ from tests.conftest import owner_dsn
 
 PHASE = "SOURCE_DATA"
 
-#: A year with no explicit partition today, so rows land in the DEFAULT
-#: partition, and one far enough out that no real migration will collide.
+#: TWO distinct years, and they must stay distinct.
+#:
+#: `DEFAULT_YEAR` has no explicit partition, so its rows land in DEFAULT.
+#: `FUTURE_YEAR` is the year a partition gets CREATED for.
+#:
+#: Sharing one year broke under the security gate, which runs the suite fifteen
+#: times against one database: PostgreSQL refuses to attach a partition when the
+#: DEFAULT partition already holds a matching row —
+#:
+#:   updated partition constraint for default partition "income_source_default"
+#:   would be violated by some row
+#:
+#: — so a single surviving row from the DEFAULT test made every later run's
+#: CREATE fail, and then "relation ... does not exist" for the rest of the file.
+DEFAULT_YEAR = 2041
 FUTURE_YEAR = 2043
 
 
@@ -106,6 +119,17 @@ def _expense(cur, user: uuid.UUID, year: int, amount: int = 250) -> None:
             (user_id, tax_year, expense_category_id, amount)
         SELECT %s, %s, id, %s FROM ref.expense_category LIMIT 1
     """, (str(user), year, amount))
+
+
+def _clear_year(cur, year: int) -> None:
+    """Remove any synthetic rows for `year` from the partitioned parents.
+
+    Only ever this file's own test data — no real tax year is anywhere near
+    2041/2043 — and it is what makes CREATE ... PARTITION OF possible on a
+    database these tests have run against before.
+    """
+    for table in ("finance.income_source", "finance.expense_record"):
+        cur.execute(f"DELETE FROM {table} WHERE tax_year = %s", (year,))
 
 
 def _drop_partition(cur, table: str) -> None:
@@ -187,7 +211,7 @@ def test_every_current_partition_of_every_source_parent_is_actually_purged():
 
         # Years chosen from the real bounds: the two explicit partitions and one
         # year that can only land in DEFAULT.
-        years = [2024, 2025, FUTURE_YEAR]
+        years = [2024, 2025, DEFAULT_YEAR]
         for year in years:
             _income(cur, user, year)
             _expense(cur, user, year)
@@ -233,6 +257,10 @@ def test_a_partition_created_after_this_release_is_purged_and_secured():
                f"finance.expense_record_y{FUTURE_YEAR}"]
     try:
         cur = admin.cursor()
+        # Clear any stray row of this year first. A row sitting in DEFAULT
+        # makes ATTACH impossible, and on a long-lived database that is a
+        # permanent, confusing failure for every later run.
+        _clear_year(cur, FUTURE_YEAR)
         cur.execute(f"CREATE TABLE IF NOT EXISTS {created[0]} PARTITION OF "
                     f"finance.income_source FOR VALUES IN ({FUTURE_YEAR})")
         cur.execute(f"CREATE TABLE IF NOT EXISTS {created[1]} PARTITION OF "
@@ -304,6 +332,7 @@ def test_the_coverage_guard_catches_a_child_enumerating_purge():
     created = f"finance.income_source_y{FUTURE_YEAR}"
     try:
         cur = admin.cursor()
+        _clear_year(cur, FUTURE_YEAR)
         cur.execute(f"CREATE TABLE IF NOT EXISTS {created} PARTITION OF "
                     f"finance.income_source FOR VALUES IN ({FUTURE_YEAR})")
         user = _account(cur)
