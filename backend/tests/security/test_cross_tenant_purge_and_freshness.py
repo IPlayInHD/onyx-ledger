@@ -115,9 +115,36 @@ def _amounts(cur, user: uuid.UUID) -> list[int]:
     return [r[0] for r in cur.fetchall()]
 
 
-async def _drain(worker: str = "xtenant") -> None:
+#: Rounds of `drain()` before giving up. A runaway guard: the real exit is
+#: "this test's own event reached a terminal state". `drain()` is bounded at
+#: `max_passes=10` (2000 events), which is right for production and is not a
+#: promise that one call empties a queue shared with the whole suite.
+_MAX_DRAIN_ROUNDS = 100
+
+
+async def _drain(worker: str = "xtenant", cur=None, events=None) -> None:
+    """Relay until THIS test's event is processed, not for a fixed effort.
+
+    These events are the newest in a shared oldest-first queue. Measured in
+    Entry 11B5J: against a 3252-event backlog a single drain never reached the
+    bystander's event and the test failed with "the bystander's own event did
+    not take effect after a neighbour was purged" — while the relay was doing
+    exactly what a fair bounded queue should do.
+    """
     try:
-        await FreshnessRelay(worker).drain(batch_size=200)
+        for _ in range(_MAX_DRAIN_ROUNDS):
+            report = await FreshnessRelay(worker).drain(batch_size=200)
+            if events and cur is not None:
+                cur.execute("SELECT claim_state FROM ioe.freshness_outbox "
+                            " WHERE id = ANY(%s::uuid[])",
+                            ([str(e) for e in events],))
+                if all(r[0] in ("completed", "failed") for r in cur.fetchall()):
+                    return
+            elif report.claimed == 0:
+                return
+        raise AssertionError(
+            "the relay never reached this test's event; the queue is not "
+            "making progress")
     finally:
         from app.database.privacy_session import dispose_worker_engines
         from app.database.session import engine
@@ -138,13 +165,13 @@ async def test_one_batch_two_tenants_each_staled_only_in_its_own_scope():
         cur = admin.cursor()
         a, a_analysis = _tenant(cur, 1111)
         b, b_analysis = _tenant(cur, 2222)
-        _queue(cur, a, a_analysis, INPUTS)
-        _queue(cur, b, b_analysis, RULES)
+        a_event = _queue(cur, a, a_analysis, INPUTS)
+        b_event = _queue(cur, b, b_analysis, RULES)
 
         assert _scenario(cur, a) == ("current", None)
         assert _scenario(cur, b) == ("current", None)
 
-        await _drain()
+        await _drain(cur=cur, events=[a_event, b_event])
 
         assert _scenario(cur, a) == ("stale", INPUTS), (
             f"tenant A recorded {_scenario(cur, a)}, expected {INPUTS}")
@@ -187,7 +214,7 @@ async def test_purging_one_tenant_leaves_the_other_tenants_queue_and_data():
         assert cur.fetchone()[0] == "pending", (
             "another account's purge disturbed this tenant's queue")
 
-        await _drain()
+        await _drain(cur=cur, events=[bystander_event])
 
         assert _scenario(cur, bystander) == ("stale", RULES), (
             "the bystander's own event did not take effect after a neighbour "

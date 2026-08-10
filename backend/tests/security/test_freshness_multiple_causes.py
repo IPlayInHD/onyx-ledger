@@ -91,14 +91,54 @@ def _account_with_current_advice(cur) -> tuple[uuid.UUID, uuid.UUID]:
     return user, analysis
 
 
-def _queue(cur, user: uuid.UUID, analysis: uuid.UUID, reason: str) -> uuid.UUID:
+def _queue(cur, user: uuid.UUID, analysis: uuid.UUID, reason: str,
+           event_id: uuid.UUID | None = None,
+           created_at: str | None = None) -> uuid.UUID:
+    """Queue one cause. `event_id` and `created_at` are settable so a test can
+    build the adversarial arrangement below deterministically."""
     cur.execute("""
         INSERT INTO ioe.freshness_outbox
-            (event_type, stale_reason_code, user_id, analysis_id, dedupe_key)
-        VALUES ('financial_data_changed', %s, %s, %s, %s)
+            (id, event_type, stale_reason_code, user_id, analysis_id,
+             dedupe_key, created_at)
+        VALUES (coalesce(%s::uuid, ref.uuid_generate_v7()),
+                'financial_data_changed', %s, %s, %s, %s,
+                coalesce(%s::timestamptz, now()))
         RETURNING id
-    """, (reason, str(user), str(analysis), f"cause:{uuid.uuid4()}"))
+    """, (str(event_id) if event_id else None, reason, str(user), str(analysis),
+          f"cause:{uuid.uuid4()}", created_at))
     return _uuid(cur.fetchone()[0])
+
+
+def _adversarial_pair(cur, user, analysis, first: str, second: str):
+    """Queue two causes so that queue order and id order DISAGREE.
+
+    This is the arrangement the 0054 fix exists for. `ref.uuid_generate_v7`
+    builds an id from a 48-bit millisecond timestamp plus `gen_random_bytes`
+    with no monotonic counter, so two events queued in the same millisecond get
+    ids in random relative order — about half the time, reversed.
+
+    Left to chance, this test is a coin flip: measured in Entry 11B5J against
+    the known-bad `ORDER BY c.id`, three consecutive runs all passed, so it was
+    not protecting the defect at all. Choosing the ids makes the condition
+    certain instead of likely, and it is not a contrived one — it is exactly
+    what the generator produces half the time.
+
+    `created_at` is set explicitly and distinctly, one millisecond apart, so
+    that `ORDER BY created_at, id` has an unambiguous answer that equals the
+    queueing order, while `ORDER BY id` alone returns them reversed.
+    """
+    low, high = sorted((uuid.uuid4(), uuid.uuid4()))
+    # The timestamps stay in the present, so these remain the newest rows in a
+    # shared queue — the realistic position, and the one that made this file
+    # fail under backlog. Only the ids are chosen: FIRST gets the LATER id, so
+    # an id-only sort puts SECOND ahead of it.
+    cur.execute("SELECT now(), now() + interval '1 millisecond'")
+    first_at, second_at = cur.fetchone()
+    first_id = _queue(cur, user, analysis, first, event_id=high,
+                      created_at=first_at.isoformat())
+    second_id = _queue(cur, user, analysis, second, event_id=low,
+                       created_at=second_at.isoformat())
+    return first_id, second_id
 
 
 def _scenario(cur, user: uuid.UUID) -> tuple[str, str | None]:
@@ -120,10 +160,40 @@ def _states(cur, events: list[uuid.UUID]) -> list[str]:
     return [r[0] for r in cur.fetchall()]
 
 
-async def _drain():
+#: Rounds of `drain()` before giving up. A runaway guard: the real exit is
+#: "this test's own events reached a terminal state". `drain()` is itself
+#: bounded at `max_passes=10` (2000 events), which is correct for production —
+#: a producer emitting faster than the relay drains must not spin forever — and
+#: is not a promise that one call empties a shared queue.
+_MAX_DRAIN_ROUNDS = 100
+
+
+async def _drain(cur=None, events: list | None = None):
+    """Relay until THIS test's events are processed, not for a fixed effort.
+
+    One `drain()` clears at most 2000 events, and these events are the newest
+    in a shared oldest-first queue. Measured in Entry 11B5J: with a 3252-event
+    backlog a single drain never reached them and the test failed with
+    "both causes must be consumed, got ['pending', 'pending']" — while the
+    relay was working exactly as designed.
+
+    Passing the event ids makes the exit condition the thing the test actually
+    needs. Without them this falls back to draining until a pass claims
+    nothing.
+    """
     relay = FreshnessRelay("causes")
     try:
-        await relay.drain(batch_size=200)
+        for _ in range(_MAX_DRAIN_ROUNDS):
+            report = await relay.drain(batch_size=200)
+            if events is not None and cur is not None:
+                if all(st in ("completed", "failed")
+                       for st in _states(cur, events)):
+                    return
+            elif report.claimed == 0:
+                return
+        raise AssertionError(
+            "the relay never reached this test's events; the queue is not "
+            "making progress")
     finally:
         from app.database.privacy_session import dispose_worker_engines
         from app.database.session import engine
@@ -147,10 +217,9 @@ async def _first_cause_wins(first: str, second: str) -> None:
         assert _scenario(cur, user) == ("current", None), "no current scenario"
         assert _run(cur, user)[0] == "current", "no current run"
 
-        events = [_queue(cur, user, analysis, first),
-                  _queue(cur, user, analysis, second)]
+        events = list(_adversarial_pair(cur, user, analysis, first, second))
 
-        await _drain()
+        await _drain(cur, events)
 
         # BOTH events must have been processed. If the second were still
         # pending, "the first reason is recorded" would be trivially true and
@@ -199,7 +268,7 @@ async def test_the_second_cause_is_still_consumed_not_stranded():
         first = _queue(cur, user, analysis, INPUTS)
         second = _queue(cur, user, analysis, RULES)
 
-        await _drain()
+        await _drain(cur, [first, second])
 
         cur.execute("SELECT claim_state, attempts, last_error_code "
                     "  FROM ioe.freshness_outbox WHERE id = %s", (str(second),))
