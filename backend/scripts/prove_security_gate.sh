@@ -111,6 +111,15 @@ prove() {
     PASS=$((PASS + 1))
   fi
   psql "$CONN" -q -v ON_ERROR_STOP=1 -c "$restore"
+  # The restore check is a FULL SUITE RUN whose result this gate acts on, so it
+  # needs the same comparable starting state the injection run gets. Resetting
+  # only before the injection left the restore run inheriting whatever admission
+  # leases and rate counters the injection run booked — and the gate then
+  # reported "suite still failing after restore" for
+  # test_admission_preauth.py::test_a_rejection_still_names_no_scope, which has
+  # nothing to do with the invariant under test. Same reasoning as the reset
+  # above; it was simply applied to one of the two runs.
+  psql "$CONN" -q -v ON_ERROR_STOP=1 -c "$SUITE_STATE_RESET"
   if ! PYTHONPATH=. "${SUITE[@]}" > "$WORK/restore" 2>&1; then
     echo "  FAIL  ${label} — suite still failing after restore:"
     grep -m3 -E '^(FAILED|E  )' "$WORK/restore" | sed 's/^/          /'
