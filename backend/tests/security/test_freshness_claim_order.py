@@ -33,6 +33,13 @@ from tests.conftest import owner_dsn
 
 PAIRS = 12
 
+#: Rounds of 200 to claim before giving up looking for this test's own events.
+#: A runaway guard, not a queue-size assumption: the real exits are "all of
+#: this test's events have been handed out" and "the queue is empty". 200
+#: rounds is 40,000 events, far past anything a suite rerun builds, and the
+#: assertion says so if it is ever reached.
+_MAX_CLAIM_ROUNDS = 200
+
 
 def _owner():
     conn = psycopg2.connect(owner_dsn())
@@ -87,15 +94,35 @@ def test_a_claimed_batch_comes_back_in_queue_order():
         # An earlier version asserted `returned == queued` against a batch of
         # exactly PAIRS, which passed alone and failed in the full suite —
         # measuring queue emptiness rather than queue order.
-        cur.execute("SELECT out_event_id FROM ioe.claim_freshness_events(200, %s)",
-                    ("order-test",))
-        returned = [str(r[0]) for r in cur.fetchall()]
-        mine = [e for e in returned if e in set(queued)]
+        # ONE CALL IS NOT ENOUGH, and asking for a bigger batch cannot help:
+        # `claim_freshness_events` clamps its batch to 200
+        # (`least(greatest(coalesce(p_batch_size,1),1), 200)`). These events are
+        # the newest in the queue, so they sort LAST — and Entry 11B5J measured
+        # this test failing with "claimed 0 of this test's 12 events" against a
+        # backlog of 452 claimable rows, while production ordering was correct.
+        #
+        # Claiming in rounds and concatenating preserves the property under
+        # test: every round takes the oldest remaining under
+        # `ORDER BY created_at, id`, so the concatenation is in the same global
+        # order a relay would see across successive claims.
+        wanted = set(queued)
+        returned: list[str] = []
+        for _ in range(_MAX_CLAIM_ROUNDS):
+            cur.execute(
+                "SELECT out_event_id FROM ioe.claim_freshness_events(200, %s)",
+                ("order-test",))
+            batch = [str(r[0]) for r in cur.fetchall()]
+            if not batch:
+                break
+            returned.extend(batch)
+            if wanted.issubset(returned):
+                break
+        mine = [e for e in returned if e in wanted]
 
         assert len(mine) == PAIRS, (
-            f"claimed {len(mine)} of this test's {PAIRS} events; the batch cap "
-            "was reached before they were all handed out, so their relative "
-            "order was not measured")
+            f"claimed {len(mine)} of this test's {PAIRS} events across "
+            f"{_MAX_CLAIM_ROUNDS} rounds of 200; their relative order was not "
+            "measured")
         assert mine == queued, (
             "the claim returned a batch in a different order than it selected "
             "it, so the relay applies events out of queue order:\n"
