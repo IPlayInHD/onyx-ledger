@@ -252,14 +252,47 @@ prove "PD-1 regression guard (new unguarded tenant table)" \
 # Lifecycle rows are not deletable by design, so the cleanup disables that
 # trigger for the duration. It runs only inside this proof, on a database the
 # script created and drops.
+# BOTH no-delete triggers, not one. This cleanup was written in Entry 11B3,
+# when identity.account_lifecycle was the only table that refused DELETE. Entry
+# 11B5C then added identity.account_lifecycle_phase with
+#
+#     fk_lifecycle_phase_subject ... REFERENCES identity.account_lifecycle(user_id)
+#         ON DELETE CASCADE
+#
+# and a no-delete trigger of its own — so the DELETE below now cascades into a
+# table that refuses to be deleted from, and the whole gate dies mid-run with
+#
+#     ERROR:  account_lifecycle_phase rows are not deletable
+#
+# It stayed invisible until Entry 11B5J, because nothing in the suite created a
+# phase row for an account this cleanup would remove until the worker
+# re-entrancy tests did. Latent since 11B5C; found when the gate first ran far
+# enough to reach it.
 LEDGER_CLEANUP="${SUITE_STATE_RESET}
   ALTER TABLE identity.account_lifecycle DISABLE TRIGGER trg_account_lifecycle_no_delete;
+  ALTER TABLE identity.account_lifecycle_phase DISABLE TRIGGER trg_lifecycle_phase_no_delete;
   DELETE FROM identity.account_lifecycle a
    WHERE a.ctid <> (SELECT min(b.ctid) FROM identity.account_lifecycle b
                      WHERE b.user_id = a.user_id);
   DELETE FROM identity.account_lifecycle a
    WHERE NOT EXISTS (SELECT 1 FROM identity.user_account u WHERE u.id = a.user_id);
+  ALTER TABLE identity.account_lifecycle_phase ENABLE TRIGGER trg_lifecycle_phase_no_delete;
   ALTER TABLE identity.account_lifecycle ENABLE TRIGGER trg_account_lifecycle_no_delete;
+  -- GUARD ON THE GUARD. Everything after this point runs the security suite and
+  -- believes its result. A cleanup that left either protection disabled would
+  -- make every later case run against a weaker database than the one being
+  -- certified, and nothing downstream would notice.
+  DO \$do\$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM pg_trigger
+                WHERE tgname IN ('trg_account_lifecycle_no_delete',
+                                 'trg_lifecycle_phase_no_delete')
+                  AND NOT tgisinternal
+                  AND tgenabled = 'D') THEN
+      RAISE EXCEPTION 'ledger cleanup left a no-delete trigger disabled';
+    END IF;
+  END
+  \$do\$;
 "
 
 # ---- PD-9, Entry 11B3 -------------------------------------------------------
