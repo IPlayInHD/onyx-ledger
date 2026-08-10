@@ -1,0 +1,114 @@
+"""Entry 11B5H2D — the claim hands back a batch in the order it selected it.
+
+`ioe.claim_freshness_events` picks WHICH rows to claim with
+`ORDER BY c.created_at, c.id`, and the relay then applies the returned rows in
+whatever order they arrive in. Those two orders have to be the same order. They
+were not: the function returned `ORDER BY c.id`, and `ref.uuid_generate_v7`
+builds an id from a 48-bit MILLISECOND timestamp plus `gen_random_bytes` — no
+monotonic counter — so two events created within the same millisecond sorted at
+random.
+
+Measured before the fix, 200 trials queueing two events back to back in
+separate transactions: 82 pairs landed in the same millisecond and 48 came back
+reversed. After: 0.
+
+This is not a cosmetic ordering preference. Freshness reasons are
+first-cause-wins by predicate — only rows still `current` are updated — so the
+order the relay applies a batch in decides which reason a person is shown, and
+"your figures moved" and "a rule changed" tell them to do different things.
+
+The test is statistical because the defect was. A single pair reproduces it
+only about half the time, so one ordered pair would pass on a broken function
+every other run — the kind of test that is worse than none. Many pairs in one
+batch make an accidental pass vanishingly unlikely: a scrambled batch of 12
+matches queue order with probability 1/12!.
+"""
+from __future__ import annotations
+
+import uuid
+
+import psycopg2
+
+from tests.conftest import owner_dsn
+
+PAIRS = 12
+
+
+def _owner():
+    conn = psycopg2.connect(owner_dsn())
+    conn.autocommit = True
+    return conn
+
+
+def test_a_claimed_batch_comes_back_in_queue_order():
+    """Queue 12 events in separate transactions, claim them in one batch, and
+    require the returned order to equal the queued order exactly."""
+    admin = _owner()
+    try:
+        cur = admin.cursor()
+        user = uuid.uuid4()
+        cur.execute("INSERT INTO identity.user_account (id, email, status) "
+                    "VALUES (%s, %s, 'active')",
+                    (str(user), f"ord_{uuid.uuid4().hex[:10]}@example.com"))
+
+        # Separate statements under autocommit, so each row gets its own
+        # transaction timestamp — which is what two real user actions produce.
+        queued: list[str] = []
+        created: list[object] = []
+        for _ in range(PAIRS):
+            cur.execute("""
+                INSERT INTO ioe.freshness_outbox
+                    (event_type, stale_reason_code, user_id, dedupe_key)
+                VALUES ('financial_data_changed', 'BASELINE_INPUTS_CHANGED',
+                        %s, %s)
+                RETURNING id, created_at
+            """, (str(user), f"ord:{uuid.uuid4()}"))
+            event_id, created_at = cur.fetchone()
+            queued.append(str(event_id))
+            created.append(created_at)
+
+        # Guard on the guard #1: the events must actually be close enough
+        # together to exercise the defect. Spread across many milliseconds, id
+        # order and creation order agree and the old function passed too.
+        span_ms = (created[-1] - created[0]).total_seconds() * 1000
+        assert span_ms < 50, (
+            f"the fixture spread {PAIRS} events over {span_ms:.1f}ms; they are "
+            "too far apart to exercise same-millisecond ordering")
+
+        # Guard on the guard #2: creation timestamps must be distinct, or there
+        # is no queue order to preserve and the assertion below is meaningless.
+        assert len(set(created)) == PAIRS, (
+            "events share a created_at; separate transactions were expected")
+
+        cur.execute("SELECT out_event_id FROM ioe.claim_freshness_events(%s, %s)",
+                    (PAIRS, "order-test"))
+        returned = [str(r[0]) for r in cur.fetchall()]
+
+        assert returned == queued, (
+            "the claim returned a batch in a different order than it selected "
+            "it, so the relay applies events out of queue order:\n"
+            f"  queued:   {queued}\n  returned: {returned}")
+    finally:
+        admin.close()
+
+
+def test_the_returned_order_is_stated_in_the_function_itself():
+    """Read the installed definition, so a later edit cannot quietly restore
+    the id-only sort while the statistical test above happens to pass."""
+    admin = _owner()
+    try:
+        cur = admin.cursor()
+        cur.execute("SELECT prosrc FROM pg_proc p JOIN pg_namespace n "
+                    "  ON n.oid = p.pronamespace "
+                    " WHERE n.nspname = 'ioe' "
+                    "   AND p.proname = 'claim_freshness_events'")
+        body = cur.fetchone()[0]
+    finally:
+        admin.close()
+
+    # The final ORDER BY is the one that decides processing order.
+    tail = body[body.rindex("FROM claimed c"):]
+    assert "ORDER BY c.created_at, c.id" in tail, (
+        "the claim no longer returns its batch in queue order; ids are "
+        "millisecond-precision plus randomness, so an id-only sort scrambles "
+        f"same-millisecond events:\n{tail}")
