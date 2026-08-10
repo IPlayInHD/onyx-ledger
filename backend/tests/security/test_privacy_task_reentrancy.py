@@ -192,9 +192,13 @@ def test_every_entry_11b5_task_survives_repeated_invocation_in_one_process():
                 str(_uuid.uuid4()), "BASELINE_INPUTS_CHANGED"),
     }
 
+    # FIVE consecutive calls, not three. The failure was never a clean
+    # alternation — `verify_sealed_integrity` failed on calls 1 and 3 and
+    # passed on 2 — so a short run can land on a lucky pattern. Five covers
+    # both parities twice over.
     failures: list[str] = []
     for name, call in cases.items():
-        for attempt in (1, 2, 3):
+        for attempt in (1, 2, 3, 4, 5):
             try:
                 call()
             except Exception as exc:                       # noqa: BLE001
