@@ -1,0 +1,18 @@
+-- PD-16 — the application runtime must not hold the freshness capability.
+--
+-- `29_ioe_outbox_and_projection.sql:517` granted `onyx_freshness_worker` to
+-- `onyx_app_rw`, the role every HTTP request runs as. The keyhole design was
+-- sound — NOLOGIN capability role, narrow SECURITY DEFINER functions, PUBLIC
+-- revoked, no table privileges — and one membership defeated all of it. Proven
+-- from a genuine runtime login (session_user = onyx_test, a member of
+-- onyx_app_rw): SET ROLE succeeded and ioe.claim_freshness_events claimed a
+-- real event.
+--
+-- The replacement is a dedicated LOGIN per privileged worker: Entry 11B5E5
+-- established it for privacy, 11B5E6A for freshness. LOGIN roles and their
+-- credentials remain external provisioning; the revoke belongs here.
+--
+-- The worker keeps EXECUTE and gains NO table access. It does not need any —
+-- proven by the test suite, which reads the queue as the application observer
+-- and calls the keyholes as the worker.
+REVOKE onyx_freshness_worker FROM onyx_app_rw;

@@ -147,3 +147,112 @@ def test_the_privacy_runtime_holds_no_dangerous_role_attributes():
     assert not superuser, "the privacy runtime is a superuser"
     assert not bypassrls, "the privacy runtime bypasses row-level security"
     assert not createdb and not createrole
+
+
+# ---------------------------------------------------------------------------
+# PD-16 — the freshness capability, after remediation
+# ---------------------------------------------------------------------------
+FRESHNESS_DSN = (
+    "postgresql://onyx_freshness_test:test@/onyx_test"
+    "?host=/var/run/postgresql&port=5432"
+)
+
+
+def _freshness_session():
+    conn = psycopg2.connect(FRESHNESS_DSN)
+    conn.autocommit = True
+    return conn
+
+
+def test_the_application_cannot_assume_the_freshness_capability():
+    """PD-16's defining closure evidence.
+
+    BEFORE remediation this exact sequence, from this exact login, succeeded —
+    and went on to claim a real event through `ioe.claim_freshness_events`. The
+    grant that allowed it was `GRANT onyx_freshness_worker TO onyx_app_rw`.
+    """
+    with _app_session() as conn:
+        cur = conn.cursor()
+        with pytest.raises(psycopg2.Error) as caught:
+            cur.execute("SET ROLE onyx_freshness_worker")
+        assert "permission denied" in str(caught.value).lower(), caught.value
+
+
+def test_no_capability_reaches_the_application_role_even_transitively():
+    """`pg_has_role` walks the whole graph, so a reintroduction through some
+    intermediate role fails here too — not only the literal original grant."""
+    with _app_session() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT pg_has_role('onyx_app_rw', 'onyx_freshness_worker',"
+                    " 'USAGE'), pg_has_role('onyx_app_rw', "
+                    "'onyx_privacy_worker', 'USAGE')")
+        freshness, privacy = cur.fetchone()
+    assert not freshness, "onyx_app_rw can use the freshness capability"
+    assert not privacy, "onyx_app_rw can use the privacy capability"
+
+
+def test_the_application_cannot_execute_the_freshness_keyholes():
+    for fn in ("claim_freshness_events", "complete_freshness_event",
+               "fail_freshness_event", "fan_out_freshness_event"):
+        with _app_session() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT has_function_privilege('onyx_app_rw', p.oid, 'EXECUTE'),"
+                "       has_function_privilege('public', p.oid, 'EXECUTE') "
+                "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                " WHERE n.nspname = 'ioe' AND p.proname = %s LIMIT 1", (fn,))
+            row = cur.fetchone()
+        # Assert the function EXISTS before asserting denial, or a renamed
+        # keyhole would make this pass by never being reached.
+        assert row is not None, f"ioe.{fn} does not exist"
+        assert row[0] is False, f"the application role can EXECUTE ioe.{fn}"
+        assert row[1] is False, f"PUBLIC can EXECUTE ioe.{fn}"
+
+
+def test_the_freshness_runtime_is_isolated_and_capable():
+    with _freshness_session() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT session_user, "
+            "pg_has_role(session_user, 'onyx_freshness_worker', 'MEMBER'), "
+            "pg_has_role(session_user, 'onyx_app_rw', 'MEMBER'), "
+            "pg_has_role(session_user, 'onyx_privacy_worker', 'MEMBER')")
+        session_user, has_fresh, has_app, has_privacy = cur.fetchone()
+        cur.execute("SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole "
+                    "  FROM pg_roles WHERE rolname = session_user")
+        superuser, bypassrls, createdb, createrole = cur.fetchone()
+    assert session_user == "onyx_freshness_test"
+    assert has_fresh, "the freshness runtime lacks its own capability"
+    assert not has_app, "the freshness runtime inherits application privileges"
+    assert not has_privacy, "the freshness runtime holds the privacy capability"
+    assert not superuser and not bypassrls and not createdb and not createrole
+
+
+def test_the_freshness_runtime_can_execute_its_keyholes():
+    with _freshness_session() as conn:
+        cur = conn.cursor()
+        for fn in ("claim_freshness_events", "complete_freshness_event",
+                   "fail_freshness_event", "fan_out_freshness_event"):
+            cur.execute(
+                "SELECT has_function_privilege(session_user, p.oid, 'EXECUTE') "
+                "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                " WHERE n.nspname = 'ioe' AND p.proname = %s LIMIT 1", (fn,))
+            row = cur.fetchone()
+            assert row is not None, f"ioe.{fn} does not exist"
+            assert row[0] is True, f"the freshness runtime cannot execute {fn}"
+
+
+def test_the_freshness_runtime_has_no_direct_queue_table_access():
+    """It does not need any, and must not acquire any. Reaching queue rows only
+    through the narrow SECURITY DEFINER function is what makes the keyhole a
+    keyhole; a table grant would turn it into a door."""
+    with _freshness_session() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT has_table_privilege(session_user, 'ioe.freshness_outbox', "
+            "'SELECT'), has_table_privilege(session_user, "
+            "'ioe.freshness_outbox', 'UPDATE'), has_table_privilege("
+            "session_user, 'ioe.freshness_outbox', 'DELETE')")
+        select_, update_, delete_ = cur.fetchone()
+    assert not select_ and not update_ and not delete_, (
+        "the freshness runtime gained direct table access to the queue")
