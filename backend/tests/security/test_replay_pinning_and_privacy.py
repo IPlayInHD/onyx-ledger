@@ -19,6 +19,7 @@ immutable artifact to manufacture an outcome.
 """
 from __future__ import annotations
 
+import re
 import uuid
 
 import pytest
@@ -157,6 +158,26 @@ async def test_replay_after_purge_stays_pinned_to_the_historical_rules():
         admin.close()
 
 
+#: Fields excluded from the amount search below. Every one is a UUID, a hex
+#: digest or a timestamp — none can carry a readable amount, and all three
+#: WILL match a short decimal by chance. The exclusion is guarded at the use
+#: site rather than taken on trust.
+_OPAQUE_EVIDENCE_FIELDS = (
+    "id", "user_id", "optimization_run_id", "portfolio_id", "scenario_id",
+    "operational_event_id",
+    "expected_spec_hash", "expected_result_hash", "actual_result_hash",
+    "started_at", "completed_at", "created_at", "claim_expires_at",
+)
+
+#: The same for the outbox. `dedupe_key`, `stale_reason_code`, `event_type`,
+#: `tax_year` and `jurisdiction` are deliberately NOT excluded: those are the
+#: fields a leak would actually travel in.
+_OPAQUE_OUTBOX_FIELDS = (
+    "id", "user_id", "analysis_id", "claim_token",
+    "claimed_at", "created_at", "processed_at",
+)
+
+
 # ---------------------------------------------------------------------- §33 --
 async def test_the_evidence_replay_writes_carries_no_financial_value():
     """Integrity evidence outlives the data it describes, so what it records
@@ -171,19 +192,51 @@ async def test_the_evidence_replay_writes_carries_no_financial_value():
         result = await IntegrityVerificationService(uid).verify("optimization", run_id)
         assert result.status is IntegrityStatus.VERIFIED
 
-        cur.execute("SELECT count(*), coalesce(string_agg(to_jsonb(c)::text, ' '), '') "
+        # The opaque fields are checked for SHAPE, the readable ones for the
+        # amounts. Doing it the other way round — one substring search over the
+        # whole serialized row — is what this test used to do, and `EXPENSE` is
+        # 1750: four digits, every one a valid hex character. Measured on a
+        # database this suite had run against ten times, 3 of 590
+        # integrity_check rows contained the string "1750" and every one was a
+        # coincidence:
+        #
+        #     2 inside a SHA-256 digest or a UUID
+        #     1 inside a timestamp's microseconds — "...48.817504+00:00"
+        #
+        # So the assertion failed roughly once in ten runs while nothing had
+        # leaked. A privacy test that cries wolf gets weakened by the next
+        # person who sees it fail, which is the real cost.
+        cur.execute("SELECT count(*), coalesce(string_agg("
+                    "  (to_jsonb(c) - %s::text[])::text, ' '), '') "
                     "  FROM ioe.integrity_check c "
-                    " WHERE c.optimization_run_id = %s", (str(run_id),))
+                    " WHERE c.optimization_run_id = %s",
+                    (list(_OPAQUE_EVIDENCE_FIELDS), str(run_id)))
         count, body = cur.fetchone()
         assert count > 0, "no integrity evidence was written; this proves nothing"
+
+        # THE GUARD ON THE EXCLUSION. Skipping those fields is only safe while
+        # they really are opaque; a future change that put a readable value in
+        # a column named `..._hash` would otherwise be excluded from the very
+        # check meant to catch it.
+        cur.execute("SELECT expected_spec_hash, expected_result_hash, "
+                    "       actual_result_hash "
+                    "  FROM ioe.integrity_check WHERE optimization_run_id = %s",
+                    (str(run_id),))
+        for row in cur.fetchall():
+            for digest in row:
+                assert digest is None or re.fullmatch(r"[0-9a-f]{64}", digest), (
+                    "an excluded evidence field is not a hex digest, so "
+                    f"excluding it from the amount search is unsafe: {digest!r}")
 
         for forbidden, label in ((str(int(INCOME)), "income amount"),
                                  (str(int(EXPENSE)), "expense amount")):
             assert forbidden not in body, (
                 f"the {label} reached the integrity check record")
 
-        cur.execute("SELECT coalesce(string_agg(to_jsonb(o)::text, ' '), '') "
-                    "  FROM ioe.freshness_outbox o WHERE o.user_id = %s", (str(uid),))
+        cur.execute("SELECT coalesce(string_agg("
+                    "  (to_jsonb(o) - %s::text[])::text, ' '), '') "
+                    "  FROM ioe.freshness_outbox o WHERE o.user_id = %s",
+                    (list(_OPAQUE_OUTBOX_FIELDS), str(uid)))
         outbox = cur.fetchone()[0]
         assert str(int(INCOME)) not in outbox, (
             "an income amount reached the freshness outbox")
