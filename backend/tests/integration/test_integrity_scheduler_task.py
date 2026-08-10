@@ -32,7 +32,8 @@ from app.database.models import (
     TaxRuleVersion,
     UserAccount,
 )
-from app.database.session import engine, unit_of_work
+from app.database.privacy_session import dispose_all_engines
+from app.database.session import unit_of_work
 from app.services.ioe.domain.integrity import (
     VERIFIER_VERSION,
     IntegrityReason,
@@ -58,7 +59,8 @@ BEAT_KEY = "ioe-integrity-verification"
 @pytest.fixture(autouse=True)
 async def _dispose_engine():
     yield
-    await engine.dispose()
+    # BOTH runtimes — see the note in test_integrity_verification.py.
+    await dispose_all_engines()
 
 
 def _suffix() -> str:
@@ -158,7 +160,7 @@ async def _tamper(scenario_id: uuid.UUID, **columns) -> None:
 
 async def _seed_one_scenario() -> None:
     await _sealed_scenario()
-    await engine.dispose()
+    await dispose_all_engines()
 
 
 async def _drain_until_checked(
@@ -587,11 +589,11 @@ def test_the_task_body_returns_counts_only():
     from workers.tasks.ioe import verify_sealed_integrity
 
     asyncio.run(_seed_one_scenario())
-    asyncio.run(engine.dispose())        # no pool bound to another loop
+    asyncio.run(dispose_all_engines())   # no pool bound to another loop
     try:
         metrics = verify_sealed_integrity.run(batch_size=2)
     finally:
-        asyncio.run(engine.dispose())
+        asyncio.run(dispose_all_engines())
 
     assert set(metrics) == set(SchedulerReport().as_metrics())
     assert all(isinstance(v, int) for v in metrics.values())

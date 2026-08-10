@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import text
 
 from app.core.logging import get_logger
-from app.database.session import unit_of_work
+from app.database.privacy_session import freshness_unit_of_work
 from app.services.ioe.domain.integrity import (
     INTEGRITY_CHECK_POLICY_VERSION,
     EntityType,
@@ -156,7 +156,12 @@ class IntegrityScheduler:
         self, *, entity_type: str = "optimization", batch_size: int = DEFAULT_BATCH_SIZE
     ) -> list[ScheduledTarget]:
         bounded = min(max(batch_size, 1), MAX_BATCH_SIZE)
-        async with unit_of_work(actor_type="system") as session:
+        # PRIVILEGED, so it runs on the dedicated freshness runtime rather than
+        # the role that serves HTTP. `ioe.claim_integrity_targets` is granted to
+        # `onyx_freshness_worker` and to nobody else; PD-16 removed that
+        # capability from `onyx_app_rw`, which is correct and is exactly why
+        # this call cannot be made from an ordinary application session.
+        async with freshness_unit_of_work() as session:
             rows = await session.execute(
                 text(
                     "SELECT out_entity_type AS entity_type, "
@@ -169,7 +174,8 @@ class IntegrityScheduler:
             return [ScheduledTarget(**dict(r._mapping)) for r in rows]
 
     async def recover_stale_claims(self, limit: int = 100) -> int:
-        async with unit_of_work(actor_type="system") as session:
+        # Privileged for the same reason as `claim` above.
+        async with freshness_unit_of_work() as session:
             recovered = await session.scalar(
                 text("SELECT ioe.recover_stale_integrity_checks(:limit)"),
                 {"limit": limit},

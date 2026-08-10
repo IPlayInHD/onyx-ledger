@@ -37,7 +37,11 @@ from app.database.models import (
     TaxRuleVersion,
     UserAccount,
 )
-from app.database.session import engine, unit_of_work
+from app.database.privacy_session import (
+    dispose_all_engines,
+    freshness_unit_of_work,
+)
+from app.database.session import unit_of_work
 from app.services.ioe.domain.integrity import (
     NON_REPRODUCIBLE,
     VERIFIER_VERSION,
@@ -70,7 +74,10 @@ SYNTHETIC_DOCUMENT = "T4 slip for Jordan Blackwood, employer Northwind Ltd"
 @pytest.fixture(autouse=True)
 async def _dispose_engine():
     yield
-    await engine.dispose()
+    # BOTH runtimes: the scheduler's keyhole calls run on the freshness
+    # engine, so disposing only the app engine leaves a pool bound to a dead
+    # event loop and the next test in the file fails for unrelated reasons.
+    await dispose_all_engines()
 
 
 def _suffix() -> str:
@@ -693,7 +700,11 @@ async def test_the_scheduler_claim_returns_identifiers_only():
 @pytest.mark.asyncio
 async def test_the_scheduler_batch_is_bounded_in_sql():
     await _sealed_optimization()
-    async with unit_of_work(actor_type="system") as s:
+    # As the FRESHNESS runtime, not the application role. PD-16 removed this
+    # capability from `onyx_app_rw`, so calling the keyhole through an ordinary
+    # session now fails on privilege — which would make this test report a
+    # permission error where it means to measure a batch cap.
+    async with freshness_unit_of_work() as s:
         rows = (await s.execute(text(
             "SELECT count(*) FROM ioe.claim_integrity_targets(10000, 'optimization')"
         ))).scalar()

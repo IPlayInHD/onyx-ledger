@@ -129,6 +129,24 @@ async def dispose_worker_engines() -> None:
     _factories.clear()
 
 
+async def dispose_all_engines() -> None:
+    """Every engine this process may have opened — application AND workers.
+
+    The pooled-connection-bound-to-a-dead-event-loop trap has now been hit
+    three times, and each time the shape was identical: a code path quietly
+    started using a SECOND engine, while the disposal site next to it still
+    named only the first. Tests passed alone and failed together.
+
+    A caller that has to remember to dispose two things will eventually
+    remember one. This names the set instead, so the next runtime added to the
+    registry is covered by every existing call site without anyone editing it.
+    """
+    from app.database.session import engine  # local: avoids a circular import
+
+    await engine.dispose()
+    await dispose_worker_engines()
+
+
 async def dispose_privacy_engine() -> None:
     """Retained for call sites written before the registry existed."""
     await dispose_worker_engines()
