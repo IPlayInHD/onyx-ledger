@@ -70,17 +70,31 @@ def _to_purge_pending(cur, user: uuid.UUID) -> None:
                     " WHERE user_id = %s", (state, str(user)))
 
 
-def _claim(cur, worker: str, user: uuid.UUID) -> uuid.UUID | None:
-    """Claim through the real function, returning THIS account's token.
+def _claim(cur, worker: str, user: uuid.UUID, rounds: int = 20) -> uuid.UUID | None:
+    """Claim through the real function until THIS account appears.
 
-    The queue is shared with every other test, so the batch is taken wide and
-    filtered rather than assumed to contain one row.
+    `claim_account_lifecycle` caps its batch at 50 and orders oldest-first, so
+    claiming ONCE and filtering is really an assertion that fewer than 50
+    claimable lifecycles exist. That is true on a fresh database and false on
+    one the security-gate proof has run the suite against fifteen times — where
+    this file failed with "worker A did not claim the account" while the code
+    under test was perfectly correct.
+
+    `test_account_lifecycle.py` had already learned this and solved it with
+    `_claim_until_found`; Entry 11B5H2E did not copy the lesson. Draining in
+    rounds makes the subject's position in the backlog irrelevant, which is the
+    honest shape: the invariant is that the worker CAN claim this account, not
+    where it sits in the queue.
     """
-    cur.execute("SELECT out_user_id, out_claim_token "
-                "  FROM identity.claim_account_lifecycle(50, %s)", (worker,))
-    for claimed_user, token in cur.fetchall():
-        if str(claimed_user) == str(user):
-            return token
+    for _ in range(rounds):
+        cur.execute("SELECT out_user_id, out_claim_token "
+                    "  FROM identity.claim_account_lifecycle(50, %s)", (worker,))
+        batch = cur.fetchall()
+        if not batch:
+            return None
+        for claimed_user, token in batch:
+            if str(claimed_user) == str(user):
+                return token
     return None
 
 

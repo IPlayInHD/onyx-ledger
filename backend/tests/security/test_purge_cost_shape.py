@@ -253,5 +253,17 @@ def test_the_worker_claim_batch_stays_bounded_as_subjects_accumulate():
         assert 0 < claimed <= 50, (
             f"a claim asking for 10000 returned {claimed}; the SQL cap of 50 is "
             "not holding, and a backlog could be swallowed whole")
+
+        # Drain what this test created. Sixty pending subjects per run is a
+        # backlog every OTHER test's claim then has to page through — and since
+        # the claim is capped at 50 and ordered oldest-first, leaving them
+        # behind is how a correct test starts reporting "worker A did not claim
+        # the account" under the security gate's repeated runs. A test that
+        # manufactures a backlog cleans it up.
+        for _ in range(20):
+            cur.execute("SELECT count(*) FROM "
+                        "identity.claim_account_lifecycle(50, 'cost-drain')")
+            if cur.fetchone()[0] == 0:
+                break
     finally:
         admin.close()

@@ -260,12 +260,26 @@ prove "PD-9 ledger DELETE grant" \
 # The subject's uniqueness. Without the primary key, one account could
 # accumulate several logical lifecycles and idempotency would be a claim rather
 # than a fact.
+# The dependent foreign key has to go with it and come back after. Entry 11B5C
+# added `identity.account_lifecycle_phase.fk_lifecycle_phase_subject`, which
+# references this primary key's index, and from then on the bare DROP failed
+# with "cannot drop constraint ... because other objects depend on it". The
+# injection therefore never applied — so the case was measuring nothing, and the
+# restore left the schema short of a constraint for every case that followed.
+# CASCADE is used deliberately here and the FK is rebuilt explicitly, rather
+# than trusting CASCADE's silent removal to be the whole story.
 prove "PD-9 durable subject uniqueness" \
   "ALTER TABLE identity.account_lifecycle
-     DROP CONSTRAINT account_lifecycle_pkey;" \
+     DROP CONSTRAINT account_lifecycle_pkey CASCADE;" \
   "${LEDGER_CLEANUP}
    ALTER TABLE identity.account_lifecycle
-     ADD CONSTRAINT account_lifecycle_pkey PRIMARY KEY (user_id);"
+     ADD CONSTRAINT account_lifecycle_pkey PRIMARY KEY (user_id);
+   ALTER TABLE identity.account_lifecycle_phase
+     DROP CONSTRAINT IF EXISTS fk_lifecycle_phase_subject;
+   ALTER TABLE identity.account_lifecycle_phase
+     ADD CONSTRAINT fk_lifecycle_phase_subject
+     FOREIGN KEY (user_id) REFERENCES identity.account_lifecycle(user_id)
+     ON DELETE CASCADE;"
 
 # The worker requiring a live account again. Restoring the join is the shape of
 # a future change that quietly breaks every phase after account removal.
