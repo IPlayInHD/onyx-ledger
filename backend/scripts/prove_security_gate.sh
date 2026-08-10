@@ -38,6 +38,41 @@ export ONYX_PRIVACY_DATABASE_URL="postgresql+asyncpg://${PRIVACY_ROLE}:test@/${D
 export ONYX_FRESHNESS_DATABASE_URL="postgresql+asyncpg://${FRESHNESS_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
 export ONYX_JWT_SECRET="${ONYX_JWT_SECRET:-security-gate-proof-secret-32-bytes-x}"
 
+# ONE DESTRUCTIVE RUN AT A TIME.
+#
+# The proof database name above is a CONSTANT, and until Entry 11B5J nothing
+# stopped a second instance of this script from using the same one. Two runs
+# overlapped by accident and the damage was not subtle:
+#
+#   DROP TABLE finance.income_source_y2043   blocked on a relation lock for
+#                                            10m56s behind the other run
+#   identity.account_lifecycle               one run's claim consumed the
+#                                            other's fixture row -> the suite
+#                                            reported `assert 'pending' ==
+#                                            'claimed'`
+#   PD-1 policy present                      reported FAIL -- a security defect
+#                                            that did not exist
+#   trap cleanup EXIT                        either run's exit would DROP the
+#                                            database the other was using
+#
+# A gate that can invent a defect is worse than no gate, because the first
+# response to a red security gate is to go hunting for a hole in the product.
+#
+# THE LOCK IS TAKEN BEFORE THE EXIT TRAP IS INSTALLED, deliberately: a refused
+# run must not reach a cleanup that drops the database belonging to the run
+# that holds the lock. `flock` lives on an open descriptor, so the kernel
+# releases it however the process dies -- including SIGKILL, which is how both
+# of those runs were ended -- so a crashed run cannot wedge the gate.
+LOCK="${ONYX_SEC_PROOF_LOCK:-/tmp/onyx_sec_proof.gate.lock}"
+exec 9>"$LOCK" || { echo "cannot open the security-gate lock" >&2; exit 70; }
+if ! flock -n 9; then
+  # A closed reason code and nothing else. This line is printed by a script
+  # whose environment is full of connection strings.
+  echo "refusing to run: reason=SECURITY_GATE_ALREADY_RUNNING" >&2
+  echo "another destructive security-gate run already owns the proof database" >&2
+  exit 69
+fi
+
 # The database goes; the role stays. Dropping a cluster-wide role on the way out
 # would invalidate a concurrent job authenticated as it.
 cleanup() { psql "$BASE" -q -c "DROP DATABASE IF EXISTS ${DB};" >/dev/null 2>&1 || true; }
