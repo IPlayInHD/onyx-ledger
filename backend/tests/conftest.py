@@ -38,14 +38,19 @@ def next_source_address() -> str:
 
 @pytest_asyncio.fixture
 async def client():
-    from app.database.session import engine
+    from app.database.privacy_session import dispose_all_engines
     from app.main import app  # imported after env is set
 
     transport = httpx.ASGITransport(app=app, client=(next_source_address(), 40000))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
-    # Dispose the pool so connections aren't reused across per-test event loops.
-    await engine.dispose()
+    # EVERY engine, not just the application one. Pooled connections are bound
+    # to the event loop that opened them, and a test that also touched a
+    # privileged runtime leaves that pool alive for the next test's loop —
+    # which then fails with "attached to a different loop" somewhere unrelated.
+    # This fixture named only `engine` until Entry 11B5J, which is the fifth
+    # time that shape has cost a debugging session.
+    await dispose_all_engines()
 
 
 @pytest_asyncio.fixture

@@ -52,12 +52,28 @@ def test_the_application_cannot_assume_the_privacy_capability():
 
 def test_the_application_cannot_invoke_the_privacy_keyholes_directly():
     """Membership is not the only way in — EXECUTE granted to the wrong role
-    would do it too. Asserted against the functions themselves."""
+    would do it too. Asserted against the functions themselves.
+
+    THE LIFECYCLE WORKER TRIO WAS MISSING FROM THIS LIST UNTIL ENTRY 11B5J, and
+    that omission is the whole reason the defect survived. PD-16 was a role
+    MEMBERSHIP (`GRANT onyx_freshness_worker TO onyx_app_rw`) and its gate
+    watched memberships; `claim_account_lifecycle`, `advance_account_lifecycle`
+    and `fail_account_lifecycle` were DIRECT grants made under the pre-11B5E
+    assumption that the application role also ran the privacy worker.
+
+    Reproduced from a genuine application LOGIN before the fix: claiming
+    returned another tenant's user id, state and claim token, and advancing with
+    that token moved the victim's account to ACCESS_DISABLED. A list that omits
+    a keyhole is not a weaker guard — it is no guard at all for that keyhole.
+    """
     for fn in ("identity.count_remaining_source_data",
                "identity.purge_source_data",
                "identity.start_lifecycle_phase",
                "identity.complete_lifecycle_phase",
-               "identity.fail_lifecycle_phase"):
+               "identity.fail_lifecycle_phase",
+               "identity.claim_account_lifecycle",
+               "identity.advance_account_lifecycle",
+               "identity.fail_account_lifecycle"):
         with _app_session() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -67,6 +83,41 @@ def test_the_application_cannot_invoke_the_privacy_keyholes_directly():
             row = cur.fetchone()
         assert row is not None, f"{fn} does not exist"
         assert row[0] is False, f"the application role can EXECUTE {fn}"
+
+
+def test_the_application_login_cannot_drive_another_tenants_deletion():
+    """The behavioural half of the ACL assertion above.
+
+    An ACL check proves what the catalog says; this proves what the database
+    does when the request-path role actually tries it. Both are kept because
+    they fail differently: a future GRANT restores the capability silently,
+    while a future change to the function's own guards would not show up in an
+    ACL at all.
+    """
+    with _app_session() as conn:
+        cur = conn.cursor()
+        for statement, label in (
+            ("SELECT * FROM identity.claim_account_lifecycle(10, 'probe')",
+             "claim another tenant's lifecycle"),
+            ("SELECT identity.advance_account_lifecycle("
+             "'00000000-0000-0000-0000-000000000001'::uuid,"
+             "'00000000-0000-0000-0000-000000000002'::uuid,"
+             "'ACCESS_DISABLED', 'probe')", "disable another tenant's account"),
+            ("SELECT identity.fail_account_lifecycle("
+             "'00000000-0000-0000-0000-000000000001'::uuid,"
+             "'00000000-0000-0000-0000-000000000002'::uuid,"
+             "'WORKER_CLAIM_LOST', 'probe')", "fail another tenant's lifecycle"),
+        ):
+            try:
+                cur.execute(statement)
+                cur.fetchall()
+            except psycopg2.errors.InsufficientPrivilege:
+                conn.rollback()
+            else:
+                conn.rollback()
+                raise AssertionError(
+                    f"the application role could {label}; the lifecycle worker "
+                    "capability is reachable from the request path")
 
 
 def test_public_cannot_execute_the_privacy_keyholes():

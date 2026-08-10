@@ -14,6 +14,7 @@ import psycopg2
 import pytest
 from sqlalchemy import text
 
+from app.database.privacy_session import privacy_unit_of_work
 from app.database.session import unit_of_work
 from app.services.privacy import (
     AccountLifecycleService,
@@ -337,7 +338,7 @@ def test_a_lifecycle_cannot_be_completed_without_a_completion_time():
 async def test_the_service_refuses_to_mark_a_lifecycle_complete():
     """Belt to the trigger's braces. Entry 11B1 implements no purge, so nothing
     in this codebase has earned the right to say an account's data is gone."""
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         service = AccountLifecycleService(session)
         claimed = type("C", (), {
             "user_id": uuid.uuid4(), "claim_token": uuid.uuid4(),
@@ -558,19 +559,19 @@ async def test_the_worker_claims_advances_and_recovers(client):
     token, user_id, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         service = AccountLifecycleService(session)
         mine = await _claim_until_found(service, user_id, "worker-a")
     assert mine is not None, "the requested account was not claimable"
     assert mine.requested_at is not None, "the cutoff was not handed to the worker"
 
     # A second worker cannot take a live claim.
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         again = await AccountLifecycleService(session).claim(
             worker_id="worker-b", batch_size=50)
     assert user_id not in {c.user_id for c in again}
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         assert await AccountLifecycleService(session).advance(
             mine, LifecycleState.ACCESS_DISABLED, worker_id="worker-a")
     assert await _state_of(user_id) == LifecycleState.ACCESS_DISABLED.value
@@ -582,7 +583,7 @@ async def test_an_abandoned_claim_is_recovered_by_another_worker(client):
     token, user_id, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         claimed = await _claim_until_found(
             AccountLifecycleService(session), user_id, "doomed-worker")
     assert claimed is not None
@@ -590,7 +591,7 @@ async def test_an_abandoned_claim_is_recovered_by_another_worker(client):
     # Age the claim past the timeout, as a dead worker's claim would age.
     _age_claim(user_id)
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         recovered = await _claim_until_found(
             AccountLifecycleService(session), user_id, "rescue-worker")
     assert recovered is not None, "an abandoned claim was never released"
@@ -608,18 +609,18 @@ async def test_a_stale_claim_token_cannot_advance_the_lifecycle(client):
     token, user_id, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         mine = await _claim_until_found(
             AccountLifecycleService(session), user_id, "worker-a")
     assert mine is not None
 
     _age_claim(user_id)
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         stolen = await _claim_until_found(
             AccountLifecycleService(session), user_id, "worker-b")
     assert stolen is not None, "worker-b never took the claim"
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         assert not await AccountLifecycleService(session).advance(
             mine, LifecycleState.ACCESS_DISABLED, worker_id="worker-a"), (
             "a worker advanced a lifecycle it no longer held"
@@ -631,19 +632,19 @@ async def test_a_failed_phase_records_a_closed_code_and_stays_retryable(client):
     token, user_id, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         claimed = await _claim_until_found(
             AccountLifecycleService(session), user_id, "worker-a")
         assert claimed is not None
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         assert await AccountLifecycleService(session).fail(
             claimed, LifecycleFailureCode.PHASE_RETRY_REQUIRED, worker_id="worker-a")
 
     assert await _state_of(user_id) == LifecycleState.FAILED_RETRYABLE.value
 
     # And it is claimable again — a failure must not strand the account.
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         again = await AccountLifecycleService(session).claim(
             worker_id="worker-c", batch_size=50)
     assert user_id in {c.user_id for c in again}
@@ -700,7 +701,7 @@ async def test_deletion_is_never_reported_complete_in_11b1(client):
     token, user_id, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
-    async with unit_of_work(actor_type="admin") as session:
+    async with privacy_unit_of_work() as session:
         service = AccountLifecycleService(session)
         for _ in range(3):
             for claimed in await service.claim(worker_id="w", batch_size=50):

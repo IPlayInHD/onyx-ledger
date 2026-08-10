@@ -25,7 +25,17 @@ CONN="postgres://${SUPER}@/${DB}?host=${PGHOST}&port=${PGPORT}"
 # other run's pooled connections would start failing with "permission denied"
 # for reasons that have nothing to do with the code under test.
 SUITE_ROLE=onyx_secproof
+# The privileged runtimes need their OWN logins here too, for the same reason
+# the suite role does. Entry 11B5J made this mandatory rather than optional: the
+# account-lifecycle worker keyholes are no longer executable by `onyx_app_rw`,
+# so a gate that provisioned only the application identity could not run the
+# suite at all — it would report "already failing" and prove nothing.
+PRIVACY_ROLE=onyx_secproof_privacy
+FRESHNESS_ROLE=onyx_secproof_freshness
+
 export ONYX_DATABASE_URL="postgresql+asyncpg://${SUITE_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
+export ONYX_PRIVACY_DATABASE_URL="postgresql+asyncpg://${PRIVACY_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
+export ONYX_FRESHNESS_DATABASE_URL="postgresql+asyncpg://${FRESHNESS_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
 export ONYX_JWT_SECRET="${ONYX_JWT_SECRET:-security-gate-proof-secret-32-bytes-x}"
 
 # The database goes; the role stays. Dropping a cluster-wide role on the way out
@@ -42,9 +52,19 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${SUITE_ROLE}') THEN
     CREATE ROLE ${SUITE_ROLE} LOGIN PASSWORD 'test' IN ROLE onyx_app_rw;
   END IF;
+  -- Deliberately NOT members of onyx_app_rw: each privileged runtime gets its
+  -- capability and nothing else, which is the topology under test.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${PRIVACY_ROLE}') THEN
+    CREATE ROLE ${PRIVACY_ROLE} LOGIN PASSWORD 'test' IN ROLE onyx_privacy_worker;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${FRESHNESS_ROLE}') THEN
+    CREATE ROLE ${FRESHNESS_ROLE} LOGIN PASSWORD 'test' IN ROLE onyx_freshness_worker;
+  END IF;
 END
 \$\$;
 GRANT onyx_app_rw TO ${SUITE_ROLE};
+GRANT onyx_privacy_worker TO ${PRIVACY_ROLE};
+GRANT onyx_freshness_worker TO ${FRESHNESS_ROLE};
 SQL
 
 # The suite connects as ${SUITE_ROLE}, a member of onyx_app_rw — NOT as a superuser.

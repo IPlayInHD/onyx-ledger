@@ -74,13 +74,13 @@ async def _walk_to_purging(user_id: uuid.UUID):
 
     for nxt in (LifecycleState.ACCESS_DISABLED, LifecycleState.PURGE_PENDING,
                 LifecycleState.PURGING):
-        async with unit_of_work(actor_type="system") as s:
+        async with privacy_unit_of_work() as s:
             svc = AccountLifecycleService(s)
             claimed = await _claim_subject(svc, user_id)
             assert claimed is not None, f"could not claim to reach {nxt}"
             assert await svc.advance(claimed, nxt, worker_id="test-worker")
 
-    async with unit_of_work(actor_type="system") as s:
+    async with privacy_unit_of_work() as s:
         return await _claim_subject(AccountLifecycleService(s), user_id)
 
 
