@@ -313,6 +313,49 @@ prove "PD-9 subject must exist at creation" \
      BEFORE INSERT ON identity.account_lifecycle
      FOR EACH ROW EXECUTE FUNCTION identity.require_lifecycle_subject_exists();"
 
+# Entry 11B5J. The application role holding EXECUTE on the account-lifecycle
+# worker keyholes — the defect this gate did not previously look for, because
+# PD-16 was a role MEMBERSHIP and these were direct grants.
+#
+# The injection ASSERTS ITS OWN EFFECT before the suite runs: if the GRANT did
+# not actually produce the unsafe condition, the case raises here instead of
+# quietly reporting a pass. That is what stops it going the way the PD-9
+# primary-key case went, where a later foreign key silently made the injection
+# a no-op and the case measured nothing for months.
+prove "11B5J lifecycle worker keyholes reachable from the app role" \
+  "GRANT EXECUTE ON FUNCTION identity.claim_account_lifecycle(integer, text)
+     TO onyx_app_rw;
+   GRANT EXECUTE ON FUNCTION identity.advance_account_lifecycle(uuid, uuid, text, text)
+     TO onyx_app_rw;
+   GRANT EXECUTE ON FUNCTION identity.fail_account_lifecycle(uuid, uuid, text, text)
+     TO onyx_app_rw;
+   DO \$do\$
+   BEGIN
+     IF NOT has_function_privilege(
+              'onyx_app_rw',
+              'identity.claim_account_lifecycle(integer,text)', 'EXECUTE') THEN
+       RAISE EXCEPTION 'injection did not take effect: the unsafe condition '
+                       'this case exists to detect was never created';
+     END IF;
+   END
+   \$do\$;" \
+  "REVOKE EXECUTE ON FUNCTION identity.claim_account_lifecycle(integer, text)
+     FROM onyx_app_rw;
+   REVOKE EXECUTE ON FUNCTION identity.advance_account_lifecycle(uuid, uuid, text, text)
+     FROM onyx_app_rw;
+   REVOKE EXECUTE ON FUNCTION identity.fail_account_lifecycle(uuid, uuid, text, text)
+     FROM onyx_app_rw;
+   DO \$do\$
+   BEGIN
+     IF has_function_privilege(
+          'onyx_app_rw',
+          'identity.claim_account_lifecycle(integer,text)', 'EXECUTE') THEN
+       RAISE EXCEPTION 'cleanup failed: the app role still holds the lifecycle '
+                       'worker capability';
+     END IF;
+   END
+   \$do\$;"
+
 echo
 echo "security gate proof: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]
