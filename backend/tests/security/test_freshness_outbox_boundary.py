@@ -596,6 +596,26 @@ async def test_the_relay_applies_events_under_ordinary_tenant_context():
     scenario_a = await ScenarioService(uid_a).simulate(analysis_a, _spec())
     scenario_b = await ScenarioService(uid_b).simulate(analysis_b, _spec())
 
+    # DRAIN THE QUEUE TO QUIESCENCE FIRST, and only then emit the event under
+    # test. `drain()` processes the WHOLE outbox, and a tax-year-scoped event
+    # left pending by any earlier test fans out to every tenant holding results
+    # in that year — including B. That is the relay working correctly, but it
+    # makes "B is still current" a statement about the shared queue rather than
+    # about tenant scoping.
+    #
+    # On a fresh database the queue happens to be empty and the assertion held;
+    # under the security gate, which runs this suite fifteen times against one
+    # database, 63 year-scoped events were pending and B was legitimately
+    # staled by one of them. The test failed with "the relay reached across
+    # tenants" while the relay had done nothing of the sort.
+    await FreshnessRelay("tenant-context-drain").drain()
+
+    async with unit_of_work(user_id=uid_b, actor_type="user") as s:
+        before = await s.get(Scenario, scenario_b.scenario_id)
+        assert before.freshness_status == "current", (
+            "tenant B is not current before the event under test is emitted, "
+            "so this schedule cannot show whether A's event reached it")
+
     # An event scoped to A's analysis only, emitted in A's own transaction —
     # which is how producers emit, and which the outbox's own RLS requires: a
     # user-scoped event can only be written by that user's session.
