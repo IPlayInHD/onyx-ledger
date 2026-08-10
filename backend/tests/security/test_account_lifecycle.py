@@ -106,7 +106,14 @@ def _age_claim(user_id: uuid.UUID, interval: str = "2 hours") -> None:
 
 
 
-async def _claim_until_found(service, user_id, worker_id: str, rounds: int = 20):
+#: Rounds of 50 the claim drains below will make before giving up. See the
+#: helper docstring: this is a runaway guard, not a statement about how many
+#: lifecycles exist.
+_DRAIN_LIMIT = 2000
+
+
+async def _claim_until_found(service, user_id, worker_id: str,
+                             rounds: int = _DRAIN_LIMIT):
     """Claim repeatedly until this account appears, or give up.
 
     `claim_account_lifecycle` caps its batch at 50 and orders by `requested_at`
@@ -116,6 +123,22 @@ async def _claim_until_found(service, user_id, worker_id: str, rounds: int = 20)
     and false on one the security-gate proof has run the suite against thirty
     times. The invariant under test is that the worker can claim this account;
     the batch position is not part of it.
+    
+    THE CAP IS A RUNAWAY GUARD, NOT A QUEUE-SIZE ASSUMPTION. It was 20 —
+    1000 accounts — and Entry 11B5J's authoritative security-gate run failed
+    here with "worker A did not claim the account" while the code under test
+    was correct. Measured cause: the security suite leaves 206 claimable
+    lifecycles behind per run, and `claim_account_lifecycle` releases every
+    lease older than ten minutes before it claims, so the whole accumulated
+    backlog returns to the queue between two gate cases minutes apart. Fast
+    consecutive runs hid it completely — after seven runs the database held
+    1442 claimable rows and ALL 1442 were still under a live lease, so the
+    subject was the only unclaimed row and round 1 found it.
+
+    The loop's real exit is an empty batch, and it always terminates: every
+    round takes up to 50 rows out of the unclaimed set under a fresh lease,
+    and a fresh lease is not released by the recovery step. The bound below
+    only stops a runaway if that ever stops being true.
     """
     for _ in range(rounds):
         claimed = await service.claim(worker_id=worker_id, batch_size=50)

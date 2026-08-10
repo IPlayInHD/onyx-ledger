@@ -276,6 +276,20 @@ LEDGER_CLEANUP="${SUITE_STATE_RESET}
                      WHERE b.user_id = a.user_id);
   DELETE FROM identity.account_lifecycle a
    WHERE NOT EXISTS (SELECT 1 FROM identity.user_account u WHERE u.id = a.user_id);
+  -- AND THE PHASE ROWS THOSE DELETES ORPHANED. Normally
+  -- fk_lifecycle_phase_subject ON DELETE CASCADE removes them for us — but the
+  -- uniqueness case drops account_lifecycle_pkey CASCADE, which takes that
+  -- foreign key with it, so during a restore the cascade is not there to run.
+  -- The ledger rows go, the phase rows stay, and rebuilding the foreign key
+  -- then fails with
+  --
+  --     insert or update on table "account_lifecycle_phase" violates foreign
+  --     key constraint "fk_lifecycle_phase_subject"
+  --
+  -- which killed the gate mid-run and left cases 15-16 with no verdict.
+  DELETE FROM identity.account_lifecycle_phase p
+   WHERE NOT EXISTS (SELECT 1 FROM identity.account_lifecycle l
+                      WHERE l.user_id = p.user_id);
   ALTER TABLE identity.account_lifecycle_phase ENABLE TRIGGER trg_lifecycle_phase_no_delete;
   ALTER TABLE identity.account_lifecycle ENABLE TRIGGER trg_account_lifecycle_no_delete;
   -- GUARD ON THE GUARD. Everything after this point runs the security suite and
@@ -290,6 +304,11 @@ LEDGER_CLEANUP="${SUITE_STATE_RESET}
                   AND NOT tgisinternal
                   AND tgenabled = 'D') THEN
       RAISE EXCEPTION 'ledger cleanup left a no-delete trigger disabled';
+    END IF;
+    IF EXISTS (SELECT 1 FROM identity.account_lifecycle_phase p
+                WHERE NOT EXISTS (SELECT 1 FROM identity.account_lifecycle l
+                                   WHERE l.user_id = p.user_id)) THEN
+      RAISE EXCEPTION 'ledger cleanup left phase rows with no ledger row';
     END IF;
   END
   \$do\$;
