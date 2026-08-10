@@ -426,6 +426,70 @@ async def test_an_individual_deletion_during_the_source_read_leaves_no_hybrid():
         f"read began: {body[:400]}")
 
 
+async def test_a_profile_mutation_during_the_source_read_leaves_no_hybrid():
+    """§13. The profile is read by statement 5b and the income by 5d, so a
+    profile change genuinely can land between them.
+
+    It is coherent for the same structural reason as individual deletion:
+    `upsert_tax_profile` writes ONLY `profile.tax_profile`, which the snapshot
+    reads once. The province the engine calculates with must therefore match
+    the province recorded in the snapshot — a run that computed Ontario tax and
+    then sealed a snapshot saying Quebec would be the profile-shaped hybrid.
+    """
+    uid = await _user_with_sources()
+
+    reached_read = asyncio.Event()
+    profile_changed = asyncio.Event()
+
+    from app.services.tax_engine.service import TaxEngineService
+
+    original = TaxEngineService._build_input_live
+
+    async def racing_build(self, user_id, tax_year):
+        reached_read.set()
+        await asyncio.wait_for(profile_changed.wait(), timeout=15)
+        return await original(self, user_id, tax_year)
+
+    async def mutate_profile() -> None:
+        await asyncio.wait_for(reached_read.wait(), timeout=15)
+        from app.services.users.profile_service import ProfileService
+
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            await ProfileService(s).upsert_tax_profile(
+                uid, {"province_code": "BC", "marital_status": "married"})
+        profile_changed.set()
+
+    async def analysis() -> None:
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            await AccountLifecycleService(s).assert_may_act(uid)
+            await AnalysisService(s).run(uid, 2025)
+
+    TaxEngineService._build_input_live = racing_build   # type: ignore[method-assign]
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(analysis(), mutate_profile()), timeout=40)
+    finally:
+        TaxEngineService._build_input_live = original   # type: ignore[method-assign]
+
+    assert profile_changed.is_set(), "the profile never changed; seam untested"
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        run = await s.scalar(select(AnalysisRun).where(AnalysisRun.user_id == uid))
+        snap = await s.scalar(select(AnalysisInputSnapshot).where(
+            AnalysisInputSnapshot.analysis_id == run.id))
+        body = str(snap.snapshot)
+
+    # The run's province and the snapshot's province are two records of the
+    # same decision. If they disagree, the sealed artifact does not describe
+    # the calculation that produced it.
+    assert run.province_code == "BC", (
+        f"the analysis ran as {run.province_code} though the profile read "
+        "happened after the change committed")
+    assert "BC" in body, f"the snapshot does not carry the province used: {body[:400]}"
+    assert "ON" not in body.replace("province", ""), (
+        f"the snapshot carries both provinces — a hybrid profile: {body[:400]}")
+
+
 # ------------------------------------------------------------- §14, §15 -----
 async def test_one_accounts_deletion_lock_does_not_block_another_accounts_analysis():
     """A finite timeout is the point: an accidental global advisory lock would
