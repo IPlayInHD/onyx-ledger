@@ -15,7 +15,7 @@ from alembic import op
 from app.database.sql_migrations import apply_sql_file
 
 revision = "0053_pd16_freshness_capability"
-down_revision = "0052_lifecycle_claim_purge_states"
+down_revision = "0052_claim_purge_states"
 branch_labels = None
 depends_on = None
 
