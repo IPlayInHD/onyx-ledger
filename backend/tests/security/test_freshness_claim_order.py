@@ -80,14 +80,26 @@ def test_a_claimed_batch_comes_back_in_queue_order():
         assert len(set(created)) == PAIRS, (
             "events share a created_at; separate transactions were expected")
 
-        cur.execute("SELECT out_event_id FROM ioe.claim_freshness_events(%s, %s)",
-                    (PAIRS, "order-test"))
+        # The whole queue is shared with every other test in the run, and older
+        # pending events legitimately sort ahead of these. So claim the maximum
+        # and compare only THIS test's events, as a subsequence.
+        #
+        # An earlier version asserted `returned == queued` against a batch of
+        # exactly PAIRS, which passed alone and failed in the full suite —
+        # measuring queue emptiness rather than queue order.
+        cur.execute("SELECT out_event_id FROM ioe.claim_freshness_events(200, %s)",
+                    ("order-test",))
         returned = [str(r[0]) for r in cur.fetchall()]
+        mine = [e for e in returned if e in set(queued)]
 
-        assert returned == queued, (
+        assert len(mine) == PAIRS, (
+            f"claimed {len(mine)} of this test's {PAIRS} events; the batch cap "
+            "was reached before they were all handed out, so their relative "
+            "order was not measured")
+        assert mine == queued, (
             "the claim returned a batch in a different order than it selected "
             "it, so the relay applies events out of queue order:\n"
-            f"  queued:   {queued}\n  returned: {returned}")
+            f"  queued:   {queued}\n  returned: {mine}")
     finally:
         admin.close()
 

@@ -27,7 +27,8 @@ from app.database.models import (
     TaxRuleVersion,
     UserAccount,
 )
-from app.database.session import engine, unit_of_work
+from app.database.privacy_session import dispose_all_engines
+from app.database.session import unit_of_work
 from app.services.document_processing.service import DocumentService
 from app.services.financial.service import FinancialService
 from app.services.ioe.domain.scenario import FreshnessStatus, StaleReason
@@ -50,7 +51,11 @@ RRSP = "INCREASE_RRSP_DEDUCTION"
 @pytest.fixture(autouse=True)
 async def _dispose_engine():
     yield
-    await engine.dispose()
+    # BOTH runtimes. These tests drive `FreshnessRelay`, whose keyhole
+    # calls run on the freshness engine; disposing only the app engine
+    # leaves that pool bound to a finished event loop and the next test
+    # fails with 'attached to a different loop'.
+    await dispose_all_engines()
 
 
 def _suffix() -> str:

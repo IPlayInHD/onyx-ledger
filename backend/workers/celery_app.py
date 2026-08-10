@@ -49,6 +49,13 @@ celery_app.conf.task_routes = {
     # Verification replays sealed calculations, so it runs real engine work.
     # Its own queue keeps that off the freshness lanes and off optimization.
     "workers.tasks.ioe.verify_sealed_integrity": {"queue": "ioe_integrity"},
+    # Account deletion gets its own lane. It runs as a DIFFERENT database
+    # principal (`onyx_privacy_worker`) and is the one task that destroys user
+    # data, so it must not sit behind an optimization backlog and must not be
+    # served by a worker process that also holds ordinary application
+    # connections. Entry 11B5E added the task and missed the route, which sent
+    # it to Celery's default queue.
+    "workers.tasks.privacy.run_account_deletion_phases": {"queue": "privacy"},
 }
 
 celery_app.conf.beat_schedule = {
