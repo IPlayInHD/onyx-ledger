@@ -30,7 +30,9 @@ from app.database.session import unit_of_work
 from tests.conftest import owner_dsn
 
 PHASE = "SCENARIO_RETENTION"
-EARLIER_PHASES = ("SOURCE_DATA",)
+#: The phases the dispatcher runs before this one. Recorded complete so
+#: the worker reaches SCENARIO_RETENTION; each has its own proofs elsewhere.
+EARLIER_PHASES = ("SOURCE_DATA", "DOCUMENTS")
 
 
 def _owner():

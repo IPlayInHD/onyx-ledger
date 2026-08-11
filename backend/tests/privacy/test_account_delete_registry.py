@@ -196,6 +196,9 @@ def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
     classified = sorted(t for t, e in REGISTRY.items() if e.state == CLASSIFIED)
     assert classified == [
         "analysis.analysis_run",
+        "docs.document",
+        "docs.document_extraction",
+        "docs.extraction_field",
         "ioe.freshness_outbox",
         "ioe.integrity_check",
         "ioe.optimization_run",
@@ -203,7 +206,7 @@ def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
         "ioe.scenario",
         "reco.recommendation",
     ]
-    assert len(terminal_delete_blockers()) == 63
+    assert len(terminal_delete_blockers()) == 60
 
 
 def test_the_sealed_replay_output_is_retained():
@@ -280,7 +283,7 @@ def test_question_b_the_terminal_delete_gate_fails_closed():
         assert_terminal_account_delete_ready()
 
     message = str(excinfo.value)
-    assert "63" in message and "70" in message
+    assert "60" in message and "70" in message
     assert "UNCLASSIFIED_BLOCKING" in message, (
         "the failure must name the workflow state, or the reader will read it as "
         "a retention verdict"
@@ -319,4 +322,4 @@ def test_the_terminal_gate_would_pass_only_on_a_fully_classified_registry():
     finally:
         mod.REGISTRY = original
 
-    assert len(terminal_delete_blockers()) == 63, "the substitution leaked"
+    assert len(terminal_delete_blockers()) == 60, "the substitution leaked"

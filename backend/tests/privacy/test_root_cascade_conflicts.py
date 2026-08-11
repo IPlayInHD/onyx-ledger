@@ -147,10 +147,10 @@ def test_the_known_conflicts_are_distinct_from_unknown_risk(cur):
     conflicts = _conflicts(cur)
     blocking = [t for t, e in REGISTRY.items() if e.protected_from_destructive_cascade is None]
     assert set(conflicts).isdisjoint(blocking)
-    assert len(blocking) == 63, (
-        f"{len(blocking)} unmeasured privacy surfaces, expected 63. Migration "
-        "0060 removed four cascade edges and must not have changed this number: "
-        "dropping a foreign key is not a privacy decision."
+    assert len(blocking) == 60, (
+        f"{len(blocking)} unmeasured privacy surfaces, expected 60. This number "
+        "moves only when a table is genuinely classified from evidence — never "
+        "because a foreign key was dropped, which is not a privacy decision."
     )
 
 

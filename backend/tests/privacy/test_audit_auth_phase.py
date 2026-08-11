@@ -94,12 +94,12 @@ def _walk_to_purging(cur, uid) -> None:
 def _mark_source_data_complete(cur, uid) -> None:
     """Record the phases that run BEFORE this one as done.
 
-    SOURCE_DATA and SCENARIO_RETENTION each have their own proofs elsewhere;
-    this file is about what happens after them. The worker runs one phase per
-    claim in a fixed order, so both have to be recorded or it would keep
-    choosing an earlier one and never reach audit/auth.
+    SOURCE_DATA, DOCUMENTS and SCENARIO_RETENTION each have their own proofs
+    elsewhere; this file is about what happens after them. The worker runs one
+    phase per claim in a fixed order, so all of them have to be recorded or it
+    would keep choosing an earlier one and never reach audit/auth.
     """
-    for phase in (SOURCE, "SCENARIO_RETENTION"):
+    for phase in (SOURCE, "DOCUMENTS", "SCENARIO_RETENTION"):
         cur.execute("""
             INSERT INTO identity.account_lifecycle_phase
                    (user_id, phase, status, attempts, started_at, completed_at)
@@ -665,4 +665,4 @@ def test_terminal_deletion_is_still_blocked_by_the_registry():
 
     with pytest.raises(AssertionError):
         assert_terminal_account_delete_ready()
-    assert len(terminal_delete_blockers()) == 63
+    assert len(terminal_delete_blockers()) == 60

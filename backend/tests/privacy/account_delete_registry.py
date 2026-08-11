@@ -153,7 +153,45 @@ REGISTRY: dict[str, Entry] = {
     "billing.entitlement": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.payment_method_ref": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.subscription": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "docs.document": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "docs.document": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="CONTENT_PURGED_BEFORE_ACCOUNT_REMOVAL",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The uploaded content goes and the row survives the DOCUMENTS "
+            "phase as its own deletion record. That phase deletes the binary "
+            "from object storage first, purges the extraction rows, then "
+            "writes deleted_at — keeping content_hash, which proves WHICH "
+            "document was deleted, and object_key, which is opaque since 11B4 "
+            "(an account id, a version and a document id; the schema stores no "
+            "filename at all) and lets an orphan check tell deleted-on-purpose "
+            "from vanished. The row is tombstoned rather than deleted there "
+            "because hard-deleting it would cascade away docs.document_link, "
+            "and a confirmed figure must never look unsourced. Measured: a "
+            "sealed optimization and scenario still replay with every document "
+            "of the account gone, so the binary is not a replay dependency. "
+            "DELETE at terminal removal rather than RETAIN: the content is "
+            "already gone by then and nothing measured requires the tombstone "
+            "to outlive the account it describes, so the existing ON DELETE "
+            "CASCADE is left exactly as it is."
+        ),
+        evidence_references=(
+            "db/sql/57_document_phase.sql",
+            "app/services/document_processing/service.py:294",
+            "tests/privacy/test_document_phase.py",
+        ),
+        row_state_dependent=True,
+        state_conditioned_cleanup=(
+            "A live row (deleted_at IS NULL) still has retrievable content "
+            "behind it and must be purged before terminal removal; a tombstone "
+            "is finished work. identity.count_remaining_document_privacy_work "
+            "counts the live ones, and because the binary is deleted before "
+            "the tombstone is written, zero live rows also means zero objects "
+            "left in storage."
+        ),
+    ),
     "finance.expense_record": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "finance.expense_record_default": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "finance.expense_record_y2024": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
@@ -296,7 +334,20 @@ REGISTRY: dict[str, Entry] = {
     "analysis.analysis_line_item": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "analysis.reconciliation_check": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "billing.invoice": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "docs.document_extraction": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "docs.document_extraction": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="DERIVED_EXTRACTION_OF_PURGED_CONTENT",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Per-document extraction attempt. Deleted outright by the DOCUMENTS phase: it is derived from a binary that is itself deleted, and replay was measured to verify without it. Holds engine, status and confidence only — the values it produced live in docs.extraction_field, which goes with it."
+        ),
+        evidence_references=(
+            "db/sql/57_document_phase.sql",
+            "tests/privacy/test_document_phase.py",
+        ),
+    ),
     "docs.document_link": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.multi_year_projection": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.optimization_candidate": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
@@ -336,7 +387,20 @@ REGISTRY: dict[str, Entry] = {
     "wealth.registered_account_detail": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ai.ai_message_citation": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
     "ai.ai_prompt_context": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "docs.extraction_field": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
+    "docs.extraction_field": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="EXTRACTED_USER_CONTENT",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "What was read off the page — value_text and value_number, a salary or a figure from a slip. Deleted with the document, because deleting a PDF while keeping the numbers extracted from it is not content deletion. The facts the user CONFIRMED survive separately; those are the tax input the user asserted, not the document's contents."
+        ),
+        evidence_references=(
+            "db/sql/57_document_phase.sql",
+            "tests/privacy/test_document_phase.py",
+        ),
+    ),
     "ioe.candidate_cost": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
     "ioe.candidate_economic_effect": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
     "ioe.confidence_component": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),

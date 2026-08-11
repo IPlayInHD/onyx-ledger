@@ -49,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import DomainError
 from app.core.logging import get_logger
+from app.domain.ports import ObjectStorage
 
 log = get_logger("onyx.privacy.lifecycle")
 
@@ -426,6 +427,7 @@ __all__ = [
     "reset_lifecycle_metrics",
     "AuditAuthDeidentificationService",
     "ScenarioRetentionService",
+    "DocumentPurgeService",
     "phase_is_complete",
 ]
 
@@ -698,3 +700,117 @@ async def phase_is_complete(
         {"u": user_id, "p": phase.value},
     )
     return status == "COMPLETE"
+
+
+class DocumentPurgeService:
+    """Drives DOCUMENTS: every binary gone, every extraction row gone.
+
+    THE ONLY PHASE WITH TWO STORAGE SYSTEMS, and that is what shapes it.
+    PostgreSQL and the object store are not one transaction, so one commits
+    first and a crash between them is possible. `delete_document` settled the
+    ordering for a single document in Entry 11B4 — the binary goes first,
+    because it is the irreversible part with no transaction to roll back, and a
+    crash after it leaves a live row whose retry converges. The reverse order
+    would leave a binary nobody can find again.
+
+    So this service walks the account one document at a time and keeps that
+    ordering per document, rather than doing all the storage work and then all
+    the database work. A crash anywhere leaves either an untouched document or
+    a live row whose binary is already gone, and both converge on retry.
+
+    IT OWNS NO SQL THAT CHANGES A ROW. The two keyholes are account-scoped and
+    claim-authorised, and `onyx_privacy_worker` holds no DELETE on the document
+    tables — so "delete every account's documents" is not expressible by the
+    role that runs this.
+
+    WHAT SURVIVES, unchanged from Entry 11A §8: the content hash, which proves
+    which document was deleted; the opaque object key, which distinguishes
+    deleted-on-purpose from vanished; the provenance edge in
+    `docs.document_link`, so a confirmed figure never looks unsourced; and the
+    confirmed facts themselves, which the user asserted and which are the tax
+    input.
+    """
+
+    #: One pass takes at most this many documents. A phase that claimed a
+    #: 10 000-document account in one lease would hold it for the whole storage
+    #: pass; the remainder is picked up by the next run, and the guard keeps the
+    #: phase incomplete until there is none.
+    BATCH = 500
+
+    def __init__(self, session: AsyncSession, storage: ObjectStorage | None = None):
+        self.s = session
+        #: Injectable so a test can make the provider fail. Resolved lazily
+        #: otherwise, because importing the adapter at module import time would
+        #: drag settings into every consumer of this module.
+        self._storage = storage
+
+    @property
+    def storage(self) -> ObjectStorage:
+        if self._storage is None:
+            from app.integrations.storage import get_object_storage
+
+            self._storage = get_object_storage()
+        return self._storage
+
+    async def run(
+        self, claimed: ClaimedLifecycle, *, worker_id: str,
+    ) -> PhaseOutcome:
+        from app.integrations.storage import DeleteOutcome
+
+        phase = SourceDataPhase.DOCUMENTS
+        started = await self.s.scalar(
+            text("SELECT identity.start_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        )
+        if not started:
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=-1, failure_code="CLAIM_LOST")
+
+        outstanding = (await self.s.execute(
+            text("SELECT * FROM identity.list_account_documents_for_purge"
+                 "(:u, :t, :w, :n)"),
+            {"u": claimed.user_id, "t": claimed.claim_token,
+             "w": worker_id, "n": self.BATCH},
+        )).all()
+
+        failure: str | None = None
+        for document_id, bucket, object_key in outstanding:
+            result = self.storage.delete(bucket, object_key)
+            if result not in (DeleteOutcome.DELETED, DeleteOutcome.ALREADY_ABSENT):
+                # One object that will not go must not stop the others, and
+                # must not let the phase finish. The closed outcome name is the
+                # only thing recorded — never the provider's message, which
+                # Entry 11A proved carries values a privacy store must not keep.
+                failure = f"STORAGE_{result.name}"
+                DELETION_PHASE[f"{phase.value}:storage_{result.name.lower()}"] += 1
+                continue
+            await self.s.execute(
+                text("SELECT identity.finalize_document_purge(:u, :d, :t, :w)"),
+                {"u": claimed.user_id, "d": document_id,
+                 "t": claimed.claim_token, "w": worker_id},
+            )
+
+        remaining = int(await self.s.scalar(
+            text("SELECT identity.count_remaining_document_privacy_work(:u)"),
+            {"u": claimed.user_id},
+        ) or 0)
+        if remaining:
+            code = failure or "DOCUMENTS_INCOMPLETE"
+            await self.s.execute(
+                text("SELECT identity.fail_lifecycle_phase(:u, :p, :t, :c, :w)"),
+                {"u": claimed.user_id, "p": phase.value,
+                 "t": claimed.claim_token, "c": code, "w": worker_id},
+            )
+            DELETION_PHASE[f"{phase.value}:incomplete"] += 1
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=remaining, failure_code=code)
+
+        completed = bool(await self.s.scalar(
+            text("SELECT identity.complete_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        ))
+        DELETION_PHASE[f"{phase.value}:{'completed' if completed else 'claim_lost'}"] += 1
+        return PhaseOutcome(claimed.user_id, phase, completed=completed,
+                            remaining=0)

@@ -24,6 +24,7 @@ from app.database.privacy_session import privacy_unit_of_work
 from app.services.privacy import (
     AccountLifecycleService,
     AuditAuthDeidentificationService,
+    DocumentPurgeService,
     LifecycleState,
     ScenarioRetentionService,
     SourceDataPhase,
@@ -115,6 +116,17 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
                         item, worker_id=worker_id,
                         phase=SourceDataPhase.SOURCE_DATA)
                 elif not await phase_is_complete(
+                    session, item.user_id, SourceDataPhase.DOCUMENTS
+                ):
+                    # DOCUMENTS after SOURCE_DATA and before the rest, because
+                    # of a real dependency rather than taste: confirming a
+                    # document freezes tax facts, and those facts must already
+                    # be frozen before the source binary disappears. SOURCE_DATA
+                    # finishing is what establishes that no live financial row
+                    # is still waiting on a document.
+                    outcome = await DocumentPurgeService(session).run(
+                        item, worker_id=worker_id)
+                elif not await phase_is_complete(
                     session, item.user_id, SourceDataPhase.SCENARIO_RETENTION
                 ):
                     outcome = await ScenarioRetentionService(session).run(
@@ -127,7 +139,7 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
                     totals["purged"] += 1
                 elif outcome.failure_code in (
                     "SOURCE_DATA_INCOMPLETE", "AUDIT_AUTH_INCOMPLETE",
-                    "SCENARIO_RETENTION_INCOMPLETE",
+                    "SCENARIO_RETENTION_INCOMPLETE", "DOCUMENTS_INCOMPLETE",
                 ):
                     totals["incomplete"] += 1
 
