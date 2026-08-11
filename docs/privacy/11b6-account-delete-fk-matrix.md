@@ -66,3 +66,45 @@ stop MODEL A, so the rest is the next slice's work.
                                                                 tables
     PD-9                                                        CLOSED, ledger
                                                                 survives
+
+---
+
+# Minimum cascade cut-set (computed, Entry 11B6C)
+
+**31 protected tables, but only 6 root edges need changing.** Cutting
+descendant FKs is unnecessary once the branch root survives.
+
+| # | Cut edge (from `identity.user_account`) | Protected descendants saved | Branch depth |
+|---|---|---|---|
+| 1 | `analysis.analysis_run` | 32 | 3 |
+| 2 | `ioe.optimization_run` | 20 | 2 |
+| 3 | `ioe.scenario` | 9 | 1 |
+| 4 | `ioe.integrity_check` | 1 (itself) | 0 |
+| 5 | `ioe.freshness_outbox` | 1 (itself) | 0 |
+| 6 | **`reco.recommendation`** | 1 — `ioe.optimization_candidate` | 2 |
+
+Branch counts overlap because several protected tables are reachable by more
+than one path; the union is the 31 protected tables.
+
+## Why edge 6 matters
+
+Cutting only the five obvious roots leaves **one** protected table still
+reachable:
+
+    protected reachable BEFORE cut : 78 paths / 70 tables
+    after cutting 5 roots          : 1 protected still reachable
+    the survivor                   : ioe.optimization_candidate
+                                     via reco.recommendation, depth 2
+
+`reco.recommendation` is not itself evidence and would not be selected by any
+name-based or depth-1 heuristic — but it carries a CASCADE into sealed
+optimization candidates. A cut-set chosen by inspection rather than by
+computing reachability would have destroyed them.
+
+## Status
+
+    protected tables      31
+    root edges to change   6
+    verification           recompute reachability after the migration and
+                           require intersection(CASCADE_REACHABLE, PROTECTED)
+                           to be empty
