@@ -381,6 +381,21 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "foreign key to the account, because it must outlive the account "
              "it describes — that is what makes the backup-restore invariant "
              "implementable. Closed event codes, states and worker ids only."),
+    _e("identity.account_subject", (P.ACCOUNT_IDENTITY, P.PSEUDONYMOUS_IDENTIFIER),
+       S.OPERATIONAL, R.WHILE_ACCOUNT_ACTIVE, D.HARD_DELETE, rls=True,
+       on_user_deletion=U.NOT_USER_DELETABLE, purge=G.LATER_PHASE,
+       notes="Entry 11B6 (PD-15). The live half of the subject mapping: it is "
+             "the ONLY thing that resolves `audit.audit_log.subject_key` back "
+             "to an account. HARD_DELETE is not cleanup, it is the "
+             "de-identification mechanism — `identity.deidentify_audit_auth` "
+             "retires the key into `identity.deletion_subject` and deletes "
+             "this row, after which append-only audit history is no longer "
+             "attributable to anyone without a single audit row being edited. "
+             "Deliberately NOT a foreign key to `user_account`, so the phase "
+             "that removes the mapping is ordered by the lifecycle rather than "
+             "by a cascade. It therefore does NOT participate in the "
+             "SOURCE_DATA purge: severance is its own later phase. Holds two "
+             "UUIDs and a timestamp — no email, no address, no value."),
 
     # ----------------------------------------------------------------- profile
     _e("profile.user_profile", (P.DIRECT_IDENTIFIER, P.TAX_PROFILE_DATA),
