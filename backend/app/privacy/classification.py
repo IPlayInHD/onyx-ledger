@@ -597,10 +597,19 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
     _e("ioe.scenario_event", (P.OPERATIONAL_TELEMETRY,),
        S.AUDIT, R.BOUNDED_AUDIT, D.CASCADE_DELETE, rls=True),
     _e("ioe.run_rule_snapshot", (P.PSEUDONYMOUS_IDENTIFIER,),
-       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
        replay_dependency=True,
        notes="Join from a run to the shared rule snapshot. Carries no personal "
-             "data but links a user's run to a version manifest. NO RLS."),
+             "data but links a user's run to a version manifest. NO RLS. "
+             "Entry 11B6C corrected this from CASCADE_DELETE. That value was "
+             "read as a statement about the removal MECHANISM — 'removed by "
+             "the parent's cascade' — but this enum answers what account "
+             "deletion DOES to the table, and the measured answer is that the "
+             "row survives: the purge test asserts its rule pin is "
+             "byte-identical afterwards, and the cascade that would destroy it "
+             "is refused by the database. A row replay depends on cannot have "
+             "an unqualified destructive answer, which is what this file "
+             "already says for every other replay dependency."),
     _e("ioe.integrity_check", (P.AUDIT_SECURITY_RECORD, P.PSEUDONYMOUS_IDENTIFIER),
        S.AUDIT, R.BOUNDED_AUDIT, D.DE_IDENTIFY, rls=True,
        notes="Replay-verification history. Survives de-identified so the "
