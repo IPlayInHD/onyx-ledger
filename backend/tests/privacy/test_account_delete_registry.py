@@ -108,6 +108,30 @@ def test_every_cited_evidence_reference_resolves():
                 )
 
 
+def test_a_row_state_dependent_entry_says_what_the_other_states_still_owe():
+    """§14 — "retain" on a mixed table is only honest with the cleanup attached.
+
+    A table whose sealed rows must survive and whose live rows must not is
+    classified for the survival, because that is the constraint the cascade
+    violates. Left there, it reads as permission to keep everything. The
+    cleanup note is what stops that.
+    """
+    for table, entry in REGISTRY.items():
+        if not entry.row_state_dependent:
+            continue
+        assert entry.state == CLASSIFIED, f"{table} is unclassified but state-dependent"
+        assert entry.state_conditioned_cleanup, (
+            f"{table} is row-state dependent and does not say what happens to "
+            "the states it does not retain"
+        )
+    for table, entry in REGISTRY.items():
+        if entry.state_conditioned_cleanup:
+            assert entry.row_state_dependent, (
+                f"{table} carries cleanup metadata without being marked "
+                "row-state dependent"
+            )
+
+
 def test_an_unclassified_entry_carries_no_classification_fields():
     """`UNCLASSIFIED_BLOCKING` is a workflow state, not a quiet classification."""
     for table, entry in REGISTRY.items():
@@ -117,6 +141,8 @@ def test_an_unclassified_entry_carries_no_classification_fields():
         assert entry.reason_code is None
         assert entry.evidence_quality is None
         assert entry.evidence_references == ()
+        assert entry.row_state_dependent is False
+        assert entry.state_conditioned_cleanup is None
 
 
 def test_an_unclassified_entry_never_reads_as_approved_for_deletion():
@@ -161,16 +187,23 @@ def test_the_helper_partition_is_total():
 # ------------------------------------------------------- §27 semantic anchors
 
 def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
-    """Four, and no more. Seeding a fifth from a plausible-looking name is how
-    the superseded "31 protected" figure was produced."""
+    """Exactly the ones somebody read the evidence for, and no more.
+
+    Seeding one extra from a plausible-looking name is how the superseded
+    "31 protected" figure was produced, so the list is spelled out rather than
+    counted.
+    """
     classified = sorted(t for t, e in REGISTRY.items() if e.state == CLASSIFIED)
     assert classified == [
+        "analysis.analysis_run",
         "ioe.freshness_outbox",
+        "ioe.integrity_check",
         "ioe.optimization_run",
         "ioe.run_rule_snapshot",
+        "ioe.scenario",
         "reco.recommendation",
     ]
-    assert len(terminal_delete_blockers()) == 66
+    assert len(terminal_delete_blockers()) == 63
 
 
 def test_the_sealed_replay_output_is_retained():
@@ -247,7 +280,7 @@ def test_question_b_the_terminal_delete_gate_fails_closed():
         assert_terminal_account_delete_ready()
 
     message = str(excinfo.value)
-    assert "66" in message and "70" in message
+    assert "63" in message and "70" in message
     assert "UNCLASSIFIED_BLOCKING" in message, (
         "the failure must name the workflow state, or the reader will read it as "
         "a retention verdict"
@@ -286,4 +319,4 @@ def test_the_terminal_gate_would_pass_only_on_a_fully_classified_registry():
     finally:
         mod.REGISTRY = original
 
-    assert len(terminal_delete_blockers()) == 66, "the substitution leaked"
+    assert len(terminal_delete_blockers()) == 63, "the substitution leaked"

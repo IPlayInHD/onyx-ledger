@@ -78,6 +78,16 @@ class Entry:
     evidence_quality: str | None = None
     rationale: str | None = None
     evidence_references: tuple[str, ...] = field(default_factory=tuple)
+    #: True when the retention verdict depends on the STATE of the row rather
+    #: than on the table. A table can be genuinely mixed — sealed historical
+    #: rows that must survive alongside live rows that must not — and forcing a
+    #: single table-wide answer would be a false statement either way.
+    row_state_dependent: bool = False
+    #: What still has to happen per row when `row_state_dependent` is True.
+    #: Required in that case: "retain" without saying what happens to the live
+    #: rows is how a retention verdict quietly becomes a licence to keep
+    #: everything.
+    state_conditioned_cleanup: str | None = None
 
     @property
     def protected_from_destructive_cascade(self) -> bool | None:
@@ -95,7 +105,30 @@ class Entry:
 #: Every certified cascade-reachable table, exactly once.
 REGISTRY: dict[str, Entry] = {
     "ai.ai_conversation": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "analysis.analysis_run": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "analysis.analysis_run": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="SEALED_REPLAY_BASELINE_PARENT",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "The header of a completed tax analysis, and the parent of the "
+            "frozen baseline every replay resolves. "
+            "analysis.analysis_input_snapshot references it ON DELETE CASCADE, "
+            "and that snapshot is what ReplayDependencyResolver.baseline_input "
+            "reads instead of the live financial tables. The already-proven "
+            "ioe.optimization_run is also its ON DELETE CASCADE child, so "
+            "destroying this row destroys a table already proven to require "
+            "survival. Measured: DELETE FROM analysis.analysis_run is refused "
+            "outright by the database, with and without the sanctioned "
+            "app.allow_evidence_purge context."
+        ),
+        evidence_references=(
+            "db/sql/08_analysis.sql",
+            "app/services/ioe/replay/resolver.py:170",
+            "tests/security/test_sealed_history_after_purge.py:464",
+        ),
+    ),
     "audit.data_export_request": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.entitlement": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.payment_method_ref": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
@@ -129,7 +162,31 @@ REGISTRY: dict[str, Entry] = {
             "db/sql/29_ioe_outbox_and_projection.sql:114",
         ),
     ),
-    "ioe.integrity_check": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "ioe.integrity_check": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="SECURITY_EVIDENCE_RETAIN",
+        reason_code="APPEND_ONLY_VERIFICATION_HISTORY",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "The durable record THAT verification ran, which is a different "
+            "question from whether the artifact can still be reproduced. "
+            "Replay does not need old rows — each verification APPENDS a new "
+            "one — but the table refuses to give the old ones up: "
+            "ioe.guard_integrity_check_transition raises on every DELETE with "
+            "no escape, unlike ioe.reject_result_mutation which yields to the "
+            "sanctioned app.allow_evidence_purge context. Only SELECT, INSERT "
+            "and UPDATE are granted; evidence columns are write-once. "
+            "Measured: this guard is what refuses DELETE FROM "
+            "identity.user_account, so the terminal delete cannot execute at "
+            "all today."
+        ),
+        evidence_references=(
+            "db/sql/32_integrity_verification.sql:162",
+            "db/sql/32_integrity_verification.sql:175",
+            "db/sql/32_integrity_verification.sql:220",
+        ),
+    ),
     "ioe.optimization_run": Entry(
         state=CLASSIFIED,
         depth=1,
@@ -146,7 +203,43 @@ REGISTRY: dict[str, Entry] = {
             "tests/security/test_sealed_history_after_purge.py:464",
         ),
     ),
-    "ioe.scenario": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "ioe.scenario": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="DEIDENTIFY_THEN_RETAIN",
+        reason_code="SEALED_WHEN_VERIFIED_FREE_TEXT_ALWAYS",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "Genuinely mixed, and the only honest single answer is retain with "
+            "cleanup. A scenario is a first-class replay entity "
+            "(EntityType.SCENARIO) whose scenario_result_hash replay verifies, "
+            "and ioe.run_rule_snapshot — already proven retained — hangs off it "
+            "ON DELETE CASCADE. But workflow_status ranges over pending, "
+            "running, completed, failed and cancelled, so a row can also be "
+            "live product state that never sealed anything. Measured on one "
+            "fixture: with the scenario verified, DELETE is refused both "
+            "without the purge context (ioe.scenario_event immutability) and "
+            "with it (ioe.integrity_check append-only); with the scenario "
+            "unverified, the same DELETE inside the purge context succeeds and "
+            "destroys ioe.scenario_result. `label` and `note` are user free "
+            "text on an otherwise sealed row and must be cleared in either "
+            "case, which is what makes this DEIDENTIFY rather than RETAIN."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/verification.py:194",
+            "db/sql/28_ioe_scenarios.sql",
+            "tests/security/test_sealed_history_after_purge.py:238",
+        ),
+        row_state_dependent=True,
+        state_conditioned_cleanup=(
+            "Sealed rows (scenario_result_hash IS NOT NULL, or any row with an "
+            "ioe.integrity_check attached) must survive. Unsealed rows are live "
+            "product state and still owe an explicit purge — retaining this "
+            "table is not permission to keep them. `label` and `note` must be "
+            "cleared on every retained row. The per-state purge is "
+            "BRANCH_CLEANUP_PENDING and is not implemented here."
+        ),
+    ),
     "profile.dependent": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "profile.spouse_profile": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "profile.tax_profile": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
