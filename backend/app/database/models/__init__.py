@@ -55,7 +55,9 @@ from app.database.models.docs import (  # noqa: F401
 )
 from app.database.models.finance import ExpenseRecord, IncomeSource  # noqa: F401
 from app.database.models.identity import (  # noqa: F401
+    AccountSubject,
     AuthSession,
+    DeletionSubject,
     EmailVerificationToken,
     LoginEvent,
     MfaMethod,

@@ -32,6 +32,12 @@ class AuditLog(Base):
     previous_value: Mapped[dict | None] = mapped_column(JSONB)
     new_value: Mapped[dict | None] = mapped_column(JSONB)
     ip_address: Mapped[str | None] = mapped_column(INET)
+    # Entry 11B6 (PD-15). WHO the action concerned, as a key rather than an id;
+    # `actor_id` is a different question and stays. Resolved through
+    # identity.account_subject while the account lives. Written by the
+    # audit.log_change trigger, not by the ORM — declared here because the
+    # schema-drift gate refuses to govern a column the models cannot see.
+    subject_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
 class ConsentLog(Base):
@@ -46,6 +52,7 @@ class ConsentLog(Base):
     granted: Mapped[bool] = mapped_column(Boolean, nullable=False)
     version: Mapped[str | None] = mapped_column(String)
     ip_address: Mapped[str | None] = mapped_column(INET)
+    subject_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = created_at_col()
 
 
@@ -90,4 +97,5 @@ class SecurityEvent(Base):
     severity: Mapped[str] = mapped_column(String, default="info")
     detail: Mapped[dict | None] = mapped_column(JSONB)
     ip_address: Mapped[str | None] = mapped_column(INET)
+    subject_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = created_at_col()

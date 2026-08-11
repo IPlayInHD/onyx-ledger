@@ -29,6 +29,16 @@
       "reason": "Foreign key created by backend/db/sql, typically with an ON DELETE action or a name the ORM does not reproduce."
     },
     {
+      "key": "modify_comment|audit|audit_log|subject_key",
+      "kind": "modify_comment",
+      "schema": "audit",
+      "table": "audit_log",
+      "object": "subject_key",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
       "key": "modify_comment|audit|data_deletion_request|user_id",
       "kind": "modify_comment",
       "schema": "audit",
@@ -64,6 +74,16 @@
       "schema": "identity",
       "table": "account_lifecycle",
       "object": "user_id",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|identity|login_event|deidentified_at",
+      "kind": "modify_comment",
+      "schema": "identity",
+      "table": "login_event",
+      "object": "deidentified_at",
       "detail": "",
       "class": "COLUMN_COMMENT_METADATA",
       "reason": "Governed column-comment divergence."
@@ -9367,6 +9387,26 @@
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_table_comment|identity|account_subject|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "identity",
+      "table": "account_subject",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|identity|deletion_subject|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "identity",
+      "table": "deletion_subject",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
     },
     {
       "key": "remove_table|audit|audit_log_2025m01|<table>",
