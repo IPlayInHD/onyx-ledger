@@ -79,25 +79,41 @@ async def _claim(worker: str, batch: int = 10) -> list[dict]:
         return [dict(r._mapping) for r in rows]
 
 
-async def _quiesce(limit: int = 200) -> None:
-    """Drain until the outbox stops yielding work.
+async def _drain_all_claimable(limit: int = 200) -> None:
+    """Relay until no CLAIMABLE work is left. That is not an empty queue.
 
-    `FreshnessRelay.drain()` is bounded — `max_passes=10` — and deliberately
-    so: a producer emitting faster than the relay drains must not be able to
-    spin there forever. That bound is correct for production and wrong for a
-    test that needs an empty queue, because the security gate's database
-    carries a backlog far larger than ten passes will clear. Measured there:
-    over a thousand events pending, against a drain that clears ten passes.
+    WHAT IT DRAINS: pending events with `attempts < 5` that are unclaimed, or
+    whose lease has passed `ioe.freshness_claim_timeout()` — exactly the set
+    `claim_freshness_events` selects.
 
-    So the loop lives here, in the test, and production keeps its bound. The
-    exit is a pass that claims nothing; `limit` is only a runaway guard.
+    WHAT IT DELIBERATELY LEAVES:
+      * events at the retry ceiling (`attempts >= 5`). The claim predicate
+        excludes them permanently, so no amount of draining will move them.
+      * events under a live lease held by another worker.
+      * anything queued after the final pass.
+
+    Measured on a database the suite had run against repeatedly: 267 pending
+    before, of which only 15 were claimable; this returned in 19.1s and left
+    252 pending, ALL of them at the retry ceiling. Calling that state
+    "quiescent" — as this helper was originally named — would be wrong in the
+    direction that matters, because a reader would take it to mean the queue
+    was empty and write assertions accordingly.
+
+    TERMINATION. `FreshnessRelay.drain()` is bounded at `max_passes=10`, which
+    is right for production — a producer emitting faster than the relay drains
+    must not spin forever — and is not a promise that one call empties a shared
+    queue. The exit here is a drain that claims nothing, which must arrive:
+    every pass removes claimable rows from that set and either completes them
+    or advances `attempts` toward the ceiling. `limit` is a runaway guard only,
+    and says so if it is ever reached.
     """
     for _ in range(limit):
         report = await FreshnessRelay("tenant-context-drain").drain()
         if report.claimed == 0:
             return
     raise AssertionError(
-        "the outbox never went quiet; the relay is not making progress")
+        "the relay never stopped finding claimable work; the queue is not "
+        "making progress")
 
 
 async def _claim_mine(worker: str, event_id: uuid.UUID,
@@ -633,7 +649,7 @@ async def test_the_relay_applies_events_under_ordinary_tenant_context():
     # not current before the event under test is emitted". Creating the
     # scenarios AFTER quiescence means no pending event can reach them, and the
     # only event that touches them is the one this test emits.
-    await _quiesce()
+    await _drain_all_claimable()
 
     scenario_a = await ScenarioService(uid_a).simulate(analysis_a, _spec())
     scenario_b = await ScenarioService(uid_b).simulate(analysis_b, _spec())
