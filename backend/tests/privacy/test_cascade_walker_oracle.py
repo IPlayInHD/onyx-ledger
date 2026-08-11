@@ -16,7 +16,12 @@ import psycopg2
 import pytest
 
 from tests.conftest import owner_dsn
-from tests.privacy.account_delete_registry import REGISTRY
+from tests.privacy.account_delete_registry import (
+    CLASSIFIED,
+    REGISTRY,
+    UNCLASSIFIED_BLOCKING,
+    terminal_delete_blockers,
+)
 from tests.privacy.cascade_walker import (
     cascade_reachable,
     cascade_reachable_known_bad,
@@ -145,21 +150,47 @@ def live_cur():
         conn.close()
 
 
-def test_the_registry_membership_is_what_the_live_schema_says_today(live_cur):
-    """The certified universe is not a snapshot to be trusted — it is re-derived.
+def test_the_live_cascade_closure_never_exceeds_the_certified_universe(live_cur):
+    """A migration that widens what deletion destroys fails here.
 
-    A migration that adds a cascading FK to a new table silently widens what an
-    account delete destroys. Recomputing here is what turns that into a failing
-    test instead of a discovery after the fact.
+    Deliberately a SUBSET assertion, not equality. Equality was right while the
+    registry was defined by reachability; migration 0060 made it wrong, because
+    dropping the four retained-root foreign keys removes whole branches from the
+    closure without removing anyone's obligation to classify them. Shrinking is
+    therefore expected and allowed; growing is not.
     """
     live = cascade_reachable(live_cur, ROOT)
-    missing = sorted(set(live) - set(REGISTRY))
-    extra = sorted(set(REGISTRY) - set(live))
-    assert missing == [], f"cascade-reachable tables absent from the registry: {missing}"
-    assert extra == [], f"registry tables no longer cascade-reachable: {extra}"
+    unregistered = sorted(set(live) - set(REGISTRY))
+    assert unregistered == [], (
+        f"these tables are cascade-reachable from {ROOT} and carry no registry "
+        f"entry: {unregistered}. A migration widened what account deletion "
+        "destroys; classify them before relying on the terminal gate."
+    )
 
 
-def test_the_registry_depths_match_the_live_schema(live_cur):
+def test_tables_that_left_the_closure_are_still_tracked(live_cur):
+    """The other half: leaving the graph is not the same as being resolved.
+
+    Every certified table that is no longer cascade-reachable must still hold a
+    registry entry in a real state. This is what stops `DROP CONSTRAINT` from
+    functioning as a privacy decision.
+    """
+    live = cascade_reachable(live_cur, ROOT)
+    departed = sorted(set(REGISTRY) - set(live))
+    for table in departed:
+        entry = REGISTRY[table]
+        assert entry.state in (CLASSIFIED, UNCLASSIFIED_BLOCKING), (
+            f"{table} left the cascade closure and lost its registry state"
+        )
+    # Departure must not have quietly resolved anything.
+    unresolved_departed = [t for t in departed if REGISTRY[t].state == UNCLASSIFIED_BLOCKING]
+    assert set(unresolved_departed) <= set(terminal_delete_blockers()), (
+        "a table left the cascade closure and stopped blocking terminal deletion"
+    )
+
+
+def test_the_registry_depths_match_the_live_schema_where_still_reachable(live_cur):
+    """Depth is only meaningful for tables the current graph still reaches."""
     live = cascade_reachable(live_cur, ROOT)
     drifted = {
         table: (entry.depth, live[table])
@@ -167,6 +198,37 @@ def test_the_registry_depths_match_the_live_schema(live_cur):
         if table in live and entry.depth != live[table]
     }
     assert drifted == {}, f"registry depth disagrees with the live graph: {drifted}"
+
+
+def test_dropping_a_cascade_edge_cannot_resolve_an_unclassified_surface(synthetic_cur):
+    """§45 guard-on-the-guard: graph surgery must not satisfy privacy.
+
+    Modelled on the synthetic schema so it is a statement about the RULE rather
+    than about today's data. An edge leading to an unclassified table is
+    removed; the table leaves the closure, and terminal readiness must be
+    exactly as blocked as it was before.
+
+    Without this, the cheapest way to "finish" privacy work would be to drop
+    foreign keys until nothing unclassified is reachable — which decides
+    nothing and protects no one.
+    """
+    before_blockers = set(terminal_delete_blockers())
+    before_reachable = set(cascade_reachable(synthetic_cur, SYNTHETIC_ROOT))
+
+    synthetic_cur.execute(
+        "ALTER TABLE walkoracle.c_casc DROP CONSTRAINT c_casc_root_id_fkey"
+    )
+    after_reachable = set(cascade_reachable(synthetic_cur, SYNTHETIC_ROOT))
+    after_blockers = set(terminal_delete_blockers())
+
+    assert after_reachable < before_reachable, (
+        "dropping the edge did not shrink the closure; the model is not "
+        "exercising what it claims to"
+    )
+    assert after_blockers == before_blockers, (
+        "removing a cascade edge changed the set of terminal-deletion "
+        "blockers. Privacy completeness is being satisfied by graph surgery."
+    )
 
 
 def test_the_root_has_direct_severance_edges_as_well_as_cascades(live_cur):

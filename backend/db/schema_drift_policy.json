@@ -29,6 +29,16 @@
       "reason": "Foreign key created by backend/db/sql, typically with an ON DELETE action or a name the ORM does not reproduce."
     },
     {
+      "key": "modify_comment|analysis|analysis_run|user_id",
+      "kind": "modify_comment",
+      "schema": "analysis",
+      "table": "analysis_run",
+      "object": "user_id",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
       "key": "modify_comment|audit|audit_log|subject_key",
       "kind": "modify_comment",
       "schema": "audit",
@@ -84,6 +94,36 @@
       "schema": "identity",
       "table": "login_event",
       "object": "deidentified_at",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|ioe|integrity_check|user_id",
+      "kind": "modify_comment",
+      "schema": "ioe",
+      "table": "integrity_check",
+      "object": "user_id",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|ioe|optimization_run|user_id",
+      "kind": "modify_comment",
+      "schema": "ioe",
+      "table": "optimization_run",
+      "object": "user_id",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|ioe|scenario|user_id",
+      "kind": "modify_comment",
+      "schema": "ioe",
+      "table": "scenario",
+      "object": "user_id",
       "detail": "",
       "class": "COLUMN_COMMENT_METADATA",
       "reason": "Governed column-comment divergence."
@@ -9403,6 +9443,16 @@
       "kind": "remove_table_comment",
       "schema": "identity",
       "table": "deletion_subject",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|identity|user_account|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "identity",
+      "table": "user_account",
       "object": "<table_comment>",
       "detail": "",
       "class": "TABLE_COMMENT_METADATA",

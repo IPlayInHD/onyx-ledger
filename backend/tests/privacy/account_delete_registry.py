@@ -1,16 +1,36 @@
-"""Canonical default-deny privacy registry for account-deletion cascade.
+"""Canonical default-deny privacy registry for account deletion.
 
-Generated from ``docs/privacy/11b6-account-delete-cascade-universe.md`` — the
-certified 70-table set reachable from ``identity.user_account`` through
-all-CASCADE paths. Regenerate by editing this file directly; the universe doc
-is the membership authority and ``test_registry_invariants`` enforces the
-correspondence.
+Membership is the **privacy deletion universe**: every user-derived surface that
+must carry a retention decision before an account can be terminally deleted. It
+was certified in
+``docs/privacy/11b6-account-delete-cascade-universe.md`` by walking all-CASCADE
+paths from ``identity.user_account``, which is how the 70 tables were found —
+but reachability was the *discovery* method, not the definition.
+
+THE DISTINCTION IS LOAD-BEARING, and migration 0060 is why. That migration drops
+four foreign keys, which removes four whole branches from the live cascade
+closure. If membership were defined as "currently cascade-reachable", dozens of
+tables nobody has classified would silently leave the registry and the terminal
+delete would look closer to ready — privacy completeness satisfied by graph
+surgery rather than by anyone deciding anything. So:
+
+    REGISTRY                  certified privacy deletion universe; does not
+                              shrink because a foreign key was dropped
+    live cascade closure      what the current graph destroys; informational,
+                              and asserted to be a SUBSET of the registry
+
+A table leaving the closure stays in the registry and keeps blocking. A table
+ENTERING the closure without a registry entry fails, because that is a migration
+widening what deletion destroys.
 
 Default-deny: a table with no read evidence behind it is ``UNCLASSIFIED_BLOCKING``.
 That is a *workflow state*, not a retention classification. It never means
 "retain indefinitely", "privacy-approved retention", "safe to expose", or
 "safe to delete". It means: nobody has looked yet, so no destructive or
 terminal action may rely on this row.
+
+Regenerate by editing this file directly; the universe doc is the membership
+authority and ``test_registry_invariants`` enforces the correspondence.
 """
 
 from __future__ import annotations

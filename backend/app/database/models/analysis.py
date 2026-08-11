@@ -16,9 +16,12 @@ class AnalysisRun(Base):
     __table_args__ = {"schema": "analysis"}
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
-    )
+    # Entry 11B6C: HISTORICAL SUBJECT CORRELATOR, not a live foreign key.
+    # Migration 0060 detached this table from `identity.user_account` so a
+    # completed analysis — and the frozen snapshot replay reads instead of the
+    # live financial tables — survives account deletion. The value is never
+    # rewritten, and RLS still resolves ownership through it.
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     tax_year: Mapped[int] = mapped_column(Integer, nullable=False)
     province_code: Mapped[str | None] = mapped_column(String)
     engine_version: Mapped[str] = mapped_column(String, nullable=False)

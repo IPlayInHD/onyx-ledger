@@ -108,37 +108,33 @@ def _conflicts(cur) -> dict[str, list[str]]:
     return out
 
 
-def test_every_proven_retained_table_is_reported_with_its_exposing_root(cur):
-    """The conflict inventory. Not an assertion that it is empty — it is not.
+def test_no_proven_retained_table_is_cascade_reachable_any_more(cur):
+    """The conflict inventory, now empty — and that is 0060's whole result.
 
-    This is Question A at full width: for each table proven to need survival,
-    which direct child of the account exposes it to the cascade. Those roots are
-    where a cut would have to go; choosing the mechanism is not this slice's
-    job.
+    Before the migration this reported five conflicts over four direct roots.
+    Dropping those four foreign keys removed every all-CASCADE path from the
+    account to a table proven to require survival. Asserted as emptiness rather
+    than deleted, because a future migration that re-exposes one has to fail
+    somewhere.
     """
     conflicts = _conflicts(cur)
-    assert conflicts, (
-        "no proven-retained table is cascade-reachable. Either the retention "
-        "proofs or the graph changed materially — re-establish Question A "
-        "before relying on it."
+    assert conflicts == {}, (
+        "proven-retained evidence is cascade-reachable from the account again:\n  "
+        + "\n  ".join(
+            f"{table} via {', '.join(roots)}" for table, roots in sorted(conflicts.items())
+        )
     )
-    for table, roots in sorted(conflicts.items()):
-        assert roots, f"{table} is reachable but no direct root explains it"
 
 
-def test_the_conflict_set_covers_every_proven_retained_table(cur):
-    """A retained table that is NOT reachable would be genuinely safe today.
-
-    Splitting the two is the point: it stops "proven retained" from being read
-    as "currently in danger", and would show up immediately if a cut landed.
-    """
-    reachable = cascade_reachable(cur, ROOT)
-    retained = set(proven_retained_tables())
-    safe = sorted(retained - set(reachable))
-    assert safe == [], (
-        f"these proven-retained tables are no longer cascade-reachable: {safe}. "
-        "That is good news and must be recorded deliberately, not absorbed."
-    )
+def test_the_four_detached_roots_are_no_longer_direct_cascade_children(cur):
+    """The specific edges 0060 removed, named so a regression is unambiguous."""
+    edges = {child: act for child, act in direct_inbound_edges(cur, ROOT)}
+    for table in ("analysis.analysis_run", "ioe.optimization_run",
+                  "ioe.scenario", "ioe.integrity_check"):
+        assert table not in edges, (
+            f"{table} has a direct foreign key to {ROOT} again "
+            f"(action={edges[table]!r}); migration 0060 removed it"
+        )
 
 
 def test_the_known_conflicts_are_distinct_from_unknown_risk(cur):
@@ -151,24 +147,26 @@ def test_the_known_conflicts_are_distinct_from_unknown_risk(cur):
     conflicts = _conflicts(cur)
     blocking = [t for t, e in REGISTRY.items() if e.protected_from_destructive_cascade is None]
     assert set(conflicts).isdisjoint(blocking)
-    assert len(conflicts) + len(blocking) < len(REGISTRY), (
-        "every table is either a known conflict or unmeasured, which would mean "
-        "nothing has been proven deletable — check the partition helpers"
+    assert len(blocking) == 63, (
+        f"{len(blocking)} unmeasured privacy surfaces, expected 63. Migration "
+        "0060 removed four cascade edges and must not have changed this number: "
+        "dropping a foreign key is not a privacy decision."
     )
 
 
-def test_the_three_root_branches_are_direct_cascade_children(cur):
-    """The roots this slice classified really are depth-1 cascade children.
+def test_the_registry_did_not_shrink_when_the_graph_did(cur):
+    """§44 — the number that must not move.
 
-    Their classifications rest on that: a retained table hanging off a direct
-    `ON DELETE CASCADE` from the account is what makes the root edge itself the
-    thing that must change.
+    The closure lost 29 tables when four edges went. Every one of them keeps its
+    registry entry and, where unclassified, keeps blocking. If this ever fails
+    alongside a smaller blocker count, privacy completeness was bought with
+    `DROP CONSTRAINT`.
     """
-    edges = {child: act for child, act in direct_inbound_edges(cur, ROOT)}
-    for table in ("analysis.analysis_run", "ioe.scenario", "ioe.integrity_check"):
-        assert edges.get(table) == "c", (
-            f"{table} is no longer a direct ON DELETE CASCADE child of {ROOT} "
-            f"(edge={edges.get(table)!r}); its classification rationale cites "
-            "that fact and must be rebuilt"
-        )
-        assert REGISTRY[table].depth == 1
+    live = set(cascade_reachable(cur, ROOT))
+    assert len(REGISTRY) == 70, (
+        f"the certified privacy universe is {len(REGISTRY)} tables, not 70"
+    )
+    assert len(live) < len(REGISTRY), (
+        "the live closure is no smaller than the certified universe; 0060's "
+        "detachment is not in effect"
+    )

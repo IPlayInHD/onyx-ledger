@@ -100,9 +100,11 @@ class OptimizationRun(Base):
     __table_args__ = {"schema": "ioe"}
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
-    )
+    # Entry 11B6C: HISTORICAL SUBJECT CORRELATOR, not a live foreign key.
+    # Migration 0060 detached this table from `identity.user_account`; replay
+    # verifies against this run's sealed hashes long after the account is gone.
+    # The value is never rewritten, and RLS still resolves ownership through it.
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     analysis_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("analysis.analysis_run.id", ondelete="CASCADE")
     )
@@ -599,9 +601,11 @@ class Scenario(Base):
     __table_args__ = {"schema": "ioe"}
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
-    )
+    # Entry 11B6C: HISTORICAL SUBJECT CORRELATOR, not a live foreign key.
+    # Migration 0060 detached this table from `identity.user_account`; a sealed
+    # scenario is a replay entity and its rule pin hangs off it.
+    # The value is never rewritten, and RLS still resolves ownership through it.
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     base_analysis_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("analysis.analysis_run.id", ondelete="CASCADE")
     )
@@ -898,9 +902,11 @@ class IntegrityCheck(Base):
     }
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="CASCADE")
-    )
+    # Entry 11B6C: HISTORICAL SUBJECT CORRELATOR, not a live foreign key.
+    # Migration 0060 detached this table from `identity.user_account`; the
+    # append-only verification history is security evidence and refuses DELETE.
+    # The value is never rewritten, and RLS still resolves ownership through it.
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     entity_type: Mapped[str] = mapped_column(Text, nullable=False)
     optimization_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ioe.optimization_run.id", ondelete="CASCADE")

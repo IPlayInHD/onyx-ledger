@@ -28,8 +28,9 @@ ROOTS = (
     "ioe.integrity_check",
 )
 
-#: constraint name -> the table it sits on. These are 0060's exact targets.
-ROOT_FK_NAMES = {
+#: The constraints migration 0060 removed, kept so the downgrade path and the
+#: history stay legible. Nothing should recreate them.
+DETACHED_FK_NAMES = {
     "analysis.analysis_run": "analysis_run_user_id_fkey",
     "ioe.optimization_run": "optimization_run_user_id_fkey",
     "ioe.scenario": "scenario_user_id_fkey",
@@ -58,8 +59,15 @@ def tx():
         conn.close()
 
 
-def test_the_four_root_foreign_keys_are_exactly_what_0060_will_target(cur):
-    """Names and definitions, so the migration cannot be written against a guess."""
+def test_no_retained_root_holds_a_live_foreign_key_to_the_account(cur):
+    """§15 — the detachment invariant, and it is deliberately stronger than
+    "not CASCADE".
+
+    `NO ACTION` and `RESTRICT` are not severance: they leave the account row
+    undeletable, which is the same dead end 0060 exists to remove. So the
+    assertion is that NO foreign key from these tables reaches
+    `identity.user_account` at all, whatever its delete action.
+    """
     cur.execute("""
         SELECT cn.nspname || '.' || cc.relname, con.conname,
                pg_get_constraintdef(con.oid)
@@ -71,19 +79,39 @@ def test_the_four_root_foreign_keys_are_exactly_what_0060_will_target(cur):
            AND cn.nspname || '.' || cc.relname = ANY(%s)
          ORDER BY 1
     """, (list(ROOTS),))
-    found = {table: (name, definition) for table, name, definition in cur.fetchall()}
-
-    assert sorted(found) == sorted(ROOTS), (
-        f"a retained root no longer has a direct FK to identity.user_account: "
-        f"{sorted(set(ROOTS) - set(found))}"
+    attached = cur.fetchall()
+    assert attached == [], (
+        "a retained evidence root is referentially bound to the account again:\n  "
+        + "\n  ".join(f"{t}: {n} {d}" for t, n, d in attached)
+        + "\nAny such constraint makes terminal account removal impossible "
+        "again — CASCADE destroys the evidence, NO ACTION/RESTRICT refuse the "
+        "parent delete."
     )
-    for table, (name, definition) in found.items():
-        assert name == ROOT_FK_NAMES[table], (
-            f"{table}: constraint is {name!r}, but 0060 is designed against "
-            f"{ROOT_FK_NAMES[table]!r}"
-        )
-        assert "ON DELETE CASCADE" in definition, (
-            f"{table}: {definition} — already changed; re-derive the model"
+
+
+def test_the_ownership_column_survived_the_detachment_intact(cur):
+    """R1 preserves the historical UUID; only the constraint was removed."""
+    cur.execute("""
+        SELECT cn.nspname || '.' || cc.relname, a.attnotnull, t.typname
+          FROM pg_attribute a
+          JOIN pg_class cc ON cc.oid = a.attrelid
+          JOIN pg_namespace cn ON cn.oid = cc.relnamespace
+          JOIN pg_type t ON t.oid = a.atttypid
+         WHERE a.attname = 'user_id' AND a.attnum > 0 AND NOT a.attisdropped
+           AND cn.nspname || '.' || cc.relname = ANY(%s)
+         ORDER BY 1
+    """, (list(ROOTS),))
+    columns = {table: (notnull, typ) for table, notnull, typ in cur.fetchall()}
+    assert sorted(columns) == sorted(ROOTS), (
+        f"a retained root lost its ownership column: "
+        f"{sorted(set(ROOTS) - set(columns))}"
+    )
+    for table, (notnull, typ) in columns.items():
+        assert typ == "uuid", f"{table}.user_id is {typ}, not uuid"
+        assert notnull, (
+            f"{table}.user_id became nullable. R1 keeps the historical subject "
+            "on every retained row; a nullable column invites a SET NULL that "
+            "would erase it."
         )
 
 
