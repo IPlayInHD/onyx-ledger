@@ -7,6 +7,7 @@ from app.services.privacy.lifecycle import (
     TERMINAL_FOR_11B1,
     AccountDeletionInProgress,
     AccountLifecycleService,
+    AuditAuthDeidentificationService,
     ClaimedLifecycle,
     LifecycleFailureCode,
     LifecycleState,
@@ -15,6 +16,7 @@ from app.services.privacy.lifecycle import (
     SourceDataPhase,
     SourceDataPurgeService,
     lifecycle_metrics,
+    phase_is_complete,
     reset_lifecycle_metrics,
 )
 
@@ -22,7 +24,9 @@ __all__ = [
     "TERMINAL_FOR_11B1",
     "AccountDeletionInProgress",
     "AccountLifecycleService",
+    "AuditAuthDeidentificationService",
     "PhaseOutcome",
+    "phase_is_complete",
     "SourceDataPhase",
     "SourceDataPurgeService",
     "ClaimedLifecycle",

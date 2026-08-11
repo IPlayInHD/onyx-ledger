@@ -424,15 +424,18 @@ __all__ = [
     "LifecycleStatus",
     "lifecycle_metrics",
     "reset_lifecycle_metrics",
+    "AuditAuthDeidentificationService",
+    "phase_is_complete",
 ]
 
 
 class SourceDataPhase(StrEnum):
     """The closed set of privacy phases with durable progress (Entry 11B5).
 
-    Only `SOURCE_DATA` is implemented. The others are named because the phase
-    table's CHECK constraint names them, and because a dispatcher that branched
-    on free-form strings would let a typo become a silently skipped phase.
+    `SOURCE_DATA` and, since Entry 11B6D, `AUDIT_AUTH_DEIDENTIFICATION` are
+    implemented. `DOCUMENTS` is named because the phase table's CHECK
+    constraint names it, and because a dispatcher that branched on free-form
+    strings would let a typo become a silently skipped phase.
     """
 
     SOURCE_DATA = "SOURCE_DATA"
@@ -519,3 +522,103 @@ class SourceDataPurgeService:
         DELETION_PHASE[f"{phase.value}:{'completed' if completed else 'claim_lost'}"] += 1
         return PhaseOutcome(claimed.user_id, phase, completed=completed,
                             remaining=0)
+
+
+class AuditAuthDeidentificationService:
+    """Drives AUDIT_AUTH_DEIDENTIFICATION through the Entry 11B6 keyhole.
+
+    Owns NO mutation SQL, exactly like `SourceDataPurgeService`. Everything that
+    changes a row lives in `identity.deidentify_audit_auth`, which takes one
+    subject, is authorised by the claim token, and runs as the function owner
+    because the tables it touches are ones no application role may write.
+
+    WHAT THE PHASE MEANS. Every account-to-retained-history identity mapping
+    that must be severed before the account row can go has been severed, and
+    the authoritative remaining count is zero. It does NOT mean audit history
+    was deleted, security history was deleted, or historical actor ids were
+    rewritten — none of those happen, and the append-only audit log is never
+    touched at all.
+
+    COMPLETION IS NOT WHAT THE KEYHOLE REPORTED. The keyhole returns per-table
+    counts, which are useful to an operator and worthless as proof: a table it
+    forgot reports nothing, which looks identical to a table that had nothing.
+    Completion is decided by `identity.count_attributable_audit_auth`, and since
+    0061 the database refuses to record the phase while that count is non-zero.
+
+    IDEMPOTENCY WITHOUT A REVERSE MAP. A second run finds no
+    `identity.account_subject` row, returns zeros and changes nothing. The
+    ABSENCE of the mapping is the durable record that this was done — storing a
+    "already de-identified" marker keyed by account would rebuild the very link the
+    phase exists to destroy.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.s = session
+
+    async def run(
+        self, claimed: ClaimedLifecycle, *, worker_id: str,
+    ) -> PhaseOutcome:
+        phase = SourceDataPhase.AUDIT_AUTH_DEIDENTIFICATION
+        started = await self.s.scalar(
+            text("SELECT identity.start_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        )
+        if not started:
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=-1, failure_code="CLAIM_LOST")
+
+        await self.s.execute(
+            text("SELECT identity.deidentify_audit_auth(:u, :t, :w)"),
+            {"u": claimed.user_id, "t": claimed.claim_token, "w": worker_id},
+        )
+
+        remaining = int(await self.s.scalar(
+            text("SELECT identity.count_attributable_audit_auth(:u)"),
+            {"u": claimed.user_id},
+        ) or 0)
+        if remaining:
+            # Refuse here rather than let `complete_lifecycle_phase` raise. Both
+            # refuse, but a worker that only learned by catching an exception
+            # could not tell "work remains" from "something broke".
+            await self.s.execute(
+                text("SELECT identity.fail_lifecycle_phase(:u, :p, :t, :c, :w)"),
+                {"u": claimed.user_id, "p": phase.value,
+                 "t": claimed.claim_token, "c": "AUDIT_AUTH_INCOMPLETE",
+                 "w": worker_id},
+            )
+            DELETION_PHASE[f"{phase.value}:incomplete"] += 1
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=remaining,
+                                failure_code="AUDIT_AUTH_INCOMPLETE")
+
+        completed = bool(await self.s.scalar(
+            text("SELECT identity.complete_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        ))
+        DELETION_PHASE[f"{phase.value}:{'completed' if completed else 'claim_lost'}"] += 1
+        return PhaseOutcome(claimed.user_id, phase, completed=completed,
+                            remaining=0)
+
+
+async def phase_is_complete(
+    session: AsyncSession, user_id: uuid.UUID, phase: SourceDataPhase
+) -> bool:
+    """Has this subject already finished `phase`?
+
+    The dispatcher needs this to know which phase a claimed account is owed,
+    read from the durable record rather than from anything the current process
+    remembers — the process that ran the previous phase may have been a
+    different one that has since died.
+
+    Through a function, not the table. `onyx_privacy_worker` holds EXECUTE on
+    the lifecycle verbs and no privilege on `identity.account_lifecycle_phase`;
+    the first version of this read the table directly and was refused. That
+    refusal is the keyhole working, so the question got its own narrow verb.
+    """
+    status: str | None = await session.scalar(
+        text("SELECT identity.lifecycle_phase_status(:u, :p)"),
+        {"u": user_id, "p": phase.value},
+    )
+    return status == "COMPLETE"

@@ -23,9 +23,11 @@ from app.core.logging import get_logger
 from app.database.privacy_session import privacy_unit_of_work
 from app.services.privacy import (
     AccountLifecycleService,
+    AuditAuthDeidentificationService,
     LifecycleState,
     SourceDataPhase,
     SourceDataPurgeService,
+    phase_is_complete,
 )
 from workers.celery_app import celery_app
 from workers.runtime import run_task
@@ -89,22 +91,36 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
                 if item.state is not LifecycleState.PURGING:
                     continue
 
-                outcome = await SourceDataPurgeService(session).run(
-                    item, worker_id=worker_id,
-                    phase=SourceDataPhase.SOURCE_DATA)
+                # ONE PHASE PER CLAIM, decided from the durable phase record
+                # rather than from anything this process remembers. The worker
+                # that finished SOURCE_DATA may have been a different one that
+                # has since died, so "what is this account owed" is a question
+                # only the database can answer.
+                if not await phase_is_complete(
+                    session, item.user_id, SourceDataPhase.SOURCE_DATA
+                ):
+                    outcome = await SourceDataPurgeService(session).run(
+                        item, worker_id=worker_id,
+                        phase=SourceDataPhase.SOURCE_DATA)
+                else:
+                    outcome = await AuditAuthDeidentificationService(session).run(
+                        item, worker_id=worker_id)
 
                 if outcome.completed:
                     totals["purged"] += 1
-                elif outcome.failure_code == "SOURCE_DATA_INCOMPLETE":
+                elif outcome.failure_code in (
+                    "SOURCE_DATA_INCOMPLETE", "AUDIT_AUTH_INCOMPLETE"
+                ):
                     totals["incomplete"] += 1
 
                 # THE ACCOUNT IS NOT ADVANCED PAST PURGING HERE, and that is
-                # the point. SOURCE_DATA finishing means the source data is
-                # gone; documents, audit and authentication de-identification
-                # are separate phases that do not exist yet. An account marked
-                # COMPLETE now would be a status that lies in the direction
-                # that matters — `advance` refuses COMPLETE outright for the
-                # same reason.
+                # still the point even now that two phases run. Source data
+                # gone and audit/auth attribution severed is not the same as
+                # deletion finished: DOCUMENTS does not exist, the scenario
+                # cleanup does not exist, and 63 privacy surfaces are
+                # unclassified. An account marked COMPLETE now would be a
+                # status that lies in the direction that matters — `advance`
+                # refuses COMPLETE outright for the same reason.
 
                 # A closed code, never a subject id and never exception text.
                 log.info("privacy_phase",
