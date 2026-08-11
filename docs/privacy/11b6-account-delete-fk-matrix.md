@@ -158,3 +158,53 @@ Four candidates, NOT yet confirmed: the corrected traversal has not been re-run,
 so the protected set itself (previously 31) must be recomputed before any
 migration is planned. `ioe.integrity_check` also still needs the §9 justification
 for being in the protected set at all.
+
+---
+
+# Certified cascade graph (corrected walker)
+
+## The walker defect
+
+    WRONG   recurse when the edge that REACHED this node was CASCADE
+            ... WHERE w.act='c'      -- w = the inbound edge
+    RIGHT   recurse only when THIS outbound edge is CASCADE
+            ... WHERE f.act='c'      -- f = the edge being traversed
+
+The wrong form admitted SET NULL children into the deletion closure, because a
+child reached by a SET NULL edge is not deleted at all.
+
+## Certified numbers
+
+| | previous claim | corrected |
+|---|---|---|
+| direct inbound FKs | 38 / 34 CASCADE / 4 SET NULL | **confirmed, remeasured** |
+| cascade-reachable tables | 73 | **70** |
+| `ioe.`/`analysis.` reachable | 31 | **30** |
+
+Cross-checked by two independent implementations sharing no traversal code — a
+recursive SQL CTE over `pg_constraint` and a Python BFS over a flat 248-edge
+inventory. Both report **70**. Depth differs by construction (CTE 4 = longest
+path, BFS 3 = shortest) and is a reporting difference, not a disagreement on the
+set.
+
+## The recommendation branch, settled
+
+`ioe.optimization_candidate` **is** cascade-reachable at depth 2 — but through
+
+    ioe.optimization_candidate.run_id -> ioe.optimization_run   CASCADE
+
+not through `reco.recommendation`, whose edge is SET NULL. So the previous
+slice's removal of `reco.recommendation` from the cut-set was correct, though
+for a sharper reason than stated then: the table it was supposed to protect is
+already covered by the `ioe.optimization_run` cut.
+
+`reco.recommendation` is itself cascade-reachable at depth 1 via its own FK from
+`user_account`; that is live recommendation data and is expected to delete.
+
+## Status
+
+    walker defect            fixed
+    closure                  recomputed from scratch, independently agreed
+    previous 73/31/6 figures SUPERSEDED
+    protected set            not yet rebuilt from semantics (30 is a
+                             schema-prefix proxy, not a justified set)
