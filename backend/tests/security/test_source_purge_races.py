@@ -16,7 +16,6 @@ import pytest
 from tests.conftest import owner_dsn
 
 
-
 def _owner():
     conn = psycopg2.connect(owner_dsn())
     conn.autocommit = True
