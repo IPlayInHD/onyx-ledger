@@ -41,7 +41,17 @@ def test_the_application_login_really_is_the_application_role():
         cur.execute("SELECT session_user, "
                     "pg_has_role(session_user, 'onyx_app_rw', 'MEMBER')")
         session_user, is_app = cur.fetchone()
-    assert session_user == "onyx_test"
+    # The login NAME is not the invariant and must not be asserted: the
+    # harnesses use different principals for the same role
+    # (`onyx_test` under scripts/run_backend_tests.sh, `onyx_secproof` under
+    # scripts/prove_security_gate.sh). Pinning the name made this file pass
+    # only where it connected to its own hardcoded database — the defect that
+    # made the whole file vacuous under the gate. What matters is the
+    # MEMBERSHIP, which is asserted below, plus that the login is a real
+    # LOGIN principal rather than the capability role itself.
+    assert session_user not in ("onyx_app_rw", "onyx_migrator"), (
+        f"the proof login is {session_user!r} — a capability or owner role, "
+        "not an application LOGIN principal")
     assert is_app, "the proof login is not an application-role member"
 
 
@@ -173,7 +183,9 @@ def test_the_privacy_runtime_is_not_an_application_role():
             "pg_has_role(session_user, 'onyx_privacy_worker', 'MEMBER'), "
             "pg_has_role(session_user, 'onyx_app_rw', 'MEMBER')")
         session_user, has_capability, has_app = cur.fetchone()
-    assert session_user == "onyx_privacy_test"
+    assert session_user not in ("onyx_privacy_worker", "onyx_migrator"), (
+        f"the privacy proof login is {session_user!r} — a capability or owner "
+        "role, not a LOGIN principal that gains the capability by membership")
     assert has_capability, "the privacy runtime lacks its own capability"
     assert not has_app, "the privacy runtime inherits application privileges"
 
@@ -276,7 +288,9 @@ def test_the_freshness_runtime_is_isolated_and_capable():
         cur.execute("SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole "
                     "  FROM pg_roles WHERE rolname = session_user")
         superuser, bypassrls, createdb, createrole = cur.fetchone()
-    assert session_user == "onyx_freshness_test"
+    assert session_user not in ("onyx_freshness_worker", "onyx_migrator"), (
+        f"the freshness proof login is {session_user!r} — a capability or "
+        "owner role, not a LOGIN principal")
     assert has_fresh, "the freshness runtime lacks its own capability"
     assert not has_app, "the freshness runtime inherits application privileges"
     assert not has_privacy, "the freshness runtime holds the privacy capability"
