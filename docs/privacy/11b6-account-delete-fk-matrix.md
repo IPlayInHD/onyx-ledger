@@ -108,3 +108,53 @@ computing reachability would have destroyed them.
     verification           recompute reachability after the migration and
                            require intersection(CASCADE_REACHABLE, PROTECTED)
                            to be empty
+
+---
+
+# Corrections from the semantic analysis (Entry 11B6C continuation)
+
+Two of the six "cut edges" were wrong. Both errors were mine.
+
+## 1. The sixth edge does not exist — traversal bug
+
+`reco.recommendation` was added because `ioe.optimization_candidate` appeared
+reachable through it. It is not:
+
+    ioe.optimization_candidate.recommendation_id
+      -> reco.recommendation        ON DELETE SET NULL   (not CASCADE)
+
+A SET NULL edge does not delete the child. `optimization_candidate` survives
+that path with its `recommendation_id` nulled, and it is already protected by
+cutting `ioe.optimization_run`, which its `run_id` FK cascades from.
+
+The recursive query that produced the finding gated recursion on the action of
+the edge that REACHED a node, then enumerated every outbound FK from it
+regardless of that edge's own action — so SET NULL children were reported as
+cascade-reachable. **The walker over-reported.** Any conclusion drawn from it
+about which tables are cascade-reachable is suspect until re-run with the
+action tested on the outbound edge.
+
+## 2. `ioe.freshness_outbox` is not evidence
+
+Its own comment: *"Transactional outbox for freshness invalidation. Written in
+the same transaction as the change that caused it, so an event exists if and
+only if the change committed."* Delivery infrastructure, with no retention or
+purge semantics anywhere in the schema. Preserving processed queue residue past
+account deletion has no justification.
+
+Reclassified `DERIVED_DELETE`; removed from the protected set.
+
+## Revised position
+
+    previously reported cut-set     6 edges
+    reco.recommendation             REMOVE — traversal artifact
+    ioe.freshness_outbox            REMOVE — not evidence
+    remaining candidates            analysis.analysis_run
+                                    ioe.optimization_run
+                                    ioe.scenario
+                                    ioe.integrity_check
+
+Four candidates, NOT yet confirmed: the corrected traversal has not been re-run,
+so the protected set itself (previously 31) must be recomputed before any
+migration is planned. `ioe.integrity_check` also still needs the §9 justification
+for being in the protected set at all.
