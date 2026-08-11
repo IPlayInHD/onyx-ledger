@@ -450,10 +450,13 @@ def test_the_scan_catches_a_planted_amount_and_ignores_an_opaque_coincidence():
                 "   verifier_version, canonical_serialization_version, "
                 "   integrity_check_policy_version, "
                 "   claim_expires_at, started_at) "
+                # A probe-only verifier_version: ux_ioe_integrity_check_active_run
+                # is unique on (optimization_run_id, verifier_version), and the
+                # chosen run may already have an active check of its own.
                 "VALUES (%s, %s, 'optimization', %s, 'running', 'NONE', %s, "
-                "        %s, %s, %s, '1.0.0', '1.1.0', '1.0.0', %s, now())",
+                "        %s, %s, %s, %s, '1.1.0', '1.0.0', %s, now())",
                 (str(probe), str(user_id), str(run_id), claimed_by,
-                 clean, clean, digest, expires))
+                 clean, clean, digest, f"probe-{probe}", expires))
 
         def scan() -> str:
             return _content_capable_text(
