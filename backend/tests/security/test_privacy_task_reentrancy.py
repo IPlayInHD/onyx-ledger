@@ -60,8 +60,23 @@ def _subject(cur) -> uuid.UUID:
         SELECT %s, 2025, id, 5150, 'ON' FROM ref.income_type
          WHERE code = 'employment'
     """, (str(user),))
-    cur.execute("INSERT INTO identity.account_lifecycle (user_id, state) "
-                "VALUES (%s, 'DELETION_REQUESTED')", (str(user),))
+    # OLDEST IN THE QUEUE, deliberately. `run_account_deletion_phases` claims
+    # a bounded batch (`_BATCH = 10`) ordered by `requested_at`, oldest first,
+    # and it takes no arguments — it chooses its own work, so a test cannot
+    # hand it a subject. A freshly requested account is therefore the LAST one
+    # a worker reaches, and on a database carrying a backlog it is never
+    # reached at all: measured at 671 claimable lifecycles, six invocations
+    # claim 60 and this subject still read ("DELETION_REQUESTED", 2, None).
+    #
+    # Backdating the request makes the subject reachable without touching what
+    # this file actually tests, which is re-entrancy across invocations in one
+    # process — not queue position. Same lesson as the freshness drains: a
+    # bounded worker is correct, and a test that assumes it will reach the
+    # newest row is not.
+    cur.execute("INSERT INTO identity.account_lifecycle "
+                "  (user_id, state, requested_at) "
+                "VALUES (%s, 'DELETION_REQUESTED', now() - interval '10 years')",
+                (str(user),))
     return user
 
 
