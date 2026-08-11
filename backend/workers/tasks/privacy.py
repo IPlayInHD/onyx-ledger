@@ -25,6 +25,7 @@ from app.services.privacy import (
     AccountLifecycleService,
     AuditAuthDeidentificationService,
     LifecycleState,
+    ScenarioRetentionService,
     SourceDataPhase,
     SourceDataPurgeService,
     phase_is_complete,
@@ -93,15 +94,31 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
 
                 # ONE PHASE PER CLAIM, decided from the durable phase record
                 # rather than from anything this process remembers. The worker
-                # that finished SOURCE_DATA may have been a different one that
-                # has since died, so "what is this account owed" is a question
-                # only the database can answer.
+                # that finished the previous phase may have been a different one
+                # that has since died, so "what is this account owed" is a
+                # question only the database can answer.
+                #
+                # THE ORDER IS FIXED AND THE PHASES ARE INDEPENDENT. Source data
+                # first because it is the largest and most visible removal;
+                # then scenarios, which is tax-evidence retention; then
+                # audit/auth identity severance last, because it is the step
+                # that makes retained history non-attributable and there is no
+                # reason to do it before the things that still need to be found
+                # by subject. None of the three reads a surface another one
+                # mutates, so the order is a convention rather than a
+                # dependency — written down here because "deterministic" is
+                # only useful if it is stated.
                 if not await phase_is_complete(
                     session, item.user_id, SourceDataPhase.SOURCE_DATA
                 ):
                     outcome = await SourceDataPurgeService(session).run(
                         item, worker_id=worker_id,
                         phase=SourceDataPhase.SOURCE_DATA)
+                elif not await phase_is_complete(
+                    session, item.user_id, SourceDataPhase.SCENARIO_RETENTION
+                ):
+                    outcome = await ScenarioRetentionService(session).run(
+                        item, worker_id=worker_id)
                 else:
                     outcome = await AuditAuthDeidentificationService(session).run(
                         item, worker_id=worker_id)
@@ -109,7 +126,8 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
                 if outcome.completed:
                     totals["purged"] += 1
                 elif outcome.failure_code in (
-                    "SOURCE_DATA_INCOMPLETE", "AUDIT_AUTH_INCOMPLETE"
+                    "SOURCE_DATA_INCOMPLETE", "AUDIT_AUTH_INCOMPLETE",
+                    "SCENARIO_RETENTION_INCOMPLETE",
                 ):
                     totals["incomplete"] += 1
 

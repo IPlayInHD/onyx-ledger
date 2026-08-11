@@ -92,15 +92,21 @@ def _walk_to_purging(cur, uid) -> None:
 
 
 def _mark_source_data_complete(cur, uid) -> None:
-    """SOURCE_DATA is a separate phase with its own proofs; this slice is about
-    what happens AFTER it, so it is recorded done rather than re-exercised."""
-    cur.execute("""
-        INSERT INTO identity.account_lifecycle_phase
-               (user_id, phase, status, attempts, started_at, completed_at)
-        VALUES (%s, %s, 'COMPLETE', 1, now(), now())
-        ON CONFLICT (user_id, phase) DO UPDATE
-           SET status='COMPLETE', completed_at=now()
-    """, (str(uid), SOURCE))
+    """Record the phases that run BEFORE this one as done.
+
+    SOURCE_DATA and SCENARIO_RETENTION each have their own proofs elsewhere;
+    this file is about what happens after them. The worker runs one phase per
+    claim in a fixed order, so both have to be recorded or it would keep
+    choosing an earlier one and never reach audit/auth.
+    """
+    for phase in (SOURCE, "SCENARIO_RETENTION"):
+        cur.execute("""
+            INSERT INTO identity.account_lifecycle_phase
+                   (user_id, phase, status, attempts, started_at, completed_at)
+            VALUES (%s, %s, 'COMPLETE', 1, now(), now())
+            ON CONFLICT (user_id, phase) DO UPDATE
+               SET status='COMPLETE', completed_at=now()
+        """, (str(uid), phase))
 
 
 def _phase_status(cur, uid, phase=PHASE):

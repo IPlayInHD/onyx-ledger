@@ -183,8 +183,8 @@ def test_a_terminal_integrity_check_refuses_every_ownership_rewrite(tx):
                (user_id, entity_type, optimization_run_id, expected_result_hash,
                 verifier_version, canonical_serialization_version,
                 integrity_check_policy_version, status, completed_at)
-        VALUES (%s, 'optimization', %s, 'probe-hash', '1.0.0', '1', '1',
-                'verified', now())
+        VALUES (%s, 'optimization', %s, md5(random()::text) || md5(random()::text),
+                '1.0.0', '1', '1', 'verified', now())
         RETURNING id
     """, (user_id, run_id))
     check_id = str(tx.fetchone()[0])

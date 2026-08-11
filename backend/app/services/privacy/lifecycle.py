@@ -425,6 +425,7 @@ __all__ = [
     "lifecycle_metrics",
     "reset_lifecycle_metrics",
     "AuditAuthDeidentificationService",
+    "ScenarioRetentionService",
     "phase_is_complete",
 ]
 
@@ -432,15 +433,17 @@ __all__ = [
 class SourceDataPhase(StrEnum):
     """The closed set of privacy phases with durable progress (Entry 11B5).
 
-    `SOURCE_DATA` and, since Entry 11B6D, `AUDIT_AUTH_DEIDENTIFICATION` are
-    implemented. `DOCUMENTS` is named because the phase table's CHECK
-    constraint names it, and because a dispatcher that branched on free-form
-    strings would let a typo become a silently skipped phase.
+    `SOURCE_DATA`, `AUDIT_AUTH_DEIDENTIFICATION` (11B6D) and
+    `SCENARIO_RETENTION` (11B6E) are implemented. `DOCUMENTS` is named because
+    the phase table's CHECK constraint names it, and because a dispatcher that
+    branched on free-form strings would let a typo become a silently skipped
+    phase.
     """
 
     SOURCE_DATA = "SOURCE_DATA"
     DOCUMENTS = "DOCUMENTS"
     AUDIT_AUTH_DEIDENTIFICATION = "AUDIT_AUTH_DEIDENTIFICATION"
+    SCENARIO_RETENTION = "SCENARIO_RETENTION"
 
 
 @dataclass(frozen=True)
@@ -591,6 +594,79 @@ class AuditAuthDeidentificationService:
             return PhaseOutcome(claimed.user_id, phase, completed=False,
                                 remaining=remaining,
                                 failure_code="AUDIT_AUTH_INCOMPLETE")
+
+        completed = bool(await self.s.scalar(
+            text("SELECT identity.complete_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        ))
+        DELETION_PHASE[f"{phase.value}:{'completed' if completed else 'claim_lost'}"] += 1
+        return PhaseOutcome(claimed.user_id, phase, completed=completed,
+                            remaining=0)
+
+
+class ScenarioRetentionService:
+    """Drives SCENARIO_RETENTION through the Entry 11B6E keyhole.
+
+    Owns no SQL that changes a row, like its two siblings. Everything happens
+    inside `identity.prepare_scenario_retention`, which takes one subject and
+    is authorised by the claim token.
+
+    WHAT THE PHASE MEANS. Migration 0060 detached `ioe.scenario` from the
+    account so that sealed scenarios survive its removal; it has no way to tell
+    a sealed scenario from a draft, so drafts survive too. This deletes the
+    scenarios that never sealed a result and clears the free text on the ones
+    that did, which is what makes DEIDENTIFY_THEN_RETAIN a real treatment
+    rather than a label.
+
+    WHAT IT DOES NOT MEAN. The retained rows keep their historical `user_id`,
+    and while `identity.user_account` still holds that account the row is still
+    attributable to it. This is preparation for terminal removal, not
+    de-identification that has already happened.
+
+    COMPLETION IS NOT WHAT THE KEYHOLE REPORTED, for the third time in this
+    module and for the same reason: the keyhole reports what it changed, which
+    says nothing about what it missed.
+    `identity.count_remaining_scenario_privacy_work` counts both obligations,
+    and 0062 makes the database refuse the completion while either is non-zero.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.s = session
+
+    async def run(
+        self, claimed: ClaimedLifecycle, *, worker_id: str,
+    ) -> PhaseOutcome:
+        phase = SourceDataPhase.SCENARIO_RETENTION
+        started = await self.s.scalar(
+            text("SELECT identity.start_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        )
+        if not started:
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=-1, failure_code="CLAIM_LOST")
+
+        await self.s.execute(
+            text("SELECT identity.prepare_scenario_retention(:u, :t, :w)"),
+            {"u": claimed.user_id, "t": claimed.claim_token, "w": worker_id},
+        )
+
+        remaining = int(await self.s.scalar(
+            text("SELECT identity.count_remaining_scenario_privacy_work(:u)"),
+            {"u": claimed.user_id},
+        ) or 0)
+        if remaining:
+            await self.s.execute(
+                text("SELECT identity.fail_lifecycle_phase(:u, :p, :t, :c, :w)"),
+                {"u": claimed.user_id, "p": phase.value,
+                 "t": claimed.claim_token, "c": "SCENARIO_RETENTION_INCOMPLETE",
+                 "w": worker_id},
+            )
+            DELETION_PHASE[f"{phase.value}:incomplete"] += 1
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=remaining,
+                                failure_code="SCENARIO_RETENTION_INCOMPLETE")
 
         completed = bool(await self.s.scalar(
             text("SELECT identity.complete_lifecycle_phase(:u, :p, :t, :w)"),

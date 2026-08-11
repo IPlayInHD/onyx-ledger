@@ -252,12 +252,17 @@ REGISTRY: dict[str, Entry] = {
         ),
         row_state_dependent=True,
         state_conditioned_cleanup=(
-            "Sealed rows (scenario_result_hash IS NOT NULL, or any row with an "
-            "ioe.integrity_check attached) must survive. Unsealed rows are live "
-            "product state and still owe an explicit purge — retaining this "
-            "table is not permission to keep them. `label` and `note` must be "
-            "cleared on every retained row. The per-state purge is "
-            "BRANCH_CLEANUP_PENDING and is not implemented here."
+            "IMPLEMENTED by the SCENARIO_RETENTION lifecycle phase (Entry "
+            "11B6E, migration 0062). Rows with scenario_result_hash IS NOT NULL "
+            "sealed evidence replay can verify and are retained; rows without "
+            "it never produced evidence and are deleted before terminal "
+            "removal. `label` and `note` are cleared on every retained row — "
+            "proven not to move any sealed hash, because ScenarioSpec excludes "
+            "them from canonical_for_hash(). "
+            "identity.count_remaining_scenario_privacy_work counts both "
+            "obligations and the database refuses the phase while either is "
+            "non-zero. NOTE the discriminator is the seal, not workflow_status: "
+            "a `failed` scenario sealed nothing and is purged."
         ),
     ),
     "profile.dependent": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
