@@ -15,7 +15,6 @@ import pytest
 
 from tests.conftest import owner_dsn
 
-APP_DSN = "postgresql://onyx_test:test@/onyx_test?host=/var/run/postgresql&port=5432"
 
 
 def _owner():

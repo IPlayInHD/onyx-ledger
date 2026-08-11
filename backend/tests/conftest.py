@@ -90,6 +90,54 @@ def owner_dsn() -> str:
     return f"postgresql://onyx_migrator@localhost:5432/{database}"
 
 
+def _runtime_dsn(env_var: str, fallback_user: str) -> str:
+    """A psycopg2 DSN for the SAME database and login the runtime is using.
+
+    WHY THIS EXISTS. `test_worker_capability_boundary.py` hardcoded
+
+        postgresql://onyx_test:test@/onyx_test?host=/var/run/postgresql&port=5432
+
+    naming a database by name. The security gate runs the suite against
+    `onyx_sec_proof`, so every assertion in that file read a DIFFERENT database
+    than the one under test — and Entry 11B5J's authoritative gate proved the
+    consequence: the lifecycle-worker ACL was granted to `onyx_app_rw` in the
+    proof database, the injection verified its own effect, and the suite passed
+    anyway because the guard was looking at `onyx_test`.
+
+    A guard pointed at a fixed database cannot certify anything about the
+    database being certified. `owner_dsn` above already said so in its
+    docstring; this is the same rule applied to the runtime logins.
+    """
+    import os
+    from urllib.parse import parse_qs, urlparse
+
+    url = os.environ.get(env_var, "")
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    database = (parsed.path or "/onyx_test").lstrip("/").split("?")[0]
+    host = query.get("host", ["/var/run/postgresql"])[0]
+    port = query.get("port", ["5432"])[0]
+    user = parsed.username or fallback_user
+    password = parsed.password or "test"
+    return (f"postgresql://{user}:{password}@/{database}"
+            f"?host={host}&port={port}")
+
+
+def app_dsn() -> str:
+    """The ordinary application login — a member of `onyx_app_rw`."""
+    return _runtime_dsn("ONYX_DATABASE_URL", "onyx_test")
+
+
+def privacy_dsn() -> str:
+    """The dedicated privacy-worker login. Not a member of `onyx_app_rw`."""
+    return _runtime_dsn("ONYX_PRIVACY_DATABASE_URL", "onyx_privacy_test")
+
+
+def freshness_dsn() -> str:
+    """The dedicated freshness-worker login. Not a member of `onyx_app_rw`."""
+    return _runtime_dsn("ONYX_FRESHNESS_DATABASE_URL", "onyx_freshness_test")
+
+
 def frozen_snapshot(
     *, tax_year: int = 2025, jurisdiction: str = "ON", **fields
 ) -> tuple[dict, str]:

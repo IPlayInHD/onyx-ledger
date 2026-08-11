@@ -12,13 +12,23 @@ from __future__ import annotations
 import psycopg2
 import pytest
 
-#: A real application login: `onyx_test` is a member of `onyx_app_rw`, which is
-#: the NOLOGIN base role every HTTP request runs as.
-APP_DSN = "postgresql://onyx_test:test@/onyx_test?host=/var/run/postgresql&port=5432"
+from tests.conftest import app_dsn, freshness_dsn, owner_dsn, privacy_dsn
+
+#: A real application login, a member of `onyx_app_rw` — the NOLOGIN base role
+#: every HTTP request runs as.
+#:
+#: DERIVED FROM THE RUNTIME ENVIRONMENT, never named. These constants used to
+#: hardcode the `onyx_test` database, and the security gate runs the suite
+#: against `onyx_sec_proof`: every assertion in this file was therefore reading
+#: a database the gate had not touched. Entry 11B5J's authoritative gate is how
+#: that surfaced — it granted the lifecycle-worker keyholes to `onyx_app_rw` in
+#: the proof database, verified the grant had taken effect, and the suite passed
+#: anyway. A guard aimed at a fixed database certifies nothing about the
+#: database under certification.
 
 
 def _app_session():
-    conn = psycopg2.connect(APP_DSN)
+    conn = psycopg2.connect(app_dsn())
     conn.autocommit = True
     return conn
 
@@ -143,14 +153,11 @@ def test_public_cannot_execute_the_privacy_keyholes():
 # ---------------------------------------------------------------------------
 #: A login that models the production privacy worker: member of the capability
 #: role and of nothing else. Not a member of `onyx_app_rw`.
-PRIVACY_DSN = (
-    "postgresql://onyx_privacy_test:test@/onyx_test"
-    "?host=/var/run/postgresql&port=5432"
-)
+
 
 
 def _privacy_session():
-    conn = psycopg2.connect(PRIVACY_DSN)
+    conn = psycopg2.connect(privacy_dsn())
     conn.autocommit = True
     return conn
 
@@ -203,14 +210,11 @@ def test_the_privacy_runtime_holds_no_dangerous_role_attributes():
 # ---------------------------------------------------------------------------
 # PD-16 — the freshness capability, after remediation
 # ---------------------------------------------------------------------------
-FRESHNESS_DSN = (
-    "postgresql://onyx_freshness_test:test@/onyx_test"
-    "?host=/var/run/postgresql&port=5432"
-)
+
 
 
 def _freshness_session():
-    conn = psycopg2.connect(FRESHNESS_DSN)
+    conn = psycopg2.connect(freshness_dsn())
     conn.autocommit = True
     return conn
 
@@ -323,13 +327,11 @@ def test_the_freshness_runtime_has_no_direct_queue_table_access():
 # is the genuine runtime login, because PostgreSQL derives SET ROLE authority
 # from `session_user` — a migrator-mediated check would show that a superuser
 # can assume anything and prove nothing about the application.
-OWNER_DSN_ADMIN = (
-    "postgresql://onyx_migrator@/onyx_test?host=/var/run/postgresql&port=5432"
-)
+
 
 
 def _admin():
-    conn = psycopg2.connect(OWNER_DSN_ADMIN)
+    conn = psycopg2.connect(owner_dsn())
     conn.autocommit = True
     return conn
 
@@ -513,3 +515,44 @@ async def _expect_unavailable(get_worker_engine, unavailable) -> None:
             raise AssertionError(
                 f"{runtime} runtime built an engine with no DSN configured — "
                 "it fell back instead of failing closed")
+
+
+def test_every_capability_session_is_on_the_database_under_test():
+    """GUARD ON THE GUARD, for the defect that hid all the others.
+
+    Every assertion in this file is about privileges in a specific database.
+    If any of these logins connects somewhere else, the assertions still pass —
+    they just stop being about the system under test. That is not theoretical:
+    these DSNs named `onyx_test` outright, and under
+    `scripts/prove_security_gate.sh`, which runs the suite against
+    `onyx_sec_proof`, this whole file was reading a database the gate never
+    injected into. The gate granted `onyx_app_rw` EXECUTE on the lifecycle
+    keyholes, proved the grant had landed, and the suite reported green.
+
+    So: all four sessions must report the same `current_database()`, and it
+    must be the one the harness provisioned.
+    """
+    seen = {}
+    for label, session in (("app", _app_session),
+                           ("privacy", _privacy_session),
+                           ("freshness", _freshness_session),
+                           ("owner", _admin)):
+        with session() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT current_database(), session_user")
+            seen[label] = cur.fetchone()
+
+    databases = {label: row[0] for label, row in seen.items()}
+    assert len(set(databases.values())) == 1, (
+        "these logins are not all on the same database, so the privilege "
+        f"assertions in this file are not all about one system: {databases}")
+
+    import os
+    from urllib.parse import urlparse
+
+    expected = (urlparse(os.environ.get("ONYX_DATABASE_URL", "")).path
+                or "/onyx_test").lstrip("/").split("?")[0]
+    actual = next(iter(databases.values()))
+    assert actual == expected, (
+        f"this file is asserting privileges in {actual!r} while the harness "
+        f"provisioned {expected!r}; the guards are aimed at the wrong database")
