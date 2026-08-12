@@ -262,7 +262,34 @@ engineering blockers and this would make it 71 with one. If a later entry proves
 a persisted artifact is genuinely required, it can be added then with that cost
 priced in rather than discovered.
 
-## 12. What implementation changed, and what it measured
+## 12. Measured cost
+
+`scripts/probe_state_graph_cost.py`, medians over 15 rounds per size, load and
+assembly timed separately because they fail differently — loading is I/O under
+RLS, assembly is pure CPU over already-fetched rows.
+
+```
+  facts   nodes    load ms   assemble ms   total ms   us/node
+      1       3       7.91          0.33       8.24     2746.2
+     25      27       8.10          0.92       9.01      333.8
+    100     102       8.16          2.77      10.94      107.2
+    400     402       9.77         10.03      19.80       49.3
+```
+
+**Loading is flat.** A 400× increase in data cost 23% more load time (7.91ms →
+9.77ms). That is the eleven-family plan behaving as designed, and it is the
+number that would move first if a per-node lookup ever crept in — which is why
+`test_assembly_issues_a_bounded_number_of_queries` compares two sizes rather
+than asserting a fixed ceiling.
+
+**Assembly is linear at roughly 25µs per node**, which is what a projection over
+in-memory rows should cost.
+
+The per-node figure falls from 2746µs to 49µs purely because the fixed ~8ms
+load floor is amortised. That floor is the eleven family queries plus the unit
+of work, not the graph — a single-fact tenant pays it too.
+
+## 13. What implementation changed, and what it measured
 
 Three corrections the design step did not anticipate, each forced by evidence:
 
