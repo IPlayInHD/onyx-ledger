@@ -212,25 +212,52 @@ Also confirmed: `identity.account_lifecycle` has no foreign key to
 outlives the account (PD-9), and `account_lifecycle_phase` refuses DELETE
 outright.
 
-## One gap, left open deliberately
+## The gap, and closing it
 
-**A late direct database writer can still recreate detail after the phase
-reports COMPLETE.** Through the product this is unreachable — the engine runs
-only for an authenticated user and the account is `ACCESS_DISABLED` — but at the
-database level nothing refuses the insert.
+11B6I shipped with one gap open: after the phase reported COMPLETE, a writer
+holding INSERT could put the purged detail straight back. Unreachable through
+the product — the engine runs only for an authenticated user and a deleting
+account is `ACCESS_DISABLED` — but "unreachable through the paths we thought of"
+is not a guarantee.
 
-The clean fix is a write-cutoff trigger on the fifteen tables keyed on
-`identity.account_deletion_state`, mirroring
-`ioe.guard_scenario_text_after_deletion_request`. It is **not** implemented here
-because it would fire per row on the hottest write path in the system: one
-ordinary optimization writes thousands of `ioe.score_component` rows, and adding
-that unmeasured at the end of this entry is a worse decision than recording the
-gap.
+It was deferred on cost. These are the hottest write paths in the system: one
+optimization writes thousands of `ioe.score_component` rows, and a `FOR EACH
+ROW` trigger would add a lifecycle lookup to every one.
 
-`test_a_late_direct_writer_can_still_recreate_detail_after_complete` pins
-today's behaviour so it cannot be mistaken for closed. It fails the day the
-cutoff lands, which is the correct prompt to replace it with the refusal
-assertion.
+**Closed in migration `0065` with statement-level triggers.** `REFERENCING NEW
+TABLE` hands the whole inserted batch to one invocation, so the check is a single
+semi-join per statement regardless of row count — O(statements), not O(rows).
+The objection was to a row-level design, and the transition table removes it
+rather than accepting it.
+
+Measured, interleaved across six rounds of a full optimization writing ~1,400
+detail rows:
+
+```
+cutoff ENABLED    median  542.5 ms
+cutoff DISABLED   median  469.7 ms
+overhead          +72.8 ms  (+15.5%)
+```
+
+Interleaved because the first attempt ran all-enabled then all-disabled and
+measured the growing rule landscape instead of the trigger — it reported the
+guard making things 16% *faster*, which is how a benchmark tells you it is
+measuring the wrong thing.
+
+73 ms per optimization for a hard guarantee that purged personal detail cannot
+be written back. The trade is recorded rather than folded into a claim that it
+is free.
+
+The cutoff starts at the deletion **request**, not at phase completion: a write
+landing before the phase would otherwise be purged silently, and one landing
+after would resurrect detail. Refusing from the request covers both.
+
+It covers exactly the fifteen purged tables and none of the eight verification
+reads — those are retained evidence, never purged, so there is nothing to
+resurrect and a cutoff there would refuse writes a sealed artifact needs. Both
+directions are asserted, and a guard-on-the-guard proves an ordinary account can
+still write its own detail, since refusing everything would satisfy the first
+assertion alone.
 
 ## Accounting
 

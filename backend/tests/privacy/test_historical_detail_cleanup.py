@@ -787,23 +787,18 @@ async def test_the_diagnostic_terminal_census_shows_detail_gone_evidence_kept():
             f"{result.status}/{result.reason_code}")
 
 
-async def test_a_late_direct_writer_can_still_recreate_detail_after_complete():
-    """A KNOWN, UNCLOSED GAP, pinned so it cannot be mistaken for closed.
+async def test_a_late_direct_writer_cannot_recreate_detail_after_complete():
+    """THE GAP 11B6I LEFT OPEN, NOW CLOSED (migration 0065).
 
-    After the cleanup phase reports COMPLETE, a writer holding INSERT on these
-    tables can put detail back. Through the product this is unreachable — the
-    engine runs only for an authenticated user and the account is ACCESS_DISABLED
-    — but at the database level nothing refuses it.
+    After the cleanup phase reported COMPLETE, a writer holding INSERT could put
+    the purged detail straight back. Through the product that was unreachable —
+    the engine runs only for an authenticated user and a deleting account is
+    ACCESS_DISABLED — but "unreachable through the paths we thought of" is not a
+    guarantee, and this asserts the guarantee.
 
-    The clean fix is a write cutoff trigger on the fifteen tables keyed on
-    `identity.account_deletion_state`, mirroring
-    `ioe.guard_scenario_text_after_deletion_request`. It is NOT implemented here
-    because it would fire per row on the hottest write path in the system (one
-    ordinary optimization writes thousands of `ioe.score_component` rows), and
-    adding that unmeasured is a worse decision than recording the gap.
-
-    This test asserts TODAY'S BEHAVIOUR. It fails the day the cutoff lands,
-    which is the correct prompt to delete it and assert the refusal instead.
+    The refusal starts at the deletion REQUEST, not at phase completion: a write
+    landing before the phase would otherwise be purged silently, and one landing
+    after would resurrect detail. Refusing from the request covers both.
     """
     uid, run_id, _pf, _sc, token = await _prepared_account()
     c = _owner()
@@ -814,16 +809,56 @@ async def test_a_late_direct_writer_can_still_recreate_detail_after_complete():
         assert _complete(cur, uid, token) is True
         assert _remaining(cur, uid) == 0
 
+        with pytest.raises(psycopg2.errors.RaiseException) as excinfo:
+            cur.execute(
+                "INSERT INTO ioe.optimization_run_event (run_id, to_status, reason_code)"
+                " VALUES (%s, 'completed', 'PROBE')", (str(run_id),))
+        assert "being deleted" in str(excinfo.value)
+
+        assert _remaining(cur, uid) == 0, "a refused insert still landed"
+        assert _phase_status(cur, uid) == "COMPLETE"
+    finally:
+        c.close()
+
+
+async def test_the_write_cutoff_covers_every_purged_table():
+    """Every table the keyhole empties refuses writes for a deleting account.
+
+    Asserted against the IMPLEMENTED purge set, so a table added to the keyhole
+    without a cutoff fails here rather than becoming a quiet resurrection route.
+    """
+    connection = psycopg2.connect(owner_dsn())
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT n.nspname || '.' || c.relname"
+                "  FROM pg_trigger t"
+                "  JOIN pg_class c ON c.oid = t.tgrelid"
+                "  JOIN pg_namespace n ON n.oid = c.relnamespace"
+                " WHERE t.tgname = 'trg_write_cutoff' AND NOT t.tgisinternal")
+            covered = {row[0] for row in cursor.fetchall()}
+    finally:
+        connection.close()
+
+    missing = sorted(implemented_purge_set() - covered)
+    assert missing == [], f"purged with no write cutoff: {missing}"
+
+    # And it must NOT reach the retained evidence: those are never purged, so a
+    # cutoff there would refuse writes a sealed artifact legitimately needs.
+    overreach = sorted(covered & set(VERIFICATION_READS))
+    assert overreach == [], f"the cutoff reaches retained evidence: {overreach}"
+
+
+async def test_an_ordinary_account_is_unaffected_by_the_cutoff():
+    """The guard-on-the-guard: refusing everything would pass the test above."""
+    uid, run_id, _pf, _sc = await _sealed_chain()
+    c = _owner()
+    cur = c.cursor()
+    try:
         cur.execute(
             "INSERT INTO ioe.optimization_run_event (run_id, to_status, reason_code)"
             " VALUES (%s, 'completed', 'PROBE')", (str(run_id),))
-
-        # The gap is real: the guard now disagrees with a COMPLETE phase.
-        assert _remaining(cur, uid) == 1, (
-            "a late insert no longer lands — the write cutoff has been "
-            "implemented, so replace this test with the refusal assertion")
-        assert _phase_status(cur, uid) == "COMPLETE", (
-            "the phase reopened on its own; if that is now the behaviour, "
-            "assert it directly")
+        assert cur.rowcount == 1, "an ordinary account could not write its own detail"
     finally:
         c.close()
