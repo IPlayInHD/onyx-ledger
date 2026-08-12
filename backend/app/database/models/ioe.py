@@ -140,7 +140,13 @@ class OptimizationRun(Base):
         JSONB,
         comment="The canonicalized constraints that entered optimization_spec_hash. Stored so the spec hash can be recomputed during replay verification. NULL on runs sealed before this column existed, which makes their spec hash unverifiable rather than wrong.",
     )
-    assumption_set: Mapped[dict | None] = mapped_column(
+    # A JSON ARRAY, not an object: `generate(assumptions=list[dict])` writes it
+    # and `PortfolioReplayService` reads it back with `list(run.assumption_set)`.
+    # The annotation said `dict`, which typechecked only because `list(mapping)`
+    # is legal — it would have silently yielded keys if the value ever had been
+    # an object. Corrected to match the writer and both readers; the column type
+    # is unchanged, so there is no schema effect.
+    assumption_set: Mapped[list | None] = mapped_column(
         JSONB,
         comment="The assumption set that entered optimization_spec_hash. Stored for the same reason as user_constraints.",
     )

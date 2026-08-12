@@ -286,12 +286,19 @@ DOMAIN_ASSUMPTION_SET = "assumption_set"
 DOMAIN_PORTFOLIO_RESULT = "portfolio_result"
 DOMAIN_VERSION_MANIFEST = "version_manifest"
 DOMAIN_WEIGHT_CONFIG = "weight_config"
+# Entry 12A. The Personal Tax State Graph is an assembled read model rather than
+# a sealed artifact, but its hash has to be domain-separated from every sealed
+# hash for the same reason they are separated from each other. Registering here
+# is how the existing scheme is REUSED: `domain_hash` refuses an unregistered
+# domain, so there is no second canonicalizer and no second hash construction.
+DOMAIN_TAX_STATE_GRAPH = "tax_state_graph"
 
 ALL_HASH_DOMAINS = (
     DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
     DOMAIN_SCENARIO_SPEC, DOMAIN_SCENARIO_RESULT,
     DOMAIN_RULE_SNAPSHOT, DOMAIN_ASSUMPTION_SET,
     DOMAIN_PORTFOLIO_RESULT, DOMAIN_VERSION_MANIFEST, DOMAIN_WEIGHT_CONFIG,
+    DOMAIN_TAX_STATE_GRAPH,
 )
 
 

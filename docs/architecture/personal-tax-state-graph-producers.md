@@ -15,9 +15,9 @@ Eight live types. Two reserved with zero producers.
 | 2 | `TAX_STATE` | `TaxEngineService`, sealed as `analysis.analysis_run` + `analysis.analysis_line_item` | `analysis_run.id`, `analysis_line_item.id` | `ENGINE_COMPUTED` | **not tracked** — a completed run is immutable | `analysis_run.confidence_score`, `data_verified` | both | **yes** |
 | 3 | `OPPORTUNITY` | `RulesEvaluatorService` → IOE, sealed as `ioe.optimization_candidate` (presented as `reco.recommendation`) | `optimization_candidate.id` | `ENGINE_COMPUTED` | parent `ioe.optimization_run.freshness_status` + `stale_reason_codes` + `evaluated_at` | `eligibility_status`, `calculation_basis`, `evidence_status`, the five-stage support scores, `support_cap_applied` / `support_cap_reason_code` | both | **yes** |
 | 4 | `DEADLINE` | governed rule data — `rules.rule_deadline`, reached through the rule versions the run pinned | `rule_deadline.id` | `RULE_DATA` | inherits the run's pinned `rule_snapshot_id` | `is_hard`, `jurisdiction_code` | both | **yes** |
-| 5 | `EVIDENCE` | governed `rules.rule_required_document` resolved against held `docs.document` / `docs.document_extraction` | `(rule_version_id, document_type_code)` | `DERIVED_DETERMINISTIC` | not tracked | `necessity`, derived `readiness`, satisfying document ids | current | **yes** |
-| 6 | `RESOURCE` | IOE portfolio assembly, sealed as `ioe.resource_ledger_entry`; pool declared by `rules.rule_shared_resource` | `resource_ledger_entry.id` | `ENGINE_COMPUTED` over `RULE_DATA` | inherits the run | `capacity`, `allocated`, `remaining`, `pool_scope` | both | **yes** |
-| 7 | `ASSUMPTION` | `ioe.assumption` (+ `ioe.assumption_set`) for runs, `ioe.scenario_assumption` for scenarios; vocabulary from `domain/assumptions.py` | `assumption.id` / `scenario_assumption.id` | `ASSUMPTION_DECLARED` | inherits its parent | `certainty`, `materiality`, `affects_eligibility`, `source` | both | **yes** |
+| 5 | `EVIDENCE` | governed `rules.rule_required_document` resolved against held `docs.document`; and the held documents themselves | requirement: `(rule_version_id, document_type_code)`; document: `document.id` | `DERIVED_DETERMINISTIC` (requirement), `DOCUMENT_EXTRACTED` (held document) | not tracked | `necessity`, derived `readiness`, `document_type_code` | current | **yes** |
+| 6 | `RESOURCE` | IOE portfolio assembly, sealed as `ioe.resource_ledger_entry` (reached through `ioe.strategy_portfolio`) | `resource_ledger_entry.id` | `ENGINE_COMPUTED` over `RULE_DATA` | inherits the run | `capacity`, `allocated`, `remaining`, `pool_scope` | both | **yes** |
+| 7 | `ASSUMPTION` | the run's sealed `ioe.optimization_run.assumption_set`, and `ioe.scenario_assumption` for scenarios | `(run_id, code)` / `scenario_assumption.id` | `ASSUMPTION_DECLARED` | inherits its parent | `certainty`, `materiality`, `affects_eligibility`, `source` | both | **yes** |
 | 8 | `SCENARIO` | `ScenarioService` / replay, sealed as `ioe.scenario` + `ioe.scenario_result` | `scenario.id` | `ENGINE_COMPUTED` | `scenario.freshness_status` + `stale_reason_code` + `freshness_evaluated_at` | `integrity_status`, `integrity_reason_code`, scenario confidence components | both | **yes** |
 | — | `OBLIGATION` | **none** | — | — | — | — | — | **no — reserved** |
 | — | `DECISION` | **none** | — | — | — | — | — | **no — reserved** |
@@ -110,19 +110,33 @@ deterministic without persisting it.
 Every edge type names the row that authorises it. An edge with no origin row is
 not emitted.
 
-| edge type | origin |
-|---|---|
-| `DERIVED_FROM` | `analysis_line_item` → its `analysis_run` / `analysis_input_snapshot` |
-| `REFERENCES_RULE` | `analysis_line_item.tax_rule_version_id`, `optimization_candidate.tax_rule_version_id` |
-| `REQUIRES` | `rules.rule_required_document` |
-| `SUPPORTED_BY` | an `EVIDENCE` requirement's satisfying `docs.document` rows |
-| `INELIGIBLE_BECAUSE` | `optimization_candidate.eligibility_status` + `exclusion_reason_code` |
-| `CONSTRAINED_BY` | `ioe.portfolio_exclusion` (`reason_code`, `blocking_candidate_id`, `shared_resource_code`) |
-| `CONSUMES_RESOURCE` | `ioe.portfolio_member.resource_allocations`, `ioe.resource_ledger_entry` |
-| `CONFLICTS_WITH` | `ioe.recommendation_relationship` |
-| `EXPIRES_AT` | `rules.rule_deadline` via the pinned rule version |
-| `ASSUMES` | `ioe.assumption` / `ioe.scenario_assumption` |
-| `REFERENCES_SCENARIO` | `ioe.scenario.base_analysis_id` |
+| edge type | from → to | origin |
+|---|---|---|
+| `DERIVED_FROM` | TAX_STATE line item → TAX_STATE run | `analysis_line_item.analysis_id` |
+| `REQUIRES` | OPPORTUNITY → EVIDENCE requirement | `rules.rule_required_document` |
+| `SUPPORTED_BY` | EVIDENCE requirement → EVIDENCE document | a requirement's satisfying `docs.document` rows |
+| `INELIGIBLE_BECAUSE` | OPPORTUNITY → OPPORTUNITY | `portfolio_exclusion.blocking_candidate_id` |
+| `CONSTRAINED_BY` | OPPORTUNITY → RESOURCE | `portfolio_exclusion.shared_resource_code` |
+| `CONSUMES_RESOURCE` | OPPORTUNITY → RESOURCE | `portfolio_member.resource_allocations` |
+| `CONFLICTS_WITH` | OPPORTUNITY → OPPORTUNITY | `ioe.recommendation_relationship` |
+| `EXPIRES_AT` | OPPORTUNITY → DEADLINE | `rules.rule_deadline` via the pinned rule version |
+| `ASSUMES` | SCENARIO → ASSUMPTION | `ioe.scenario_assumption` |
+| `REFERENCES_SCENARIO` | SCENARIO → TAX_STATE run | `ioe.scenario.base_analysis_id` |
+| `REFERENCES_RULE` | — | **RESERVED, zero producers** |
+
+### `REFERENCES_RULE` is reserved, and the eight-type constraint is why
+
+An edge needs a node at both ends. `REFERENCES_RULE` needs a `RULE` node, and
+there is no rule node among the eight live types — adding one to carry an edge
+would make a ninth. So rule identity travels as a `tax_rule_version_id`
+**attribute** on every node that references one (TAX_STATE line items,
+OPPORTUNITY, DEADLINE, EVIDENCE requirements). Nothing is lost, and
+`GraphEdge.__post_init__` refuses to construct the reserved type, so promoting
+it has to be deliberate.
+
+`INELIGIBLE_BECAUSE` and `CONSTRAINED_BY` were split rather than merged: one
+exclusion row can produce both, and they answer different questions — *the
+candidate that won* versus *the resource that ran out*.
 
 **`CONFLICTS_WITH` is budgeted, not exhaustive.** `ioe.recommendation_relationship`
 is pairwise and the optimization work already met O(n²) growth there. Only rows
@@ -212,9 +226,8 @@ One query per entity family, never one per node. The families:
 6  recommendation_relationship              by run_id
 7  assumption_set + assumption              by set id
 8  scenario + scenario_result + assumptions by user + tax_year
-9  rule_required_document + rule_deadline
-   + rule_shared_resource                   by the pinned rule_version_id set
-10 document + document_extraction           by user + tax_year
+9  rule_required_document + rule_deadline   by the pinned rule_version_id set
+10 document joined to ref.document_type     by user + tax_year, processed only
 11 finance / wealth / profile rows          by user + tax_year
 ```
 
@@ -248,3 +261,36 @@ lifecycle phase slot; the privacy universe was certified at 70 tables with zero
 engineering blockers and this would make it 71 with one. If a later entry proves
 a persisted artifact is genuinely required, it can be added then with that cost
 priced in rather than discovered.
+
+## 12. What implementation changed, and what it measured
+
+Three corrections the design step did not anticipate, each forced by evidence:
+
+* **`REFERENCES_RULE` became reserved.** See §5 — the eight-type constraint
+  leaves its far endpoint undefined.
+* **`ASSUMPTION`'s run-side source was wrong in the first draft.** It named
+  `ioe.assumption` / `ioe.assumption_set`; the actual sealed source is the
+  run's own `assumption_set` JSON, which is what enters the spec hash. The type
+  checker then found a related latent defect: `OptimizationRun.assumption_set`
+  was annotated `Mapped[dict | None]` while `generate()` writes a list and
+  `PortfolioReplayService` reads it back with `list(run.assumption_set)`. That
+  typechecked only because `list(mapping)` is legal — it would have silently
+  yielded keys had the value ever been an object. The annotation is corrected;
+  the column type is unchanged, so there is no schema effect.
+* **`EVIDENCE` has two shapes.** Keying only by requirement made held documents
+  invisible and left `SUPPORTED_BY` with nothing to point at.
+
+**A measured coverage finding.** A real assembly on a freshly provisioned
+database produced 13 nodes and 5 edges across `FACT`, `TAX_STATE`,
+`OPPORTUNITY` and `EVIDENCE`, with `portfolio_total_benefit` of `0.00` — a
+**degenerate portfolio**, every candidate excluded, so no ledger entries and no
+members. `RESOURCE`, `CONSUMES_RESOURCE`, `CONSTRAINED_BY`,
+`INELIGIBLE_BECAUSE` and `CONFLICTS_WITH` were therefore untouched by the
+integration suite.
+
+Waiting for the rule landscape to cooperate is not coverage. Because assembly
+is pure and takes a `GraphSources` value, `tests/unit/state_graph/test_assembler.py`
+drives all eight producers and all ten live edge types directly with the shapes
+the loader returns — which is the payoff for separating loading from assembly.
+That suite also caught a nondeterminism in its own fixture (unpinned `uuid4()`
+ids), which is the behaviour a determinism test is for.
