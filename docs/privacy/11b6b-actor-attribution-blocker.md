@@ -90,9 +90,29 @@ new rows. Neither was implemented here, because choosing between them —
 particularly whether option 3 is acceptable — is a decision this entry does
 not have the authority to make alone.
 
-## Status
+## Status — RESOLVED BY 11B6J
 
-    11B6B lifecycle wiring    BLOCKED
-    PD-15                     OPEN
-    classification            DESIGN_DEFECT (architecture gap)
-                              + POLICY_DECISION_REQUIRED for option 3
+    11B6B lifecycle wiring    UNBLOCKED (11B6D wired the phase)
+    PD-15                     CLOSED (11B6J)
+    classification            resolved by measurement, not by option 1 or 3
+
+**Neither option 1 nor option 3 was taken.** No `actor_key` indirection was
+added, and nobody declared the surviving UUID to be accepted security evidence.
+Option 2 — breaking the join — had already shipped: `identity.deletion_subject`
+carries `subject_key` and `retired_at` and no `user_id`, and
+`53_subject_severance.sql` deletes the live `identity.account_subject` mapping
+during AUDIT_AUTH_DEIDENTIFICATION.
+
+What closed PD-15 was the thing this note could not do in 11B6B: measure the
+residue *after* a real terminal removal. 11B6J removed an account, registered a
+same-email successor, and scanned every uuid column in the database. The
+surviving `audit.audit_log.actor_id` resolves to no live account, no
+credentials, no profile, no subject key and not to the successor — so it is an
+**orphaned pseudonymous historical/security correlator**, not the live
+attribution path this note feared.
+
+The immutable rows were never rewritten, which was the constraint that made
+option 1 look mandatory. It was not; the correlator simply stopped pointing at
+anything.
+
+See `docs/privacy/11b6j-terminal-account-removal.md`.

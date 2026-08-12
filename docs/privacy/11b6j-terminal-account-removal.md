@@ -107,20 +107,55 @@ successor B                 different UUID; same email, different person
 `42 audit rows retain A's UUID; it resolves to no account, no subject key, and
 is not B's.`
 
-### Verdict
+### Verdict — PD-15 CLOSED
 
-The surviving `actor_id` is an **orphaned pseudonymous historical/security
-correlator**: it correlates a deleted person's own actions to each other within
-immutable audit history, and it reaches no identity. On the criterion set for
-this gate — email, profile, credentials, subject identity, B, or any other
-prohibited personal-identity path — every path is closed by measurement.
+The surviving `actor_id` is an
+**`ORPHANED_PSEUDONYMOUS_HISTORICAL_SECURITY_CORRELATOR`**: it correlates a
+deleted person's own actions to each other within immutable audit history, and
+it reaches no identity.
 
-**One thing to state plainly rather than bury.** The three retained sealed roots
-also keep A's UUID, and they are not merely a correlator — they are that
-person's retained tax evidence, deliberately preserved by 0060 and classified
-`REPLAY_REQUIRED_RETAIN`. That is a known and separately certified retention
-decision, not a new PD-15 finding, but anyone reading this inventory should see
-it named rather than discover it later.
+```
+A_UUID → live account       NO
+A_UUID → credentials        NO
+A_UUID → profile            NO
+A_UUID → subject_key        NO
+A_UUID → successor B        NO
+```
+
+The immutable rows remain byte-identical. No `actor_key` indirection was
+introduced, nothing in `audit.audit_log` was rewritten, and no retained
+sealed-root ownership field was changed.
+
+**The two surviving categories are deliberately different, and worth keeping
+distinct.** The audit rows are a correlator. The three retained sealed roots
+also keep A's UUID, but they are not merely a correlator — they are that
+person's retained tax evidence, preserved on purpose by 0060 and classified
+`REPLAY_REQUIRED_RETAIN`. They are **pseudonymous historical evidence
+correlation**, an already-certified retention decision rather than an
+unresolved actor-attribution defect, and neither category offers a path from
+A's UUID back to a live person.
+
+Operator accountability is untouched: an operator who acted on subject A keeps
+their own actor identity, while A stays de-identified under the certified
+subject-severance model. De-identifying the subject was never a licence to
+anonymise the staff.
+
+### The closure invariant
+
+A historical UUID may survive in immutable/security history or in retained
+sealed historical evidence after account deletion **provided that**:
+
+```
+1. the live account no longer exists;
+2. all direct personal identity mappings are removed;
+3. all subject-key / account mappings are severed;
+4. same-email re-registration produces a distinct account UUID;
+5. the successor cannot access the deleted account's retained history;
+6. no supported database or application path resolves the historical UUID to
+   current personal identity.
+```
+
+The measured 11B6J state satisfies all six.
 
 ## What survives, and still works
 
@@ -133,7 +168,13 @@ the deletion durable.
 ## Status
 
 ```
-terminal removal          IMPLEMENTED, NOT ENABLED
+terminal removal          IMPLEMENTED, ENGINEERING CERTIFIED, NOT ENABLED
 onyx_app_rw DELETE        still none on identity.user_account
-audit history             not rewritten
+audit history             not rewritten (0 UPDATEs, 0 DELETEs)
+PD-15                     CLOSED
 ```
+
+Production enablement remains a separate future decision, gated on policy and
+deployment readiness rather than on engineering: PD-3 (auth retention duration),
+PD-10 (deployed versioned-object-storage erasure) and the four billing retention
+decisions are all still open, and none of them is an engineer's to answer.
