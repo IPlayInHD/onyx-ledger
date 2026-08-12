@@ -194,13 +194,13 @@ def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
     counted.
     """
     classified = sorted(t for t, e in REGISTRY.items() if e.state == CLASSIFIED)
-    assert len(classified) == 43, (
+    assert len(classified) == 51, (
         f"{len(classified)} classified, expected 43. Every entry here was "
         "argued from a writer, a reader and a measured lifecycle fate — a "
         "count that moved without that work is the failure this file exists "
         "to catch."
     )
-    assert len(terminal_delete_blockers()) == 27
+    assert len(terminal_delete_blockers()) == 19
 
     # Spot-checks on the branches, so a wholesale re-labelling cannot pass by
     # keeping the total right.
@@ -285,7 +285,7 @@ def test_question_b_the_terminal_delete_gate_fails_closed():
         assert_terminal_account_delete_ready()
 
     message = str(excinfo.value)
-    assert "27" in message and "70" in message
+    assert "19" in message and "70" in message
     assert "UNCLASSIFIED_BLOCKING" in message, (
         "the failure must name the workflow state, or the reader will read it as "
         "a retention verdict"
@@ -324,7 +324,7 @@ def test_the_terminal_gate_would_pass_only_on_a_fully_classified_registry():
     finally:
         mod.REGISTRY = original
 
-    assert len(terminal_delete_blockers()) == 27, "the substitution leaked"
+    assert len(terminal_delete_blockers()) == 19, "the substitution leaked"
 
 
 # ------------------------------------------------- §36 coverage accounting ---
@@ -333,16 +333,20 @@ def test_the_terminal_gate_would_pass_only_on_a_fully_classified_registry():
 #: one of the seventy must land in exactly one bucket, and none may quietly
 #: vanish from the accounting.
 UNRESOLVED_REASONS = {
+    # 11B6H measured the verification consumers of all twenty. The eight the
+    # verifier actually reads are now REPLAY_REQUIRED_RETAIN. These twelve are
+    # read by NOTHING in the replay/integrity stack — which is a finding, not a
+    # licence: no phase purges them either, so their account-deletion behaviour
+    # is still missing in both directions.
     "MISSING_LIFECYCLE_BEHAVIOR": {
         "ioe.candidate_cost", "ioe.candidate_economic_effect",
         "ioe.confidence_component", "ioe.multi_year_projection",
-        "ioe.optimization_candidate", "ioe.optimization_run_event",
-        "ioe.portfolio_evaluation_step", "ioe.portfolio_exclusion",
-        "ioe.portfolio_member", "ioe.recommendation_relationship",
-        "ioe.resource_ledger_entry", "ioe.run_rule_version",
-        "ioe.scenario_assumption", "ioe.scenario_confidence_component",
-        "ioe.scenario_event", "ioe.scenario_input_change", "ioe.scenario_lever",
-        "ioe.scenario_result", "ioe.score_component", "ioe.strategy_portfolio",
+        "ioe.optimization_run_event",
+        "ioe.portfolio_evaluation_step",
+        "ioe.recommendation_relationship",
+        "ioe.scenario_confidence_component",
+        "ioe.scenario_event", "ioe.scenario_input_change",
+        "ioe.scenario_result", "ioe.score_component",
     },
     "ENGINEERING_EVIDENCE_MISSING": {
         "analysis.analysis_assumption", "analysis.analysis_line_item",
@@ -376,7 +380,7 @@ def test_every_unresolved_surface_has_a_stated_reason():
 
 
 def test_the_accounting_reconciles_to_seventy():
-    """43 classified plus 27 explained, and nothing else."""
+    """51 classified plus 19 explained, and nothing else."""
     classified = {t for t, e in REGISTRY.items() if e.state == CLASSIFIED}
     accounted = set().union(*UNRESOLVED_REASONS.values())
     assert len(classified) + len(accounted) == 70

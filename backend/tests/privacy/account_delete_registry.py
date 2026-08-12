@@ -970,7 +970,25 @@ REGISTRY: dict[str, Entry] = {
         ),
     ),
     "ioe.multi_year_projection": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ioe.optimization_candidate": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.optimization_candidate": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="CANDIDATE_KEY_RESOLVED_INTO_PORTFOLIO_HASH",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "`PortfolioReplayService._candidate_keys` resolves every member and "
+            "exclusion to `opportunity_code:tax_rule_version_id`, and those "
+            "keys ARE the canonical form the portfolio hash is taken over. "
+            "Without the candidate row the key degrades to an empty string, so "
+            "deleting them moved a verified portfolio to "
+            "mismatch/PORTFOLIO_HASH_MISMATCH."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/services.py:340",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.optimization_run_event": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.recommendation_relationship": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.run_rule_snapshot": Entry(
@@ -993,14 +1011,88 @@ REGISTRY: dict[str, Entry] = {
             "tests/security/test_sealed_history_after_purge.py:462",
         ),
     ),
-    "ioe.run_rule_version": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ioe.scenario_assumption": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.run_rule_version": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="RECOMPUTED_INTO_SPEC_HASH_AT_VERIFICATION",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "THE RULE PIN REPLAY ACTUALLY READS. `ReplayDependencyResolver."
+            "pinned_rule_versions` selects this table and `OptimizationReplay"
+            "Service` feeds the result into `optimization_spec_hash` as "
+            "`rule_version_set` — so the spec hash is RECOMPUTED from these "
+            "rows at verification time, not read back from the sealed root. "
+            "Deleting them moved a verified optimization to "
+            "mismatch/RESULT_HASH_MISMATCH, which is the worst possible "
+            "outcome: indistinguishable from evidence tampering."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/resolver.py:216",
+            "app/services/ioe/replay/services.py:163",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.scenario_assumption": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="SEALED_SPEC_READ_BACK_AT_VERIFICATION",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "`ScenarioReplayService._sealed_spec` rebuilds the typed spec from "
+            "these rows because, in its own words, 'the spec is what the hash "
+            "was taken over, so it is read back rather than re-derived'. "
+            "Deleting them moved a verified scenario to "
+            "mismatch/RESULT_HASH_MISMATCH."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/services.py:511",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.scenario_confidence_component": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.scenario_event": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.scenario_input_change": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ioe.scenario_lever": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.scenario_lever": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="SEALED_SPEC_READ_BACK_AT_VERIFICATION",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The other half of the sealed scenario spec, and the stricter half: "
+            "`_sealed_spec` raises SealedEvidenceIncomplete outright when no "
+            "levers remain. Deleting them moved a verified scenario to "
+            "unavailable/SEALED_EVIDENCE_INCOMPLETE — the scenario stops being "
+            "verifiable at all rather than merely disagreeing."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/services.py:506",
+            "app/services/ioe/replay/services.py:516",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.scenario_result": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ioe.strategy_portfolio": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.strategy_portfolio": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="SEALED_REPLAY_ENTITY",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "PORTFOLIO is one of the three EntityType values the production "
+            "verifier accepts, and this row carries `portfolio_result_hash` — "
+            "the expected identity every portfolio replay compares against. "
+            "Deleting it does not weaken verification, it removes the entity: "
+            "the verifier raised NotFound."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/services.py:207",
+            "app/services/ioe/replay/verification.py:202",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "reco.recommendation_status_event": Entry(
         state=CLASSIFIED,
         depth=2,
@@ -1146,9 +1238,61 @@ REGISTRY: dict[str, Entry] = {
     "ioe.candidate_economic_effect": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
     "ioe.confidence_component": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
     "ioe.portfolio_evaluation_step": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "ioe.portfolio_exclusion": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "ioe.portfolio_member": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "ioe.resource_ledger_entry": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
+    "ioe.portfolio_exclusion": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="CANONICAL_PORTFOLIO_FORM_REBUILT_FROM_ROWS",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "An `exclusions` array inside the canonical portfolio form that "
+            "`portfolio_result_hash` is computed over. Deleting them moved a "
+            "verified portfolio to mismatch/PORTFOLIO_HASH_MISMATCH."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/services.py:250",
+            "app/services/ioe/replay/services.py:317",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.portfolio_member": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="CANONICAL_PORTFOLIO_FORM_AND_STORED_INVARIANTS",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The strongest dependency measured. Members are both the `members` "
+            "array of the hashed canonical form AND the input to "
+            "`_verify_invariants`, which checks I-1 telescoping and I-2 "
+            "reconciliation over the stored rows. Deleting them did not produce "
+            "a mismatch, it produced unavailable/REPLAY_EXECUTION_FAILED: the "
+            "invariant check raises before any hash is compared."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/services.py:241",
+            "app/services/ioe/replay/services.py:374",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.resource_ledger_entry": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="CANONICAL_PORTFOLIO_FORM_REBUILT_FROM_ROWS",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The `ledger` array — per-resource capacity, allocated and "
+            "remaining — inside the canonical portfolio form the hash is taken "
+            "over. Deleting them moved a verified portfolio to "
+            "mismatch/PORTFOLIO_HASH_MISMATCH."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/services.py:246",
+            "app/services/ioe/replay/services.py:291",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.score_component": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
 }
 

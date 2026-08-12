@@ -566,8 +566,12 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        on_user_deletion=U.NOT_USER_DELETABLE, purge=G.LATER_PHASE),
     _e("analysis.analysis_line_item", (P.DERIVED_TAX_RESULT,),
        S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
-       replay_dependency=True, exportable=True,
-       notes="Computed amounts with display labels. NO RLS. See PD-1."),
+       exportable=True,
+       notes="Computed amounts with display labels. NO RLS. See PD-1. "
+             "`replay_dependency` was True by lineage and is False by "
+             "measurement: replay resolves the analysis through "
+             "`analysis_input_snapshot`, and 11B6H's SQL trace shows the "
+             "verifier never issues a statement against the line items."),
     _e("analysis.analysis_assumption", (P.DERIVED_TAX_INPUT, P.USER_FREE_TEXT),
        S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
        notes="Free-text `text` column inside sealed evidence. NO RLS."),
@@ -583,21 +587,46 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
        replay_dependency=True, exportable=True,
        notes="`label` and `note` are user free text on an otherwise sealed row."),
+    # `replay_dependency` MEANS WHAT ITS DOCSTRING SAYS: the verifier reads this
+    # table. It used to be set by one comprehension over every sealed child,
+    # which encoded "is descended from a replayable run" — lineage, not
+    # consumption — and was therefore wrong for eleven tables at once.
+    #
+    # Entry 11B6H measured it two independent ways on a production-sealed
+    # chain: deleting each table's rows and re-running all three verifications,
+    # and tracing every SQL statement the three verifications issue. Both
+    # methods return the SAME eight tables, and the SQL trace covers even the
+    # ones a fixture never populates. See
+    # `tests/privacy/test_verification_consumers.py`.
+    *(_e(t, (P.DERIVED_TAX_RESULT, P.SEALED_EVIDENCE),
+         S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.RETAIN, rls=True,
+         replay_dependency=True, immutable=True,
+         notes="Sealed evidence child THE VERIFIER READS: its rows are "
+               "reconstructed into the hashed canonical form (or into the "
+               "recomputed spec hash) at verification time, so destroying them "
+               "turns a verified artifact into a mismatch or an unavailable "
+               "one. Retained evidence, not derivative detail. Declared "
+               "CASCADE_DELETE until 11B6H — a contradiction with "
+               "`replay_dependency=True` that the account-delete cascade could "
+               "not reach only because 0060 had already detached the roots.")
+      for t in ("ioe.optimization_candidate", "ioe.portfolio_exclusion",
+                "ioe.portfolio_member", "ioe.resource_ledger_entry",
+                "ioe.run_rule_version", "ioe.scenario_assumption",
+                "ioe.scenario_lever", "ioe.strategy_portfolio")),
     *(_e(t, (P.DERIVED_TAX_RESULT, P.SEALED_EVIDENCE),
          S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
-         replay_dependency=True, immutable=True,
-         notes="Sealed optimization/scenario evidence child. RLS present "
-               "(Entry 3B) — the pattern the analysis/docs/wealth children "
-               "should follow.")
+         immutable=True,
+         notes="Sealed optimization/scenario evidence child that NO replay or "
+               "integrity verification reads — measured, not assumed. Still "
+               "insert-only and still personal derived tax detail; its "
+               "account-deletion disposition is an open question (11B6H), and "
+               "`replay_dependency=False` is the measurement, not the answer.")
       for t in ("ioe.candidate_cost", "ioe.candidate_economic_effect",
                 "ioe.confidence_component", "ioe.multi_year_projection",
-                "ioe.optimization_candidate", "ioe.portfolio_evaluation_step",
-                "ioe.portfolio_exclusion", "ioe.portfolio_member",
-                "ioe.recommendation_relationship", "ioe.resource_ledger_entry",
-                "ioe.run_rule_version", "ioe.scenario_assumption",
+                "ioe.portfolio_evaluation_step",
+                "ioe.recommendation_relationship",
                 "ioe.scenario_confidence_component", "ioe.scenario_input_change",
-                "ioe.scenario_lever", "ioe.scenario_result",
-                "ioe.score_component", "ioe.strategy_portfolio")),
+                "ioe.scenario_result", "ioe.score_component")),
     _e("ioe.optimization_run_event", (P.OPERATIONAL_TELEMETRY,),
        S.AUDIT, R.BOUNDED_AUDIT, D.CASCADE_DELETE, rls=True,
        notes="Closed reason codes only."),

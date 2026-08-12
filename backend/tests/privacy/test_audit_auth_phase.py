@@ -665,4 +665,4 @@ def test_terminal_deletion_is_still_blocked_by_the_registry():
 
     with pytest.raises(AssertionError):
         assert_terminal_account_delete_ready()
-    assert len(terminal_delete_blockers()) == 27
+    assert len(terminal_delete_blockers()) == 19
