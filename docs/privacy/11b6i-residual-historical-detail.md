@@ -259,6 +259,49 @@ directions are asserted, and a guard-on-the-guard proves an ordinary account can
 still write its own detail, since refusing everything would satisfy the first
 assertion alone.
 
+## In-flight atomicity — the question the cutoff makes necessary
+
+The cutoff refuses writes to the fifteen purgeable tables and deliberately does
+**not** refuse the eight verification-required ones. So: if deletion is requested
+while an optimization is computing, can the retained half commit before the
+purgeable half is refused, leaving a half-written sealed artifact?
+
+**Transaction shape, read from the implementation rather than inferred:**
+
+| artifact | atomic? | evidence |
+|---|---|---|
+| analysis | YES | `AnalysisService.__init__(session)` opens no transaction of its own; every write joins the caller's `unit_of_work` |
+| optimization | staged, but the EVIDENCE is atomic | TX-1 header → compute (no transaction) → TX-2 `_persist`: *"one atomic transaction: all children, the sealed hash, and completion"* → TX-3 failure marker |
+| scenario | staged, same shape | TX-1 header → TX-2 `_persist` seals atomically → TX-3 failure marker |
+
+**The answer is no.** Every verification-required row and every purge-detail row
+is written in TX-2, so a cutoff refusal aborts both halves together. Measured on
+the production path with deletion requested at the moment the engine finishes —
+the worst case, since persistence then runs entirely after the cutoff is live:
+
+```
+new purge-detail rows (TX-2)        0
+new verification-required rows      0
+new sealed result hashes            0
+events appended to a sealed run     0
+runs marked completed with no hash  0
+```
+
+What *does* survive is TX-1's header and its two `pending`/`running` workflow
+events, committed before the user asked to be deleted. Those are lawful
+pre-cutoff writes, not a torn artifact: the run has no hash, no children, and
+any replay refuses it as `SealedEvidenceIncomplete` — the state every failed run
+has always left. The cleanup phase purges the events when it runs, and the
+lifecycle converges to `remaining = 0`.
+
+Three earlier versions of this test reported DID NOT RAISE while never
+exercising the path: `generate` resolves idempotency in TX-1 against the
+**specification hash**, so a second run over identical figures — even under a
+new `analysis_id` — hands back the existing completed run and never enters TX-2.
+The test now changes the account's income so the specification genuinely
+differs. A test that cannot fail is worth less than no test, and this one
+could not fail twice over.
+
 ## Accounting
 
 ```

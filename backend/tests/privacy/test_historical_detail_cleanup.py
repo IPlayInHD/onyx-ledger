@@ -862,3 +862,234 @@ async def test_an_ordinary_account_is_unaffected_by_the_cutoff():
         assert cur.rowcount == 1, "an ordinary account could not write its own detail"
     finally:
         c.close()
+
+
+# ------------------------------------------------- in-flight atomicity --
+def _request_deletion(cur, uid) -> None:
+    cur.execute("INSERT INTO identity.account_lifecycle (user_id, state)"
+                " VALUES (%s,'DELETION_REQUESTED')"
+                " ON CONFLICT (user_id) DO NOTHING", (str(uid),))
+
+
+async def _fresh_analysis(user_id) -> uuid.UUID:
+    """A new analysis over CHANGED financials, so the next optimization is a
+    genuinely new specification.
+
+    `generate` resolves idempotency in TX-1 against the SPECIFICATION hash, not
+    the analysis id — measured. A second analysis over identical figures
+    produces an identical frozen snapshot, an identical spec hash, and TX-1
+    hands back the existing completed run without ever entering TX-2. Two
+    earlier versions of this test did exactly that and reported DID NOT RAISE
+    while never exercising the path.
+
+    Changing the income is what makes the spec differ, and it is also what a
+    real second optimization would be for.
+    """
+    from decimal import Decimal
+
+    from sqlalchemy import select as _select
+
+    from app.database.models import IncomeSource, IncomeType
+    from app.services.analysis.service import AnalysisService
+
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        income_type_id = (await session.scalar(
+            _select(IncomeType).where(IncomeType.code == "employment"))).id
+        session.add(IncomeSource(
+            user_id=user_id, tax_year=2025, income_type_id=income_type_id,
+            amount=Decimal("7331.00"), province_code="ON"))
+
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        return (await AnalysisService(session).run(user_id, 2025)).id
+
+
+def _artifact_counts(cur, uid) -> dict[str, int]:
+    """Everything an optimization persists, counted per account."""
+    out: dict[str, int] = {}
+    cur.execute("SELECT count(*) FROM ioe.optimization_run WHERE user_id=%s",
+                (str(uid),))
+    out["optimization_run"] = cur.fetchone()[0]
+    cur.execute("SELECT count(*) FROM ioe.optimization_run WHERE user_id=%s"
+                "   AND optimization_result_hash IS NOT NULL", (str(uid),))
+    out["sealed_runs"] = cur.fetchone()[0]
+    # Events belonging to a SEALED run. TX-1 writes events for headers that may
+    # never seal, so "no new events at all" is the wrong invariant; "nothing was
+    # appended to a sealed artifact" is the right one.
+    cur.execute("SELECT count(*) FROM ioe.optimization_run_event e"
+                "  JOIN ioe.optimization_run r ON r.id = e.run_id"
+                " WHERE r.user_id = %s AND r.optimization_result_hash IS NOT NULL",
+                (str(uid),))
+    out["events_on_sealed_runs"] = cur.fetchone()[0]
+    for table, pred in _VERIFICATION_SCOPE.items():
+        cur.execute(f"SELECT count(*) FROM {table} WHERE {pred}", {"u": str(uid)})
+        out[table] = cur.fetchone()[0]
+    for table in sorted(implemented_purge_set()):
+        cur.execute(f"SELECT count(*) FROM {table} WHERE {_SCOPE[table]}",
+                    {"u": str(uid)})
+        out[table] = cur.fetchone()[0]
+    return out
+
+
+async def test_a_deletion_requested_mid_computation_leaves_no_partial_artifact():
+    """THE TRANSACTION-BOUNDARY PROOF the write cutoff makes necessary.
+
+    The cutoff refuses writes to the fifteen purgeable tables and deliberately
+    does NOT refuse writes to the eight verification-required ones. That raises
+    a real question: if deletion is requested WHILE an optimization is
+    computing, can the retained half commit before the purgeable half is
+    refused, leaving a half-written sealed artifact?
+
+    Measured against the production path. `OptimizationOrchestrator.generate` is
+    TX-1 (header) -> compute (no transaction) -> TX-2 (`_persist`: "one atomic
+    transaction: all children, the sealed hash, and completion"). Deletion is
+    requested at the moment the engine finishes, so persistence runs entirely
+    after the cutoff is live — the worst case for this question.
+
+    The account already holds VALID SEALED HISTORY, so the assertions are
+    deltas. Asserting "the tables are empty" would pass for the wrong reason and
+    would also be false.
+    """
+    uid, run_id, portfolio_id, scenario_id = await _sealed_chain()
+
+    c = _owner()
+    cur = c.cursor()
+    try:
+        cur.execute("SELECT optimization_result_hash FROM ioe.optimization_run"
+                    " WHERE id=%s", (str(run_id),))
+        sealed_hash_before = cur.fetchone()[0]
+
+        # A GENUINELY NEW SPECIFICATION. Re-running `generate` against the same
+        # analysis returns TX-1's existing completed run by idempotency and
+        # never reaches TX-2.
+        analysis_id = await _fresh_analysis(uid)
+
+        # BASELINE TAKEN HERE, NOT EARLIER. `_fresh_analysis` legitimately writes
+        # its own analysis detail before any deletion is requested; measuring
+        # from before it would attribute that lawful work to the failed
+        # optimization and fail for the wrong reason.
+        before = _artifact_counts(cur, uid)
+        assert before["sealed_runs"] >= 1, "fixture produced no sealed history"
+
+        from app.services.ioe.orchestrator import OptimizationOrchestrator
+
+        orchestrator = OptimizationOrchestrator(uid)
+        original_compute = orchestrator._compute
+
+        async def compute_then_request_deletion(*args, **kwargs):
+            computed = await original_compute(*args, **kwargs)
+            # The user asks to be deleted while the engine is running. TX-1 has
+            # already committed a header; TX-2 has not started.
+            _request_deletion(cur, uid)
+            return computed
+
+        orchestrator._compute = compute_then_request_deletion
+
+        with pytest.raises(Exception) as excinfo:
+            await orchestrator.generate(analysis_id)
+        assert "being deleted" in str(excinfo.value) or "deleted" in str(excinfo.value), (
+            f"persistence failed for an unrelated reason: {excinfo.value}")
+
+        after = _artifact_counts(cur, uid)
+
+        # NOTHING TX-2 WOULD HAVE WRITTEN SURVIVES, in either half. This is the
+        # invariant that matters: the retained and the purgeable halves live in
+        # the same transaction, so a refusal in one aborts the other.
+        for table in sorted(implemented_purge_set() - {"ioe.optimization_run_event"}):
+            assert after[table] == before[table], (
+                f"{table}: purge-detail rows survived a refused persistence")
+        for table in _VERIFICATION_SCOPE:
+            assert after[table] == before[table], (
+                f"{table}: verification-required rows committed while the "
+                f"purgeable half was refused — that is a partial artifact")
+        assert after["sealed_runs"] == before["sealed_runs"], (
+            "a new sealed result hash survived a refused persistence")
+
+        # `ioe.optimization_run_event` IS excepted above, and this is why —
+        # measured, not waved through. TX-1 commits the header and its
+        # pending/running workflow events BEFORE the engine runs, which is
+        # before the user asked to be deleted. Those are lawful pre-cutoff
+        # writes, not a torn artifact. What must be true is that every one of
+        # them belongs to a run that never sealed: no hash, no children, and
+        # `SealedEvidenceIncomplete` from any replay — the same state every
+        # failed run has always left behind.
+        assert after["events_on_sealed_runs"] == before["events_on_sealed_runs"], (
+            "an event was appended to a SEALED artifact by a refused "
+            "persistence")
+        cur.execute(
+            "SELECT count(*) FROM ioe.optimization_run"
+            " WHERE user_id = %s AND workflow_status = 'completed'"
+            "   AND optimization_result_hash IS NULL", (str(uid),))
+        assert cur.fetchone()[0] == 0, (
+            "a run is marked completed with no sealed hash — that IS a torn "
+            "artifact")
+
+        # The pre-existing history is untouched.
+        cur.execute("SELECT optimization_result_hash FROM ioe.optimization_run"
+                    " WHERE id=%s", (str(run_id),))
+        assert cur.fetchone()[0] == sealed_hash_before
+
+        # TX-1's header is the ONE thing that legitimately survives: it committed
+        # before the cutoff existed. It is not a sealed artifact — no hash, no
+        # children — and replay refuses it as SealedEvidenceIncomplete, which is
+        # exactly how every failed run has always been modelled.
+        assert after["optimization_run"] - before["optimization_run"] <= 1, (
+            "more than one unsealed header survived")
+    finally:
+        c.close()
+
+    # The pre-existing sealed evidence still verifies.
+    from app.services.ioe.domain.integrity import EntityType
+    from app.services.ioe.replay.verification import IntegrityVerificationService
+
+    service = IntegrityVerificationService(uid)
+    for kind, entity_id in ((EntityType.OPTIMIZATION, run_id),
+                            (EntityType.PORTFOLIO, portfolio_id),
+                            (EntityType.SCENARIO, scenario_id)):
+        result = await service.verify(kind, entity_id)
+        assert str(result.status) == "verified", (
+            f"{kind} broke after a refused in-flight persistence: "
+            f"{result.status}/{result.reason_code}")
+
+
+async def test_the_lifecycle_still_converges_after_a_refused_in_flight_write():
+    """A failed computation must not wedge deletion.
+
+    If a refused in-flight persistence left the account in a state the cleanup
+    phase could not complete, the cutoff would have traded a resurrection hole
+    for a permanently stuck deletion. It does not: the refused transaction wrote
+    nothing, so there is nothing left to purge.
+    """
+    uid, _run, _pf, _sc = await _sealed_chain()
+    c = _owner()
+    cur = c.cursor()
+    try:
+        analysis_id = await _fresh_analysis(uid)
+
+        from app.services.ioe.orchestrator import OptimizationOrchestrator
+
+        orchestrator = OptimizationOrchestrator(uid)
+        original_compute = orchestrator._compute
+
+        async def compute_then_request_deletion(*args, **kwargs):
+            computed = await original_compute(*args, **kwargs)
+            _request_deletion(cur, uid)
+            return computed
+
+        orchestrator._compute = compute_then_request_deletion
+        with pytest.raises(Exception, match="deleted"):
+            await orchestrator.generate(analysis_id)
+
+        # Now run the deletion the user actually asked for.
+        for state in ("ACCESS_DISABLED", "PURGE_PENDING", "PURGING"):
+            cur.execute("UPDATE identity.account_lifecycle SET state=%s"
+                        " WHERE user_id=%s", (state, str(uid)))
+        _mark_earlier_complete(cur, uid)
+        token = _claim(cur, uid)
+
+        _start(cur, uid, token)
+        _purge(cur, uid, token)
+        assert _remaining(cur, uid) == 0
+        assert _complete(cur, uid, token) is True
+        assert _phase_status(cur, uid) == "COMPLETE"
+    finally:
+        c.close()
