@@ -194,13 +194,13 @@ def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
     counted.
     """
     classified = sorted(t for t, e in REGISTRY.items() if e.state == CLASSIFIED)
-    assert len(classified) == 51, (
+    assert len(classified) == 66, (
         f"{len(classified)} classified, expected 43. Every entry here was "
         "argued from a writer, a reader and a measured lifecycle fate — a "
         "count that moved without that work is the failure this file exists "
         "to catch."
     )
-    assert len(terminal_delete_blockers()) == 19
+    assert len(terminal_delete_blockers()) == 4
 
     # Spot-checks on the branches, so a wholesale re-labelling cannot pass by
     # keeping the total right.
@@ -285,7 +285,7 @@ def test_question_b_the_terminal_delete_gate_fails_closed():
         assert_terminal_account_delete_ready()
 
     message = str(excinfo.value)
-    assert "19" in message and "70" in message
+    assert "4" in message and "70" in message
     assert "UNCLASSIFIED_BLOCKING" in message, (
         "the failure must name the workflow state, or the reader will read it as "
         "a retention verdict"
@@ -324,7 +324,7 @@ def test_the_terminal_gate_would_pass_only_on_a_fully_classified_registry():
     finally:
         mod.REGISTRY = original
 
-    assert len(terminal_delete_blockers()) == 19, "the substitution leaked"
+    assert len(terminal_delete_blockers()) == 4, "the substitution leaked"
 
 
 # ------------------------------------------------- §36 coverage accounting ---
@@ -333,25 +333,6 @@ def test_the_terminal_gate_would_pass_only_on_a_fully_classified_registry():
 #: one of the seventy must land in exactly one bucket, and none may quietly
 #: vanish from the accounting.
 UNRESOLVED_REASONS = {
-    # 11B6H measured the verification consumers of all twenty. The eight the
-    # verifier actually reads are now REPLAY_REQUIRED_RETAIN. These twelve are
-    # read by NOTHING in the replay/integrity stack — which is a finding, not a
-    # licence: no phase purges them either, so their account-deletion behaviour
-    # is still missing in both directions.
-    "MISSING_LIFECYCLE_BEHAVIOR": {
-        "ioe.candidate_cost", "ioe.candidate_economic_effect",
-        "ioe.confidence_component", "ioe.multi_year_projection",
-        "ioe.optimization_run_event",
-        "ioe.portfolio_evaluation_step",
-        "ioe.recommendation_relationship",
-        "ioe.scenario_confidence_component",
-        "ioe.scenario_event", "ioe.scenario_input_change",
-        "ioe.scenario_result", "ioe.score_component",
-    },
-    "ENGINEERING_EVIDENCE_MISSING": {
-        "analysis.analysis_assumption", "analysis.analysis_line_item",
-        "analysis.reconciliation_check",
-    },
     "POLICY_DECISION_REQUIRED": {
         "billing.entitlement", "billing.invoice", "billing.payment_method_ref",
         "billing.subscription",
@@ -380,7 +361,7 @@ def test_every_unresolved_surface_has_a_stated_reason():
 
 
 def test_the_accounting_reconciles_to_seventy():
-    """51 classified plus 19 explained, and nothing else."""
+    """66 classified plus 4 explained, and nothing else."""
     classified = {t for t, e in REGISTRY.items() if e.state == CLASSIFIED}
     accounted = set().union(*UNRESOLVED_REASONS.values())
     assert len(classified) + len(accounted) == 70
@@ -393,14 +374,20 @@ def test_a_policy_question_is_not_used_to_hide_missing_engineering():
 
     Billing qualifies because there is no production writer at all: the
     engineering treatment is undetermined for a reason nobody can code around,
-    and the retention question is statutory. The `ioe` and `analysis` groups
-    deliberately do NOT qualify — those are missing evidence and a missing
-    phase, and filing them under policy would make an engineering gap look like
-    somebody else's decision.
+    and the retention question is statutory.
+
+    The `ioe` and `analysis` groups never qualified, and 11B6I is why the point
+    still stands: they were missing evidence and a missing phase, and both were
+    supplied — measured consumers, then HISTORICAL_DETAIL_CLEANUP. Filing them
+    under policy would have made an engineering gap look like somebody else's
+    decision, and would have left the work undone.
     """
     policy = UNRESOLVED_REASONS["POLICY_DECISION_REQUIRED"]
     assert all(t.startswith("billing.") for t in policy), (
         "a non-billing surface was filed as a policy decision; check that its "
         "code has actually been read"
     )
-    assert not (policy & UNRESOLVED_REASONS["MISSING_LIFECYCLE_BEHAVIOR"])
+    assert set(UNRESOLVED_REASONS) == {"POLICY_DECISION_REQUIRED"}, (
+        "an engineering reason code reappeared; engineering blockers are zero "
+        "and a new one must be argued, not filed"
+    )

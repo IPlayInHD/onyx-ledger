@@ -565,19 +565,23 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "PD-1, and the highest-value row in that finding.",
        on_user_deletion=U.NOT_USER_DELETABLE, purge=G.LATER_PHASE),
     _e("analysis.analysis_line_item", (P.DERIVED_TAX_RESULT,),
-       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
        exportable=True,
        notes="Computed amounts with display labels. NO RLS. See PD-1. "
              "`replay_dependency` was True by lineage and is False by "
              "measurement: replay resolves the analysis through "
              "`analysis_input_snapshot`, and 11B6H's SQL trace shows the "
-             "verifier never issues a statement against the line items."),
+             "verifier never issues a statement against the line items. "
+             "Removed by HISTORICAL_DETAIL_CLEANUP (11B6I)."),
     _e("analysis.analysis_assumption", (P.DERIVED_TAX_INPUT, P.USER_FREE_TEXT),
-       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
-       notes="Free-text `text` column inside sealed evidence. NO RLS."),
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
+       notes="Free-text `text` column inside sealed evidence. NO RLS. No "
+             "production writer constructs one and no reader exists; removed "
+             "by HISTORICAL_DETAIL_CLEANUP (11B6I)."),
     _e("analysis.reconciliation_check", (P.DERIVED_TAX_RESULT,),
-       S.DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
-       notes="`detail` is free text produced by the system, not the user."),
+       S.DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
+       notes="`detail` is free text produced by the system, not the user. "
+             "Removed by HISTORICAL_DETAIL_CLEANUP (11B6I)."),
 
     # ------------------------------------------------------------------- IOE
     _e("ioe.optimization_run", (P.DERIVED_TAX_RESULT, P.SEALED_EVIDENCE),
@@ -614,13 +618,16 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
                 "ioe.run_rule_version", "ioe.scenario_assumption",
                 "ioe.scenario_lever", "ioe.strategy_portfolio")),
     *(_e(t, (P.DERIVED_TAX_RESULT, P.SEALED_EVIDENCE),
-         S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CASCADE_DELETE, rls=True,
+         S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
          immutable=True,
          notes="Sealed optimization/scenario evidence child that NO replay or "
-               "integrity verification reads — measured, not assumed. Still "
-               "insert-only and still personal derived tax detail; its "
-               "account-deletion disposition is an open question (11B6H), and "
-               "`replay_dependency=False` is the measurement, not the answer.")
+               "integrity verification reads — measured, not assumed (11B6H). "
+               "Removed by the HISTORICAL_DETAIL_CLEANUP phase (11B6I), which "
+               "is why this is CUSTOM_WORKFLOW rather than CASCADE_DELETE: "
+               "after 0060 detached the roots, no account cascade reaches it "
+               "and only that phase does. Not DERIVED_DELETE — only a digest "
+               "of these values survives, and recomputation stops working the "
+               "moment the running build no longer matches the pins.")
       for t in ("ioe.candidate_cost", "ioe.candidate_economic_effect",
                 "ioe.confidence_component", "ioe.multi_year_projection",
                 "ioe.portfolio_evaluation_step",
@@ -628,10 +635,15 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
                 "ioe.scenario_confidence_component", "ioe.scenario_input_change",
                 "ioe.scenario_result", "ioe.score_component")),
     _e("ioe.optimization_run_event", (P.OPERATIONAL_TELEMETRY,),
-       S.AUDIT, R.BOUNDED_AUDIT, D.CASCADE_DELETE, rls=True,
-       notes="Closed reason codes only."),
+       S.AUDIT, R.BOUNDED_AUDIT, D.CUSTOM_WORKFLOW, rls=True,
+       notes="Closed reason codes only. NOT the audit trail — that is "
+             "audit.audit_log, which 11B6D de-identifies and retains. Removed "
+             "by HISTORICAL_DETAIL_CLEANUP (11B6I); no account cascade reaches "
+             "it after 0060."),
     _e("ioe.scenario_event", (P.OPERATIONAL_TELEMETRY,),
-       S.AUDIT, R.BOUNDED_AUDIT, D.CASCADE_DELETE, rls=True),
+       S.AUDIT, R.BOUNDED_AUDIT, D.CUSTOM_WORKFLOW, rls=True,
+       notes="The scenario-side twin of ioe.optimization_run_event. Removed by "
+             "HISTORICAL_DETAIL_CLEANUP (11B6I)."),
     _e("ioe.run_rule_snapshot", (P.PSEUDONYMOUS_IDENTIFIER,),
        S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
        replay_dependency=True,

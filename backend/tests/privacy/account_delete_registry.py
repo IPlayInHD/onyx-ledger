@@ -905,7 +905,24 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/surface_census.py",
         ),
     ),
-    "analysis.analysis_assumption": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "analysis.analysis_assumption": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Assumptions recorded against an analysis, including a free-text "
+            "column. No production writer constructs one and no reader exists; "
+            "the census found it unpopulated. Free text about a person with no "
+            "reader and no writer is the clearest possible delete."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "analysis.analysis_input_snapshot": Entry(
         state=CLASSIFIED,
         depth=2,
@@ -930,8 +947,56 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/surface_census.py",
         ),
     ),
-    "analysis.analysis_line_item": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "analysis.reconciliation_check": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "analysis.analysis_line_item": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The computed line-by-line tax breakdown of one analysis. The "
+            "retained artifact on this branch is analysis_input_snapshot — the "
+            "frozen INPUTS, which every replay resolves. These are the OUTPUTS, "
+            "and 11B6H measured that no verifier issues a statement against "
+            "them. Only a DIGEST of these values survives, and a digest does "
+            "not permit reconstructing its preimage, so this is NOT "
+            "DERIVED_DELETE. The one reconstruction route — re-running the "
+            "engine over retained inputs — is not durable: with the pins "
+            "untouched and the running build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "analysis.reconciliation_check": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Per-analysis reconciliation outcomes with a system-generated "
+            "detail string. Written by AnalysisService, read by nothing. Only a "
+            "DIGEST of these values survives, and a digest does not permit "
+            "reconstructing its preimage, so this is NOT DERIVED_DELETE. The "
+            "one reconstruction route — re-running the engine over retained "
+            "inputs — is not durable: with the pins untouched and the running "
+            "build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "billing.invoice": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "docs.document_extraction": Entry(
         state=CLASSIFIED,
@@ -969,7 +1034,28 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/surface_census.py",
         ),
     ),
-    "ioe.multi_year_projection": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.multi_year_projection": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="ACCOUNT_SCOPED_HISTORICAL_PRODUCT_READ",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Per-year projected tax over the horizon. HAS A LIVE READER — GET "
+            "/runs/{id}/projections, via ProjectionQueryService — and that is "
+            "exactly why it needed measuring rather than assuming: the route "
+            "sits behind Depends(current_user_id) and RLS, so it is reachable "
+            "only by the account that owns the rows. Once that account is gone "
+            "the reader is gone with it; a same-email successor is a different "
+            "user_id and RLS excludes these rows. Retaining data for an "
+            "interface nobody can reach is not retention, it is residue."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.optimization_candidate": Entry(
         state=CLASSIFIED,
         depth=2,
@@ -989,8 +1075,49 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/test_verification_consumers.py",
         ),
     ),
-    "ioe.optimization_run_event": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ioe.recommendation_relationship": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.optimization_run_event": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="WORKFLOW_EVENT_LOG_NOT_THE_AUDIT_TRAIL",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Workflow events for one optimization run, with closed reason "
+            "codes. NOT the audit trail: that is audit.audit_log, which 11B6D "
+            "de-identifies and retains, and which is where a security or "
+            "compliance reader would look. Nothing reads this table. Not "
+            "reconstructable — it carries wall-clock timestamps — and that is "
+            "not a retention reason."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.recommendation_relationship": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Derived edges between recommendations — conflicts, prerequisites, "
+            "shared resources. Only a DIGEST of these values survives, and a "
+            "digest does not permit reconstructing its preimage, so this is NOT "
+            "DERIVED_DELETE. The one reconstruction route — re-running the "
+            "engine over retained inputs — is not durable: with the pins "
+            "untouched and the running build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.run_rule_snapshot": Entry(
         state=CLASSIFIED,
         depth=2,
@@ -1051,9 +1178,73 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/test_verification_consumers.py",
         ),
     ),
-    "ioe.scenario_confidence_component": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ioe.scenario_event": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ioe.scenario_input_change": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.scenario_confidence_component": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The scenario support breakdown. IoeReadRepository defines a method "
+            "for it and NOTHING CALLS THAT METHOD — measured across the whole "
+            "repository, tests included — so even the account-scoped reader is "
+            "dead code. Only a DIGEST of these values survives, and a digest "
+            "does not permit reconstructing its preimage, so this is NOT "
+            "DERIVED_DELETE. The one reconstruction route — re-running the "
+            "engine over retained inputs — is not durable: with the pins "
+            "untouched and the running build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.scenario_event": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="WORKFLOW_EVENT_LOG_NOT_THE_AUDIT_TRAIL",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The scenario-side twin of ioe.optimization_run_event, written by "
+            "the scenario and freshness services. Same reasoning: not the audit "
+            "trail, no reader, not reconstructable, no independent retention "
+            "obligation."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.scenario_input_change": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="ACCOUNT_SCOPED_HISTORICAL_PRODUCT_READ",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The field-level diff a scenario's levers produced, shown in the "
+            "scenario detail view. Account-scoped reader only. Only a DIGEST of "
+            "these values survives, and a digest does not permit reconstructing "
+            "its preimage, so this is NOT DERIVED_DELETE. The one "
+            "reconstruction route — re-running the engine over retained inputs "
+            "— is not durable: with the pins untouched and the running build "
+            "moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: no reader survives the account."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.scenario_lever": Entry(
         state=CLASSIFIED,
         depth=2,
@@ -1073,7 +1264,33 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/test_verification_consumers.py",
         ),
     ),
-    "ioe.scenario_result": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "ioe.scenario_result": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="ACCOUNT_SCOPED_HISTORICAL_PRODUCT_READ",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The computed result of one scenario. Read by GET /scenarios/{id} "
+            "and by the comparison route, both account-scoped under RLS. Only a "
+            "DIGEST of these values survives, and a digest does not permit "
+            "reconstructing its preimage, so this is NOT DERIVED_DELETE. The "
+            "one reconstruction route — re-running the engine over retained "
+            "inputs — is not durable: with the pins untouched and the running "
+            "build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: no reader survives the account. Note the "
+            "asymmetry that makes this safe: replay does NOT read this table — "
+            "it recomputes the result and compares hashes — which is why "
+            "deleting it leaves scenario verification green."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.strategy_portfolio": Entry(
         state=CLASSIFIED,
         depth=2,
@@ -1234,10 +1451,102 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/test_document_phase.py",
         ),
     ),
-    "ioe.candidate_cost": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "ioe.candidate_economic_effect": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "ioe.confidence_component": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "ioe.portfolio_evaluation_step": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
+    "ioe.candidate_cost": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The cost components behind one recommendation — amounts, timing "
+            "and the normalisation provenance of each. Only a DIGEST of these "
+            "values survives, and a digest does not permit reconstructing its "
+            "preimage, so this is NOT DERIVED_DELETE. The one reconstruction "
+            "route — re-running the engine over retained inputs — is not "
+            "durable: with the pins untouched and the running build moved on, "
+            "replay returns unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE "
+            "(measured). It is deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it. No product route, no export, "
+            "no operator or admin surface, no worker, and 11B6H's verification "
+            "trace does not touch it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.candidate_economic_effect": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The per-candidate economic effects: amount, basis, horizon, "
+            "reversibility. Only a DIGEST of these values survives, and a "
+            "digest does not permit reconstructing its preimage, so this is NOT "
+            "DERIVED_DELETE. The one reconstruction route — re-running the "
+            "engine over retained inputs — is not durable: with the pins "
+            "untouched and the running build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it, measured the same two ways."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.confidence_component": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The factors behind one candidate's confidence score. Only a DIGEST "
+            "of these values survives, and a digest does not permit "
+            "reconstructing its preimage, so this is NOT DERIVED_DELETE. The "
+            "one reconstruction route — re-running the engine over retained "
+            "inputs — is not durable: with the pins untouched and the running "
+            "build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
+    "ioe.portfolio_evaluation_step": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The assembly search trace: which candidate was considered in which "
+            "order and what the objective did. Deliberately NOT part of the "
+            "canonical portfolio form, so it is not even hash-committed. Only a "
+            "DIGEST of these values survives, and a digest does not permit "
+            "reconstructing its preimage, so this is NOT DERIVED_DELETE. The "
+            "one reconstruction route — re-running the engine over retained "
+            "inputs — is not durable: with the pins untouched and the running "
+            "build moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
     "ioe.portfolio_exclusion": Entry(
         state=CLASSIFIED,
         depth=3,
@@ -1293,7 +1602,29 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/test_verification_consumers.py",
         ),
     ),
-    "ioe.score_component": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
+    "ioe.score_component": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SEALED_DETAIL_NO_POST_ACCOUNT_READER",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The weighted factors behind one candidate's rank. Only a DIGEST of "
+            "these values survives, and a digest does not permit reconstructing "
+            "its preimage, so this is NOT DERIVED_DELETE. The one "
+            "reconstruction route — re-running the engine over retained inputs "
+            "— is not durable: with the pins untouched and the running build "
+            "moved on, replay returns "
+            "unavailable/PINNED_ENGINE_VERSION_UNAVAILABLE (measured). It is "
+            "deletable for the reason that does not depend on "
+            "reconstructability: nothing reads it."
+        ),
+        evidence_references=(
+            "db/sql/58_historical_detail_cleanup.sql",
+            "tests/privacy/test_historical_detail_cleanup.py",
+            "tests/privacy/test_verification_consumers.py",
+        ),
+    ),
 }
 
 

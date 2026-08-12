@@ -156,8 +156,13 @@ async def test_calculation_evidence_rejects_update_and_delete():
                 "UPDATE ioe.optimization_candidate SET opportunity_code='tampered' WHERE id=:i"
             ), {"i": cand_id})
 
+    # DELETE is refused by PRIVILEGE, not by the trigger, since Entry 11B6I.
+    # The trigger alone was never a boundary: it yields to
+    # `app.allow_evidence_purge`, which any role may set. The application role no
+    # longer holds DELETE on sealed detail at all, so there is nothing for the
+    # GUC to unlock — see `test_the_guc_is_not_the_authorisation_boundary`.
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        with pytest.raises(DBAPIError, match="immutable calculation evidence"):
+        with pytest.raises(DBAPIError, match="permission denied"):
             await s.execute(text("DELETE FROM ioe.optimization_candidate WHERE id=:i"),
                             {"i": cand_id})
 
@@ -180,8 +185,20 @@ async def test_event_log_is_append_only():
 
 
 @pytest.mark.asyncio
-async def test_evidence_purge_context_permits_deletion():
-    """Account erasure needs a sanctioned path; it is explicit, not implicit."""
+async def test_the_purge_context_alone_does_not_permit_deletion():
+    """Account erasure needs a sanctioned path — and the GUC is not one.
+
+    THIS TEST ASSERTED THE OPPOSITE UNTIL ENTRY 11B6I, and that is worth stating
+    plainly: it proved that any session which set `app.allow_evidence_purge`
+    could delete sealed calculation evidence, and read as if that were the
+    design. It was the hole. A GUC is a request, not a privilege, so the
+    application role's DELETE grant was the real boundary and it was wide open.
+
+    The sanctioned path is now the account-scoped SECURITY DEFINER keyhole
+    (`identity.purge_historical_detail`), which runs as the owner and is granted
+    to `onyx_privacy_worker` alone. The GUC survives only to let
+    `ioe.reject_result_mutation` yield to a caller that is already authorised.
+    """
     uid, aid = await _setup()
     async with unit_of_work(user_id=uid, actor_type="user") as s:
         run = await _run(s, uid, aid)
@@ -194,12 +211,15 @@ async def test_evidence_purge_context_permits_deletion():
 
     async with unit_of_work(user_id=uid, actor_type="user") as s:
         await s.execute(text("SELECT set_config('app.allow_evidence_purge','on',true)"))
-        await s.execute(text("DELETE FROM ioe.optimization_candidate WHERE id=:i"),
-                        {"i": cand_id})
+        with pytest.raises(DBAPIError, match="permission denied"):
+            await s.execute(text("DELETE FROM ioe.optimization_candidate WHERE id=:i"),
+                            {"i": cand_id})
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
         remaining = await s.scalar(
             select(OptimizationCandidate).where(OptimizationCandidate.id == cand_id)
         )
-        assert remaining is None
+        assert remaining is not None, "the evidence was destroyed by a GUC"
 
 
 # ---------------------------------------------------------------------------

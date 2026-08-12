@@ -25,6 +25,7 @@ from app.services.privacy import (
     AccountLifecycleService,
     AuditAuthDeidentificationService,
     DocumentPurgeService,
+    HistoricalDetailCleanupService,
     LifecycleState,
     ScenarioRetentionService,
     SourceDataPhase,
@@ -130,6 +131,20 @@ def run_account_deletion_phases(worker_id: str = "privacy-worker") -> dict[str, 
                     session, item.user_id, SourceDataPhase.SCENARIO_RETENTION
                 ):
                     outcome = await ScenarioRetentionService(session).run(
+                        item, worker_id=worker_id)
+                elif not await phase_is_complete(
+                    session, item.user_id, SourceDataPhase.HISTORICAL_DETAIL_CLEANUP
+                ):
+                    # HISTORICAL_DETAIL_CLEANUP after SCENARIO_RETENTION, and
+                    # this one IS a dependency. Scenario retention deletes whole
+                    # scenarios that never sealed a result; running the detail
+                    # cleanup first would delete their `scenario_result` rows and
+                    # leave retention with less to find, which is harmless, but
+                    # the reverse — retention first — means the cleanup only ever
+                    # sees scenarios that are staying, so what it removes is
+                    # exactly the derived detail of retained artifacts. That is
+                    # the property the completion guard counts.
+                    outcome = await HistoricalDetailCleanupService(session).run(
                         item, worker_id=worker_id)
                 else:
                     outcome = await AuditAuthDeidentificationService(session).run(

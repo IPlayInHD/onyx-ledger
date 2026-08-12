@@ -435,17 +435,18 @@ __all__ = [
 class SourceDataPhase(StrEnum):
     """The closed set of privacy phases with durable progress (Entry 11B5).
 
-    `SOURCE_DATA`, `AUDIT_AUTH_DEIDENTIFICATION` (11B6D) and
-    `SCENARIO_RETENTION` (11B6E) are implemented. `DOCUMENTS` is named because
-    the phase table's CHECK constraint names it, and because a dispatcher that
-    branched on free-form strings would let a typo become a silently skipped
-    phase.
+    All five are implemented: `SOURCE_DATA`, `DOCUMENTS` (11B6F),
+    `SCENARIO_RETENTION` (11B6E), `HISTORICAL_DETAIL_CLEANUP` (11B6I) and
+    `AUDIT_AUTH_DEIDENTIFICATION` (11B6D). A dispatcher that branched on
+    free-form strings would let a typo become a silently skipped phase, which is
+    why this is a closed set and the phase table's CHECK names the same values.
     """
 
     SOURCE_DATA = "SOURCE_DATA"
     DOCUMENTS = "DOCUMENTS"
     AUDIT_AUTH_DEIDENTIFICATION = "AUDIT_AUTH_DEIDENTIFICATION"
     SCENARIO_RETENTION = "SCENARIO_RETENTION"
+    HISTORICAL_DETAIL_CLEANUP = "HISTORICAL_DETAIL_CLEANUP"
 
 
 @dataclass(frozen=True)
@@ -669,6 +670,81 @@ class ScenarioRetentionService:
             return PhaseOutcome(claimed.user_id, phase, completed=False,
                                 remaining=remaining,
                                 failure_code="SCENARIO_RETENTION_INCOMPLETE")
+
+        completed = bool(await self.s.scalar(
+            text("SELECT identity.complete_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        ))
+        DELETION_PHASE[f"{phase.value}:{'completed' if completed else 'claim_lost'}"] += 1
+        return PhaseOutcome(claimed.user_id, phase, completed=completed,
+                            remaining=0)
+
+
+class HistoricalDetailCleanupService:
+    """Drives HISTORICAL_DETAIL_CLEANUP through the Entry 11B6I keyhole.
+
+    THE PHASE THE OTHER FOUR LEFT BEHIND. Source data, documents, unsealed
+    scenario text and the attributable audit trail all have a phase. The derived
+    detail hanging off the sealed roots had none, so fifteen tables of per-person
+    tax computation survived every phase and — since 0060 detached the roots from
+    `identity.user_account` — would outlive the account carrying a `user_id` that
+    resolves to nobody.
+
+    WHAT IT MUST NEVER TOUCH. Entry 11B6H proved that integrity verification
+    READS eight of the sealed-detail tables and rebuilds the hashed canonical
+    form from their rows. The keyhole therefore names its fifteen tables
+    explicitly and never walks a parent: walking `ioe.optimization_run` would
+    reach `ioe.portfolio_member`, and the result would be a mismatch
+    indistinguishable from tampering.
+
+    Owns no SQL that changes a row, like all four siblings. Everything happens
+    inside `identity.purge_historical_detail`, which takes one subject and is
+    authorised by the claim token.
+
+    COMPLETION IS NOT WHAT THE KEYHOLE REPORTED, for the fourth time in this
+    module and for the same reason: the keyhole reports what it changed, which
+    says nothing about what it missed.
+    `identity.count_remaining_historical_detail` counts every group, and 0064
+    makes the database refuse the completion while it is non-zero.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.s = session
+
+    async def run(
+        self, claimed: ClaimedLifecycle, *, worker_id: str,
+    ) -> PhaseOutcome:
+        phase = SourceDataPhase.HISTORICAL_DETAIL_CLEANUP
+        started = await self.s.scalar(
+            text("SELECT identity.start_lifecycle_phase(:u, :p, :t, :w)"),
+            {"u": claimed.user_id, "p": phase.value,
+             "t": claimed.claim_token, "w": worker_id},
+        )
+        if not started:
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=-1, failure_code="CLAIM_LOST")
+
+        await self.s.execute(
+            text("SELECT * FROM identity.purge_historical_detail(:u, :t, :w)"),
+            {"u": claimed.user_id, "t": claimed.claim_token, "w": worker_id},
+        )
+
+        remaining = int(await self.s.scalar(
+            text("SELECT identity.count_remaining_historical_detail(:u)"),
+            {"u": claimed.user_id},
+        ) or 0)
+        if remaining:
+            await self.s.execute(
+                text("SELECT identity.fail_lifecycle_phase(:u, :p, :t, :c, :w)"),
+                {"u": claimed.user_id, "p": phase.value,
+                 "t": claimed.claim_token, "c": "HISTORICAL_DETAIL_INCOMPLETE",
+                 "w": worker_id},
+            )
+            DELETION_PHASE[f"{phase.value}:incomplete"] += 1
+            return PhaseOutcome(claimed.user_id, phase, completed=False,
+                                remaining=remaining,
+                                failure_code="HISTORICAL_DETAIL_INCOMPLETE")
 
         completed = bool(await self.s.scalar(
             text("SELECT identity.complete_lifecycle_phase(:u, :p, :t, :w)"),
