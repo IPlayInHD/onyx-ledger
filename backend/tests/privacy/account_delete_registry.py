@@ -124,7 +124,29 @@ class Entry:
 
 #: Every certified cascade-reachable table, exactly once.
 REGISTRY: dict[str, Entry] = {
-    "ai.ai_conversation": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "ai.ai_conversation": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="USER_AUTHORED_AND_GENERATED_CONTENT",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "What the user typed and what was generated back to them, plus "
+            "the citations and prompt context assembled for one message. "
+            "Written by app/services/ai/service.py from user input; the "
+            "three children reach the account only through ai_conversation "
+            "and are joined to it by ON DELETE CASCADE. Nothing in the "
+            "replay or integrity stack reads any ai table — measured, not "
+            "assumed — so none of this is tax evidence. It is conversation, "
+            "and a conversation about somebody's taxes is exactly the "
+            "content account deletion is for."
+        ),
+        evidence_references=(
+            "app/services/ai/service.py",
+            "db/sql/10_ai.sql",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "analysis.analysis_run": Entry(
         state=CLASSIFIED,
         depth=1,
@@ -149,7 +171,29 @@ REGISTRY: dict[str, Entry] = {
             "tests/security/test_sealed_history_after_purge.py:464",
         ),
     ),
-    "audit.data_export_request": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "audit.data_export_request": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="OPERATIONAL_REQUEST_STATE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "One request by the account to receive its own data, with a "
+            "status and an object key for the produced export. Operational "
+            "state for a request that can no longer be served or collected "
+            "once the account is gone. Distinct from "
+            "audit.data_deletion_request, which is deliberately not a "
+            "foreign key because a deletion record must outlive its subject "
+            "(PD-9); this one carries the account FK precisely because it "
+            "need not. Census: removed by the account cascade, untouched by "
+            "every phase."
+        ),
+        evidence_references=(
+            "db/sql/14_audit.sql",
+            "db/sql/44_pd9_durable_deletion_ledger.sql:122",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "billing.entitlement": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.payment_method_ref": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.subscription": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
@@ -192,19 +236,331 @@ REGISTRY: dict[str, Entry] = {
             "left in storage."
         ),
     ),
-    "finance.expense_record": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "finance.expense_record_default": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "finance.expense_record_y2024": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "finance.expense_record_y2025": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "finance.income_source": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "finance.income_source_default": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "finance.income_source_y2024": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "finance.income_source_y2025": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "identity.auth_session": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "identity.email_verification_token": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "identity.mfa_method": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "identity.password_reset_token": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "identity.user_credential": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "finance.expense_record": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "finance.expense_record_default": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "finance.expense_record_y2024": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "finance.expense_record_y2025": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "finance.income_source": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "finance.income_source_default": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "finance.income_source_y2024": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "finance.income_source_y2025": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "identity.auth_session": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_AUTHENTICATION_STATE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The credentials themselves: the Argon2id hash, the MFA secret "
+            "and its user-supplied device label, unspent reset and "
+            "verification tokens, and live refresh sessions. All are "
+            "authorisation state for an account that will not exist, and "
+            "keeping any of it would be keeping the means to act as that "
+            "person. Distinct from identity.login_event, which is retained "
+            "and de-identified because it is security HISTORY: these are "
+            "not a record that something happened, they are the ability to "
+            "do it. Census: each is untouched by all four phases and "
+            "removed by the account cascade. No replay reader — the replay "
+            "stack contains no identity reference at all."
+        ),
+        evidence_references=(
+            "db/sql/02_identity.sql",
+            "app/services/auth/service.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "identity.email_verification_token": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_AUTHENTICATION_STATE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The credentials themselves: the Argon2id hash, the MFA secret "
+            "and its user-supplied device label, unspent reset and "
+            "verification tokens, and live refresh sessions. All are "
+            "authorisation state for an account that will not exist, and "
+            "keeping any of it would be keeping the means to act as that "
+            "person. Distinct from identity.login_event, which is retained "
+            "and de-identified because it is security HISTORY: these are "
+            "not a record that something happened, they are the ability to "
+            "do it. Census: each is untouched by all four phases and "
+            "removed by the account cascade. No replay reader — the replay "
+            "stack contains no identity reference at all."
+        ),
+        evidence_references=(
+            "db/sql/02_identity.sql",
+            "app/services/auth/service.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "identity.mfa_method": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_AUTHENTICATION_STATE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The credentials themselves: the Argon2id hash, the MFA secret "
+            "and its user-supplied device label, unspent reset and "
+            "verification tokens, and live refresh sessions. All are "
+            "authorisation state for an account that will not exist, and "
+            "keeping any of it would be keeping the means to act as that "
+            "person. Distinct from identity.login_event, which is retained "
+            "and de-identified because it is security HISTORY: these are "
+            "not a record that something happened, they are the ability to "
+            "do it. Census: each is untouched by all four phases and "
+            "removed by the account cascade. No replay reader — the replay "
+            "stack contains no identity reference at all."
+        ),
+        evidence_references=(
+            "db/sql/02_identity.sql",
+            "app/services/auth/service.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "identity.password_reset_token": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_AUTHENTICATION_STATE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The credentials themselves: the Argon2id hash, the MFA secret "
+            "and its user-supplied device label, unspent reset and "
+            "verification tokens, and live refresh sessions. All are "
+            "authorisation state for an account that will not exist, and "
+            "keeping any of it would be keeping the means to act as that "
+            "person. Distinct from identity.login_event, which is retained "
+            "and de-identified because it is security HISTORY: these are "
+            "not a record that something happened, they are the ability to "
+            "do it. Census: each is untouched by all four phases and "
+            "removed by the account cascade. No replay reader — the replay "
+            "stack contains no identity reference at all."
+        ),
+        evidence_references=(
+            "db/sql/02_identity.sql",
+            "app/services/auth/service.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "identity.user_credential": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_AUTHENTICATION_STATE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The credentials themselves: the Argon2id hash, the MFA secret "
+            "and its user-supplied device label, unspent reset and "
+            "verification tokens, and live refresh sessions. All are "
+            "authorisation state for an account that will not exist, and "
+            "keeping any of it would be keeping the means to act as that "
+            "person. Distinct from identity.login_event, which is retained "
+            "and de-identified because it is security HISTORY: these are "
+            "not a record that something happened, they are the ability to "
+            "do it. Census: each is untouched by all four phases and "
+            "removed by the account cascade. No replay reader — the replay "
+            "stack contains no identity reference at all."
+        ),
+        evidence_references=(
+            "db/sql/02_identity.sql",
+            "app/services/auth/service.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "ioe.freshness_outbox": Entry(
         state=CLASSIFIED,
         depth=1,
@@ -303,12 +659,142 @@ REGISTRY: dict[str, Entry] = {
             "a `failed` scenario sealed nothing and is purged."
         ),
     ),
-    "profile.dependent": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "profile.spouse_profile": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "profile.tax_profile": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "profile.user_preference": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "profile.user_privacy_setting": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "profile.user_profile": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "profile.dependent": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "profile.spouse_profile": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "profile.tax_profile": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "profile.user_preference": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_PRODUCT_SETTINGS",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Per-account product settings — locale, notification and "
+            "privacy preferences. Live state read back to the subject while "
+            "the account exists and meaningless afterwards; no replay, "
+            "security or evidence reader resolves them. Census: untouched "
+            "by every phase, removed by the account cascade."
+        ),
+        evidence_references=(
+            "db/sql/03_profile.sql",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "profile.user_privacy_setting": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_PRODUCT_SETTINGS",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Per-account product settings — locale, notification and "
+            "privacy preferences. Live state read back to the subject while "
+            "the account exists and meaningless afterwards; no replay, "
+            "security or evidence reader resolves them. Census: untouched "
+            "by every phase, removed by the account cascade."
+        ),
+        evidence_references=(
+            "db/sql/03_profile.sql",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "profile.user_profile": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "reco.recommendation": Entry(
         state=CLASSIFIED,
         depth=1,
@@ -325,12 +811,125 @@ REGISTRY: dict[str, Entry] = {
             "app/privacy/classification.py:599",
         ),
     ),
-    "reco.recommendation_feedback": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "wealth.asset": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "wealth.liability": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
-    "ai.ai_message": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "reco.recommendation_feedback": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_RECOMMENDATION_INTERACTION",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own reaction to a recommendation — free-text "
+            "feedback and the status they moved it to. Both hang off "
+            "reco.recommendation, which is already classified "
+            "LIVE_USER_DATA_DELETE, and both reach it by ON DELETE CASCADE. "
+            "Live product interaction rather than evidence: no replay path "
+            "and no sealed artifact resolves them, and "
+            "recommendation_feedback.comment is unbounded user free text."
+        ),
+        evidence_references=(
+            "db/sql/09_reco.sql",
+            "app/privacy/classification.py:599",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "wealth.asset": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "wealth.liability": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="SOURCE_DATA_PHASE_PURGED",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own live financial and profile source data. "
+            "identity.count_remaining_source_data names exactly these eight "
+            "logical tables and identity.purge_source_data empties them "
+            "under the subject's own RLS; the phase refuses to complete "
+            "while any row remains. Census: every populated one goes at T1, "
+            "before any other phase runs. The _default and _yNNNN entries "
+            "are declarative partitions OF income_source and expense_record "
+            "— the same rows counted through the parent, so they cannot "
+            "take a different verdict. Replay does not read them: the "
+            "frozen analysis snapshot exists precisely so historical "
+            "results do not depend on figures the user can still edit."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "app/services/privacy/lifecycle.py",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "ai.ai_message": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="USER_AUTHORED_AND_GENERATED_CONTENT",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "What the user typed and what was generated back to them, plus "
+            "the citations and prompt context assembled for one message. "
+            "Written by app/services/ai/service.py from user input; the "
+            "three children reach the account only through ai_conversation "
+            "and are joined to it by ON DELETE CASCADE. Nothing in the "
+            "replay or integrity stack reads any ai table — measured, not "
+            "assumed — so none of this is tax evidence. It is conversation, "
+            "and a conversation about somebody's taxes is exactly the "
+            "content account deletion is for."
+        ),
+        evidence_references=(
+            "app/services/ai/service.py",
+            "db/sql/10_ai.sql",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "analysis.analysis_assumption": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "analysis.analysis_input_snapshot": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "analysis.analysis_input_snapshot": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="REPLAY_REQUIRED_RETAIN",
+        reason_code="FROZEN_REPLAY_BASELINE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "THE frozen snapshot: the engine inputs a historical result was "
+            "computed from, plus its hash. "
+            "ReplayDependencyResolver.baseline_input reads it instead of "
+            "the live financial tables — which is the whole reason replay "
+            "survives the SOURCE_DATA purge — and its stored hash is "
+            "compared against the scenario's pinned "
+            "baseline_input_snapshot_hash before a replay is allowed to "
+            "mean anything. Census: survives every phase and the diagnostic "
+            "account removal unchanged, and optimization and scenario "
+            "replay both verify afterwards."
+        ),
+        evidence_references=(
+            "app/services/ioe/replay/resolver.py:170",
+            "app/services/ioe/replay/resolver.py:272",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "analysis.analysis_line_item": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "analysis.reconciliation_check": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "billing.invoice": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
@@ -348,7 +947,28 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/test_document_phase.py",
         ),
     ),
-    "docs.document_link": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
+    "docs.document_link": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="PROVENANCE_EDGE_OF_PURGED_FIGURE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The edge recording that a confirmed figure came from a "
+            "document. Entry 11A keeps it when the DOCUMENT is deleted, so "
+            "a confirmed figure never looks unsourced — and the census "
+            "shows it does survive that. What it does not survive is the "
+            "FIGURE going: it is emptied at T1 by the SOURCE_DATA phase, "
+            "because it cascades from finance.income_source and "
+            "finance.expense_record. Once both endpoints are purged the "
+            "edge records a relationship between two things that no longer "
+            "exist."
+        ),
+        evidence_references=(
+            "db/sql/11_docs.sql",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "ioe.multi_year_projection": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.optimization_candidate": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.optimization_run_event": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
@@ -381,12 +1001,133 @@ REGISTRY: dict[str, Entry] = {
     "ioe.scenario_lever": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.scenario_result": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
     "ioe.strategy_portfolio": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "reco.recommendation_status_event": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "wealth.asset_valuation": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "wealth.liability_balance": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "wealth.registered_account_detail": Entry(state=UNCLASSIFIED_BLOCKING, depth=2),
-    "ai.ai_message_citation": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
-    "ai.ai_prompt_context": Entry(state=UNCLASSIFIED_BLOCKING, depth=3),
+    "reco.recommendation_status_event": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_RECOMMENDATION_INTERACTION",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "The user's own reaction to a recommendation — free-text "
+            "feedback and the status they moved it to. Both hang off "
+            "reco.recommendation, which is already classified "
+            "LIVE_USER_DATA_DELETE, and both reach it by ON DELETE CASCADE. "
+            "Live product interaction rather than evidence: no replay path "
+            "and no sealed artifact resolves them, and "
+            "recommendation_feedback.comment is unbounded user free text."
+        ),
+        evidence_references=(
+            "db/sql/09_reco.sql",
+            "app/privacy/classification.py:599",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "wealth.asset_valuation": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="CASCADES_FROM_PURGED_SOURCE_DATA",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Detail of an asset or liability, reached only through it and "
+            "joined to it by ON DELETE CASCADE (measured from "
+            "pg_constraint). The parent is emptied by the SOURCE_DATA "
+            "phase, so these go with it and cannot survive their own owner. "
+            "Same class of data as the parent — valuations and balances are "
+            "the user's own figures — and no replay or security reader "
+            "resolves them."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "wealth.liability_balance": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="CASCADES_FROM_PURGED_SOURCE_DATA",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Detail of an asset or liability, reached only through it and "
+            "joined to it by ON DELETE CASCADE (measured from "
+            "pg_constraint). The parent is emptied by the SOURCE_DATA "
+            "phase, so these go with it and cannot survive their own owner. "
+            "Same class of data as the parent — valuations and balances are "
+            "the user's own figures — and no replay or security reader "
+            "resolves them."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "wealth.registered_account_detail": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="CASCADES_FROM_PURGED_SOURCE_DATA",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Detail of an asset or liability, reached only through it and "
+            "joined to it by ON DELETE CASCADE (measured from "
+            "pg_constraint). The parent is emptied by the SOURCE_DATA "
+            "phase, so these go with it and cannot survive their own owner. "
+            "Same class of data as the parent — valuations and balances are "
+            "the user's own figures — and no replay or security reader "
+            "resolves them."
+        ),
+        evidence_references=(
+            "db/sql/45_source_data_purge.sql:198",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "ai.ai_message_citation": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="USER_AUTHORED_AND_GENERATED_CONTENT",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "What the user typed and what was generated back to them, plus "
+            "the citations and prompt context assembled for one message. "
+            "Written by app/services/ai/service.py from user input; the "
+            "three children reach the account only through ai_conversation "
+            "and are joined to it by ON DELETE CASCADE. Nothing in the "
+            "replay or integrity stack reads any ai table — measured, not "
+            "assumed — so none of this is tax evidence. It is conversation, "
+            "and a conversation about somebody's taxes is exactly the "
+            "content account deletion is for."
+        ),
+        evidence_references=(
+            "app/services/ai/service.py",
+            "db/sql/10_ai.sql",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
+    "ai.ai_prompt_context": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="USER_AUTHORED_AND_GENERATED_CONTENT",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "What the user typed and what was generated back to them, plus "
+            "the citations and prompt context assembled for one message. "
+            "Written by app/services/ai/service.py from user input; the "
+            "three children reach the account only through ai_conversation "
+            "and are joined to it by ON DELETE CASCADE. Nothing in the "
+            "replay or integrity stack reads any ai table — measured, not "
+            "assumed — so none of this is tax evidence. It is conversation, "
+            "and a conversation about somebody's taxes is exactly the "
+            "content account deletion is for."
+        ),
+        evidence_references=(
+            "app/services/ai/service.py",
+            "db/sql/10_ai.sql",
+            "tests/privacy/surface_census.py",
+        ),
+    ),
     "docs.extraction_field": Entry(
         state=CLASSIFIED,
         depth=3,

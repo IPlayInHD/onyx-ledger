@@ -194,19 +194,21 @@ def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
     counted.
     """
     classified = sorted(t for t, e in REGISTRY.items() if e.state == CLASSIFIED)
-    assert classified == [
-        "analysis.analysis_run",
-        "docs.document",
-        "docs.document_extraction",
-        "docs.extraction_field",
-        "ioe.freshness_outbox",
-        "ioe.integrity_check",
-        "ioe.optimization_run",
-        "ioe.run_rule_snapshot",
-        "ioe.scenario",
-        "reco.recommendation",
-    ]
-    assert len(terminal_delete_blockers()) == 60
+    assert len(classified) == 43, (
+        f"{len(classified)} classified, expected 43. Every entry here was "
+        "argued from a writer, a reader and a measured lifecycle fate — a "
+        "count that moved without that work is the failure this file exists "
+        "to catch."
+    )
+    assert len(terminal_delete_blockers()) == 27
+
+    # Spot-checks on the branches, so a wholesale re-labelling cannot pass by
+    # keeping the total right.
+    assert REGISTRY["finance.income_source"].classification == "LIVE_USER_DATA_DELETE"
+    assert REGISTRY["identity.user_credential"].classification == "LIVE_USER_DATA_DELETE"
+    assert REGISTRY["ai.ai_message"].classification == "LIVE_USER_DATA_DELETE"
+    assert (REGISTRY["analysis.analysis_input_snapshot"].classification
+            == "REPLAY_REQUIRED_RETAIN")
 
 
 def test_the_sealed_replay_output_is_retained():
@@ -283,7 +285,7 @@ def test_question_b_the_terminal_delete_gate_fails_closed():
         assert_terminal_account_delete_ready()
 
     message = str(excinfo.value)
-    assert "60" in message and "70" in message
+    assert "27" in message and "70" in message
     assert "UNCLASSIFIED_BLOCKING" in message, (
         "the failure must name the workflow state, or the reader will read it as "
         "a retention verdict"
@@ -322,4 +324,79 @@ def test_the_terminal_gate_would_pass_only_on_a_fully_classified_registry():
     finally:
         mod.REGISTRY = original
 
-    assert len(terminal_delete_blockers()) == 60, "the substitution leaked"
+    assert len(terminal_delete_blockers()) == 27, "the substitution leaked"
+
+
+# ------------------------------------------------- §36 coverage accounting ---
+
+#: Why each still-unclassified surface is unclassified. Entry 11B6G §36: every
+#: one of the seventy must land in exactly one bucket, and none may quietly
+#: vanish from the accounting.
+UNRESOLVED_REASONS = {
+    "MISSING_LIFECYCLE_BEHAVIOR": {
+        "ioe.candidate_cost", "ioe.candidate_economic_effect",
+        "ioe.confidence_component", "ioe.multi_year_projection",
+        "ioe.optimization_candidate", "ioe.optimization_run_event",
+        "ioe.portfolio_evaluation_step", "ioe.portfolio_exclusion",
+        "ioe.portfolio_member", "ioe.recommendation_relationship",
+        "ioe.resource_ledger_entry", "ioe.run_rule_version",
+        "ioe.scenario_assumption", "ioe.scenario_confidence_component",
+        "ioe.scenario_event", "ioe.scenario_input_change", "ioe.scenario_lever",
+        "ioe.scenario_result", "ioe.score_component", "ioe.strategy_portfolio",
+    },
+    "ENGINEERING_EVIDENCE_MISSING": {
+        "analysis.analysis_assumption", "analysis.analysis_line_item",
+        "analysis.reconciliation_check",
+    },
+    "POLICY_DECISION_REQUIRED": {
+        "billing.entitlement", "billing.invoice", "billing.payment_method_ref",
+        "billing.subscription",
+    },
+}
+
+
+def test_every_unresolved_surface_has_a_stated_reason():
+    """No table may simply disappear from the accounting.
+
+    The failure this prevents is quiet: a surface that is neither classified
+    nor listed as an open question reads, to anyone counting, as finished work.
+    """
+    blocking = set(terminal_delete_blockers())
+    accounted = set().union(*UNRESOLVED_REASONS.values())
+
+    unexplained = sorted(blocking - accounted)
+    assert unexplained == [], (
+        f"these surfaces are unclassified with no recorded reason: {unexplained}"
+    )
+    resolved_but_listed = sorted(accounted - blocking)
+    assert resolved_but_listed == [], (
+        f"these surfaces are classified but still listed as open: "
+        f"{resolved_but_listed}"
+    )
+
+
+def test_the_accounting_reconciles_to_seventy():
+    """43 classified plus 27 explained, and nothing else."""
+    classified = {t for t, e in REGISTRY.items() if e.state == CLASSIFIED}
+    accounted = set().union(*UNRESOLVED_REASONS.values())
+    assert len(classified) + len(accounted) == 70
+    assert classified.isdisjoint(accounted)
+    assert classified | accounted == set(REGISTRY)
+
+
+def test_a_policy_question_is_not_used_to_hide_missing_engineering():
+    """§33 — POLICY_DECISION_REQUIRED means the code is understood.
+
+    Billing qualifies because there is no production writer at all: the
+    engineering treatment is undetermined for a reason nobody can code around,
+    and the retention question is statutory. The `ioe` and `analysis` groups
+    deliberately do NOT qualify — those are missing evidence and a missing
+    phase, and filing them under policy would make an engineering gap look like
+    somebody else's decision.
+    """
+    policy = UNRESOLVED_REASONS["POLICY_DECISION_REQUIRED"]
+    assert all(t.startswith("billing.") for t in policy), (
+        "a non-billing surface was filed as a policy decision; check that its "
+        "code has actually been read"
+    )
+    assert not (policy & UNRESOLVED_REASONS["MISSING_LIFECYCLE_BEHAVIOR"])

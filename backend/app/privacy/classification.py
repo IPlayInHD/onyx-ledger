@@ -425,10 +425,17 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
     _e("profile.user_preference", (P.ACCOUNT_IDENTITY,),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        exportable=True),
-    _e("profile.user_privacy_setting", (P.ACCOUNT_IDENTITY, P.AUDIT_SECURITY_RECORD),
-       S.SOURCE, R.BOUNDED_AUDIT, D.DE_IDENTIFY, rls=True, exportable=True,
-       notes="A record of consent choices. Deleting it destroys the evidence "
-             "of what the user consented to — LEGAL_REVIEW_REQUIRED."),
+    _e("profile.user_privacy_setting", (P.ACCOUNT_IDENTITY,),
+       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
+       exportable=True,
+       notes="CURRENT settings, not consent history. Entry 11B6G corrected "
+             "this from DE_IDENTIFY. The old note argued that deleting it "
+             "destroys the evidence of what the user consented to — but that "
+             "evidence is audit.consent_log, which 11B6D de-identifies and "
+             "retains. This row is the live switch positions, and it carries "
+             "ON DELETE CASCADE to the account, so DE_IDENTIFY was not "
+             "reachable in any case: the census measured it removed by the "
+             "account cascade with no phase touching it."),
 
     # ----------------------------------------------------------------- finance
     # The partitioned PARENT and its partitions are listed separately because
@@ -627,9 +634,14 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
        exportable=True, notes="`comment` is unbounded user free text."),
     _e("reco.recommendation_status_event", (P.RECOMMENDATION_DATA, P.USER_FREE_TEXT),
-       S.AUDIT, R.BOUNDED_AUDIT, D.DE_IDENTIFY, rls=True,
-       notes="FK already SET NULL on user delete; `note` free text must be "
-             "cleared too or de-identification is incomplete. NO RLS."),
+       S.AUDIT, R.BOUNDED_AUDIT, D.CASCADE_DELETE, rls=True,
+       notes="Entry 11B6G corrected this from DE_IDENTIFY. The old note was "
+             "right that the account FK is SET NULL, and wrong that this makes "
+             "the row survive: it ALSO carries ON DELETE CASCADE to "
+             "reco.recommendation, which is itself LIVE_USER_DATA_DELETE, so "
+             "the row goes with the recommendation whatever the account FK "
+             "does. `note` free text needs no separate clearing because "
+             "nothing is left to clear."),
 
     # ------------------------------------------------------------------- AI
     _e("ai.ai_conversation", (P.USER_FREE_TEXT,),
@@ -686,9 +698,15 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "user is CASCADE, which is wrong for a record that must OUTLIVE "
              "the account it describes: see §30 and §48."),
     _e("audit.data_export_request", (P.AUDIT_SECURITY_RECORD,),
-       S.AUDIT, R.BOUNDED_AUDIT, D.RETAIN,
-       notes="EXISTS AND IS UNUSED. Same CASCADE problem as the deletion "
-             "request table."),
+       S.AUDIT, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE,
+       notes="Entry 11B6G corrected this from RETAIN. Its own note already "
+             "conceded the cascade problem; PD-9 fixed the sibling table by "
+             "dropping the foreign key, and this one still has it, so RETAIN "
+             "was never achievable. It is also the right answer: this records "
+             "that an account asked to receive ITS OWN data, and neither the "
+             "request nor the export it produced can be served once the "
+             "account is gone. The durable record of DELETION is "
+             "identity.account_lifecycle, which does outlive the account."),
 
     # --- the audit log itself (PD-4, Entry 11B0) -----------------------------
     # Entry 11A named this table as PD-4 and classified its RLS exception, but

@@ -596,7 +596,7 @@ def test_terminal_deletion_is_still_blocked():
 
     with pytest.raises(AssertionError):
         assert_terminal_account_delete_ready()
-    assert len(terminal_delete_blockers()) >= 55, (
+    assert len(terminal_delete_blockers()) == 27, (
         "blockers dropped further than this slice's evidence justifies"
     )
 
