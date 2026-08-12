@@ -702,23 +702,36 @@ def test_account_removal_engineering_readiness_is_derived_not_declared():
     assert policy, "launch readiness must stay blocked while billing is undecided"
 
 
-def test_terminal_removal_is_still_neither_implemented_nor_enabled():
-    """The line 11B6I must not cross, asserted rather than promised."""
+def test_the_app_role_still_cannot_delete_an_account():
+    """The half of 11B6I's terminal-removal line that never moves.
+
+    11B6I asserted that NO terminal-removal verb existed. Entry 11B6J creates
+    exactly one — `identity.terminal_remove_account` — so that half of the
+    assertion is now the previous entry's history rather than a live invariant,
+    and it lives in `test_terminal_account_removal.py` where the keyhole is
+    proven.
+
+    What does NOT move is this: the application role holds no DELETE on
+    `identity.user_account`, and the only way an account is removed is through a
+    SECURITY DEFINER keyhole that is fail-closed on five phases and five zero
+    counts. The forbidden verbs 11B6I named alongside it stay forbidden.
+    """
     connection = psycopg2.connect(owner_dsn())
     connection.autocommit = True
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT count(*) FROM pg_proc p JOIN pg_namespace n"
-                " ON n.oid = p.pronamespace"
-                " WHERE p.proname IN ('terminal_remove_account',"
-                " 'complete_account_deletion', 'delete_account_final')")
-            assert cursor.fetchone()[0] == 0, "a terminal-removal verb exists"
-            cursor.execute(
                 "SELECT has_table_privilege('onyx_app_rw',"
                 " 'identity.user_account', 'DELETE')")
             assert cursor.fetchone()[0] is False, (
                 "DELETE on identity.user_account was restored to the app role")
+            cursor.execute(
+                "SELECT count(*) FROM pg_proc p JOIN pg_namespace n"
+                " ON n.oid = p.pronamespace"
+                " WHERE p.proname IN ('complete_account_deletion',"
+                " 'delete_account_final')")
+            assert cursor.fetchone()[0] == 0, (
+                "a verb 11B6I forbade by name was created")
     finally:
         connection.close()
 
