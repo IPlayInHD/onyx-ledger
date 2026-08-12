@@ -292,13 +292,18 @@ DOMAIN_WEIGHT_CONFIG = "weight_config"
 # is how the existing scheme is REUSED: `domain_hash` refuses an unregistered
 # domain, so there is no second canonicalizer and no second hash construction.
 DOMAIN_TAX_STATE_GRAPH = "tax_state_graph"
+# Entry 12B1. The sealed counterfactual derived state — the tax line items and
+# the pinned-rule candidate set a scenario evaluated. Separated from
+# DOMAIN_SCENARIO_RESULT because it is bound INTO that result rather than being
+# it: the same bytes must not be able to stand in for both.
+DOMAIN_COUNTERFACTUAL_DERIVED_STATE = "counterfactual_derived_state"
 
 ALL_HASH_DOMAINS = (
     DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
     DOMAIN_SCENARIO_SPEC, DOMAIN_SCENARIO_RESULT,
     DOMAIN_RULE_SNAPSHOT, DOMAIN_ASSUMPTION_SET,
     DOMAIN_PORTFOLIO_RESULT, DOMAIN_VERSION_MANIFEST, DOMAIN_WEIGHT_CONFIG,
-    DOMAIN_TAX_STATE_GRAPH,
+    DOMAIN_TAX_STATE_GRAPH, DOMAIN_COUNTERFACTUAL_DERIVED_STATE,
 )
 
 
