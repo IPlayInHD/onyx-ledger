@@ -17,11 +17,21 @@ first-cause-wins by predicate — only rows still `current` are updated — so t
 order the relay applies a batch in decides which reason a person is shown, and
 "your figures moved" and "a rule changed" tell them to do different things.
 
-The test is statistical because the defect was. A single pair reproduces it
-only about half the time, so one ordered pair would pass on a broken function
-every other run — the kind of test that is worse than none. Many pairs in one
-batch make an accidental pass vanishingly unlikely: a scrambled batch of 12
-matches queue order with probability 1/12!.
+THE TIE IS NOW CONSTRUCTED, NOT RACED. The first version queued 12 events back
+to back and asserted they had landed within 50ms of each other, on the theory
+that a fast machine would put them in the same millisecond. That made the
+FIXTURE depend on runner speed: it was measured failing its own precondition at
+72.7ms and 160.5ms on CI, twice, on commits that changed no code. A test that
+reports "the fixture was too slow" cannot report anything about the function.
+
+So the ids and creation times are supplied explicitly instead. Every event gets
+the SAME 48-bit millisecond field and a `rand_a` that DESCENDS, which makes
+byte-wise uuid order the exact reverse of queue order; creation times ascend by
+one microsecond inside that same millisecond. The adversarial case is therefore
+guaranteed on every run rather than hoped for, and a function that sorted by id
+would now fail every time instead of half the time. That is strictly stronger
+than the statistical version it replaces — nothing was weakened to remove the
+flake, and the production invariant is untouched.
 """
 from __future__ import annotations
 
@@ -32,6 +42,24 @@ import psycopg2
 from tests.conftest import owner_dsn
 
 PAIRS = 12
+
+
+def _same_millisecond_uuid(prefix_hex: str, ordinal: int) -> str:
+    """A v7-shaped uuid sharing `prefix_hex` as its millisecond field.
+
+    Layout: 48-bit ms | version 7 | rand_a | variant | rand_b. The ordinal goes
+    in `rand_a`, which is the first field that differs, so ordering between
+    these ids is decided entirely by it. `rand_b` stays random so repeated runs
+    cannot collide on the primary key.
+    """
+    body = (
+        prefix_hex                  # bytes 0-5: the shared millisecond
+        + "7"                       # version
+        + f"{ordinal:03x}"          # rand_a: what decides the sort
+        + "8"                       # RFC-4122 variant
+        + uuid.uuid4().hex[:15]     # rand_b: never reached by the comparison
+    )
+    return (f"{body[:8]}-{body[8:12]}-{body[12:16]}-{body[16:20]}-{body[20:32]}")
 
 #: Rounds of 200 to claim before giving up looking for this test's own events.
 #: A runaway guard, not a queue-size assumption: the real exits are "all of
@@ -58,34 +86,54 @@ def test_a_claimed_batch_comes_back_in_queue_order():
                     "VALUES (%s, %s, 'active')",
                     (str(user), f"ord_{uuid.uuid4().hex[:10]}@example.com"))
 
-        # Separate statements under autocommit, so each row gets its own
-        # transaction timestamp — which is what two real user actions produce.
+        # One real generated id donates a realistic millisecond field; the rest
+        # is ours, so the same-millisecond collision is built rather than raced.
+        cur.execute("SELECT ref.uuid_generate_v7()")
+        prefix_hex = str(cur.fetchone()[0]).replace("-", "")[:12]
+        base_ms = int(prefix_hex, 16)
+
+        # rand_a DESCENDS while created_at ASCENDS, so the two sorts disagree on
+        # every single pair — the worst case for the defect, not a sample of it.
         queued: list[str] = []
         created: list[object] = []
-        for _ in range(PAIRS):
+        for offset in range(PAIRS):
+            event_id = _same_millisecond_uuid(prefix_hex, PAIRS - 1 - offset)
             cur.execute("""
                 INSERT INTO ioe.freshness_outbox
-                    (event_type, stale_reason_code, user_id, dedupe_key)
-                VALUES ('financial_data_changed', 'BASELINE_INPUTS_CHANGED',
-                        %s, %s)
+                    (id, event_type, stale_reason_code, user_id, dedupe_key,
+                     created_at)
+                VALUES (%s, 'financial_data_changed', 'BASELINE_INPUTS_CHANGED',
+                        %s, %s,
+                        to_timestamp(0)
+                          + (%s::bigint * interval '1 millisecond')
+                          + (%s::int * interval '1 microsecond'))
                 RETURNING id, created_at
-            """, (str(user), f"ord:{uuid.uuid4()}"))
-            event_id, created_at = cur.fetchone()
-            queued.append(str(event_id))
+            """, (event_id, str(user), f"ord:{uuid.uuid4()}", base_ms, offset))
+            written_id, created_at = cur.fetchone()
+            queued.append(str(written_id))
             created.append(created_at)
 
-        # Guard on the guard #1: the events must actually be close enough
-        # together to exercise the defect. Spread across many milliseconds, id
-        # order and creation order agree and the old function passed too.
-        span_ms = (created[-1] - created[0]).total_seconds() * 1000
-        assert span_ms < 50, (
-            f"the fixture spread {PAIRS} events over {span_ms:.1f}ms; they are "
-            "too far apart to exercise same-millisecond ordering")
+        # Guard on the guard #1: every event must share one millisecond field.
+        # Spread across several milliseconds, id order and creation order agree
+        # and the OLD function passed too — that is exactly the hole the timing
+        # precondition was trying, unreliably, to cover.
+        prefixes = {q.replace("-", "")[:12] for q in queued}
+        assert prefixes == {prefix_hex}, (
+            f"the events do not share one millisecond field: {sorted(prefixes)}")
 
-        # Guard on the guard #2: creation timestamps must be distinct, or there
-        # is no queue order to preserve and the assertion below is meaningless.
+        # Guard on the guard #2: id order must DISAGREE with queue order, or the
+        # assertion below cannot tell the two sorts apart. Here it is the exact
+        # reverse, which is the strongest disagreement available.
+        assert sorted(queued) == list(reversed(queued)), (
+            "id order is not the reverse of queue order, so an id-only sort "
+            "would be indistinguishable from a correct one")
+
+        # Guard on the guard #3: creation timestamps must be distinct and
+        # ascending, or there is no queue order to preserve.
         assert len(set(created)) == PAIRS, (
-            "events share a created_at; separate transactions were expected")
+            "events share a created_at; distinct microseconds were expected")
+        assert list(created) == sorted(created), (
+            "creation times are not ascending, so 'queue order' is undefined")
 
         # The whole queue is shared with every other test in the run, and older
         # pending events legitimately sort ahead of these. So claim the maximum
