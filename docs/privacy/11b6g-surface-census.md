@@ -1,5 +1,18 @@
 # SURFACE CENSUS — what the deletion lifecycle actually does to all 70 tables
 
+> **CORRECTION (11B6H).** The claim below that "replay does not read any of
+> them" is **wrong**, and it is withdrawn rather than reinterpreted. Integrity
+> verification reads **8 of the 20** `ioe` tables listed here —
+> `optimization_candidate`, `portfolio_exclusion`, `portfolio_member`,
+> `resource_ledger_entry`, `run_rule_version`, `scenario_assumption`,
+> `scenario_lever` and `strategy_portfolio` — and deleting any of them turns a
+> verified artifact into a mismatch or an unverifiable one. The rule pin replay
+> resolves is `ioe.run_rule_version`, which this document counted as unread.
+> The census measured *lifecycle fate*, which was sound; the readership
+> sentence was inferred, not measured, and that is the difference.
+> See `docs/privacy/11b6h-verification-consumers.md`. The counts in the
+> **Accounting** section are superseded: 51 classified, 19 blocking.
+
 Sixty of the seventy certified privacy surfaces were `UNCLASSIFIED_BLOCKING`, and
 classifying them one at a time was never going to finish. This measured all
 seventy at once, at every stage of the lifecycle, and classified 33 of them from
