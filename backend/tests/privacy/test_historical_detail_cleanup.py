@@ -109,6 +109,31 @@ _SCOPE = {
 }
 
 
+#: How to reach one account's rows in the tables integrity verification reads.
+#: Used only to prove the cleanup leaves them exactly as it found them.
+_VERIFICATION_SCOPE = {
+    "ioe.optimization_candidate":
+        "run_id IN (SELECT id FROM ioe.optimization_run WHERE user_id=%(u)s)",
+    "ioe.run_rule_version":
+        "run_id IN (SELECT id FROM ioe.optimization_run WHERE user_id=%(u)s)",
+    "ioe.strategy_portfolio":
+        "run_id IN (SELECT id FROM ioe.optimization_run WHERE user_id=%(u)s)",
+    "ioe.portfolio_member":
+        "portfolio_id IN (SELECT p.id FROM ioe.strategy_portfolio p "
+        "JOIN ioe.optimization_run r ON r.id=p.run_id WHERE r.user_id=%(u)s)",
+    "ioe.portfolio_exclusion":
+        "portfolio_id IN (SELECT p.id FROM ioe.strategy_portfolio p "
+        "JOIN ioe.optimization_run r ON r.id=p.run_id WHERE r.user_id=%(u)s)",
+    "ioe.resource_ledger_entry":
+        "portfolio_id IN (SELECT p.id FROM ioe.strategy_portfolio p "
+        "JOIN ioe.optimization_run r ON r.id=p.run_id WHERE r.user_id=%(u)s)",
+    "ioe.scenario_lever":
+        "scenario_id IN (SELECT id FROM ioe.scenario WHERE user_id=%(u)s)",
+    "ioe.scenario_assumption":
+        "scenario_id IN (SELECT id FROM ioe.scenario WHERE user_id=%(u)s)",
+}
+
+
 # --------------------------------------------------------------- authorities --
 def implemented_purge_set() -> set[str]:
     """Every table the keyhole actually deletes, read out of the SQL."""
@@ -645,3 +670,160 @@ async def test_no_product_read_path_reaches_another_accounts_detail():
 
     with pytest.raises(NotFound):
         await ScenarioQueryService(b_uid).detail(a_scenario)
+
+
+# ------------------------------------------------- readiness, census, gaps --
+def test_account_removal_engineering_readiness_is_derived_not_declared():
+    """ACCOUNT_REMOVAL_ENGINEERING_READY, and what it deliberately excludes.
+
+    Engineering readiness means every engineering surface carries an
+    evidence-backed disposition and every purgeable one has an implemented
+    lifecycle treatment. It does NOT mean launch readiness, and the two are kept
+    apart here so that a green engineering gate can never be mistaken for
+    permission to ship.
+    """
+    from tests.privacy.account_delete_registry import terminal_delete_blockers
+
+    blockers = set(terminal_delete_blockers())
+    engineering = {t for t in blockers if not t.startswith("billing.")}
+    assert engineering == set(), (
+        f"engineering surfaces are still unresolved: {sorted(engineering)}")
+
+    policy = {t for t in blockers if t.startswith("billing.")}
+    assert policy == {
+        "billing.entitlement", "billing.invoice",
+        "billing.payment_method_ref", "billing.subscription",
+    }, "the billing policy set changed without a decision being recorded"
+
+    # PRIVACY_POLICY_LAUNCH_READY is FALSE while any of these stands. Engineers
+    # do not get to answer them, so the gate records them rather than resolving
+    # them: billing retention, PD-3 (auth retention duration), PD-10 (deployed
+    # versioned-object-storage erasure).
+    assert policy, "launch readiness must stay blocked while billing is undecided"
+
+
+def test_terminal_removal_is_still_neither_implemented_nor_enabled():
+    """The line 11B6I must not cross, asserted rather than promised."""
+    connection = psycopg2.connect(owner_dsn())
+    connection.autocommit = True
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM pg_proc p JOIN pg_namespace n"
+                " ON n.oid = p.pronamespace"
+                " WHERE p.proname IN ('terminal_remove_account',"
+                " 'complete_account_deletion', 'delete_account_final')")
+            assert cursor.fetchone()[0] == 0, "a terminal-removal verb exists"
+            cursor.execute(
+                "SELECT has_table_privilege('onyx_app_rw',"
+                " 'identity.user_account', 'DELETE')")
+            assert cursor.fetchone()[0] is False, (
+                "DELETE on identity.user_account was restored to the app role")
+    finally:
+        connection.close()
+
+
+async def test_the_diagnostic_terminal_census_shows_detail_gone_evidence_kept():
+    """DIAGNOSTIC TERMINAL-STATE CENSUS — not product terminal deletion.
+
+    An owner-level DELETE in a disposable database, run only after the cleanup
+    phase reports COMPLETE. No terminal keyhole is created and none exists; this
+    measures what a future terminal removal would leave behind.
+    """
+    from app.services.ioe.domain.integrity import EntityType
+    from app.services.ioe.replay.verification import IntegrityVerificationService
+
+    uid, run_id, portfolio_id, scenario_id, token = await _prepared_account()
+    c = _owner()
+    cur = c.cursor()
+    try:
+        kept_before = {}
+        for table, pred in _VERIFICATION_SCOPE.items():
+            cur.execute(f"SELECT count(*) FROM {table} WHERE {pred}", {"u": str(uid)})
+            kept_before[table] = cur.fetchone()[0]
+
+        _start(cur, uid, token)
+        _purge(cur, uid, token)
+        assert _remaining(cur, uid) == 0
+        assert _complete(cur, uid, token) is True
+
+        # every purge-set table is empty for this account
+        for table in sorted(implemented_purge_set()):
+            cur.execute(f"SELECT count(*) FROM {table} WHERE {_SCOPE[table]}",
+                        {"u": str(uid)})
+            assert cur.fetchone()[0] == 0, f"{table} survived the cleanup"
+
+        # The diagnostic removal itself. The lifecycle rows are deliberately
+        # left alone: nothing joins them to `identity.user_account` by foreign
+        # key, and they are the durable record that the deletion happened (PD-9)
+        # — `account_lifecycle_phase` even refuses DELETE outright.
+        cur.execute("DELETE FROM identity.user_account WHERE id=%s", (str(uid),))
+        assert cur.rowcount == 1, "the diagnostic account removal did not happen"
+        cur.execute("SELECT count(*) FROM identity.account_lifecycle WHERE user_id=%s",
+                    (str(uid),))
+        assert cur.fetchone()[0] == 1, "the deletion record did not outlive the account"
+
+        # Retained evidence outlives the account. Asserted as "whatever was
+        # there before is still there", not "these tables are non-empty":
+        # portfolio assembly admits no candidate once the shared rule landscape
+        # is saturated, so `portfolio_member` is legitimately empty on some runs
+        # and a non-emptiness assertion would fail for a reason that has nothing
+        # to do with the cleanup.
+        for table, pred in _VERIFICATION_SCOPE.items():
+            cur.execute(f"SELECT count(*) FROM {table} WHERE {pred}", {"u": str(uid)})
+            assert cur.fetchone()[0] == kept_before[table], (
+                f"{table} changed across the cleanup and the account removal")
+        assert sum(kept_before.values()) > 0, "no retained evidence was exercised"
+    finally:
+        c.close()
+
+    svc = IntegrityVerificationService(uid)
+    for kind, eid in ((EntityType.OPTIMIZATION, run_id),
+                      (EntityType.PORTFOLIO, portfolio_id),
+                      (EntityType.SCENARIO, scenario_id)):
+        result = await svc.verify(kind, eid)
+        assert str(result.status) == "verified", (
+            f"{kind} stopped verifying after the account was removed: "
+            f"{result.status}/{result.reason_code}")
+
+
+async def test_a_late_direct_writer_can_still_recreate_detail_after_complete():
+    """A KNOWN, UNCLOSED GAP, pinned so it cannot be mistaken for closed.
+
+    After the cleanup phase reports COMPLETE, a writer holding INSERT on these
+    tables can put detail back. Through the product this is unreachable — the
+    engine runs only for an authenticated user and the account is ACCESS_DISABLED
+    — but at the database level nothing refuses it.
+
+    The clean fix is a write cutoff trigger on the fifteen tables keyed on
+    `identity.account_deletion_state`, mirroring
+    `ioe.guard_scenario_text_after_deletion_request`. It is NOT implemented here
+    because it would fire per row on the hottest write path in the system (one
+    ordinary optimization writes thousands of `ioe.score_component` rows), and
+    adding that unmeasured is a worse decision than recording the gap.
+
+    This test asserts TODAY'S BEHAVIOUR. It fails the day the cutoff lands,
+    which is the correct prompt to delete it and assert the refusal instead.
+    """
+    uid, run_id, _pf, _sc, token = await _prepared_account()
+    c = _owner()
+    cur = c.cursor()
+    try:
+        _start(cur, uid, token)
+        _purge(cur, uid, token)
+        assert _complete(cur, uid, token) is True
+        assert _remaining(cur, uid) == 0
+
+        cur.execute(
+            "INSERT INTO ioe.optimization_run_event (run_id, to_status, reason_code)"
+            " VALUES (%s, 'completed', 'PROBE')", (str(run_id),))
+
+        # The gap is real: the guard now disagrees with a COMPLETE phase.
+        assert _remaining(cur, uid) == 1, (
+            "a late insert no longer lands — the write cutoff has been "
+            "implemented, so replace this test with the refusal assertion")
+        assert _phase_status(cur, uid) == "COMPLETE", (
+            "the phase reopened on its own; if that is now the behaviour, "
+            "assert it directly")
+    finally:
+        c.close()

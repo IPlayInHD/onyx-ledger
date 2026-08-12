@@ -165,6 +165,49 @@ mid / after · stale claim refused · cross-tenant rows byte-identical ·
 **replay and integrity still verify after the cleanup**, with all eight
 verification tables asserted still populated.
 
+## Diagnostic terminal census
+
+After the cleanup phase reports COMPLETE, an owner-level `DELETE` of
+`identity.user_account` in a disposable database. **No terminal keyhole was
+created and none exists** — this measures what a future terminal removal would
+leave behind.
+
+Measured: every purge-set table empty for that account; every
+verification-required table **unchanged across both the cleanup and the
+removal**; and optimization, portfolio and scenario all still `verified` with
+the account gone.
+
+The retained-evidence assertion is "whatever was there before is still there",
+not "these tables are non-empty" — portfolio assembly admits no candidate once
+the shared rule landscape saturates, so `ioe.portfolio_member` is legitimately
+empty on some runs, and a non-emptiness assertion would fail for a reason
+unrelated to the cleanup. That is the same fixture effect 11B6H hit.
+
+Also confirmed: `identity.account_lifecycle` has no foreign key to
+`identity.user_account`, so the durable record that the deletion happened
+outlives the account (PD-9), and `account_lifecycle_phase` refuses DELETE
+outright.
+
+## One gap, left open deliberately
+
+**A late direct database writer can still recreate detail after the phase
+reports COMPLETE.** Through the product this is unreachable — the engine runs
+only for an authenticated user and the account is `ACCESS_DISABLED` — but at the
+database level nothing refuses the insert.
+
+The clean fix is a write-cutoff trigger on the fifteen tables keyed on
+`identity.account_deletion_state`, mirroring
+`ioe.guard_scenario_text_after_deletion_request`. It is **not** implemented here
+because it would fire per row on the hottest write path in the system: one
+ordinary optimization writes thousands of `ioe.score_component` rows, and adding
+that unmeasured at the end of this entry is a worse decision than recording the
+gap.
+
+`test_a_late_direct_writer_can_still_recreate_detail_after_complete` pins
+today's behaviour so it cannot be mistaken for closed. It fails the day the
+cutoff lands, which is the correct prompt to replace it with the refusal
+assertion.
+
 ## Accounting
 
 ```
