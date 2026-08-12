@@ -153,19 +153,98 @@ If a later entry needs a persisted graph artifact (for example to diff two
 points in time that are not both reconstructable), it can be added then, with
 the lifecycle work priced in rather than discovered.
 
-## Open questions for the design step
+## The three open questions, resolved
 
-* **§33 deletion cutoff** — an account past `DELETION_REQUESTED` cannot write,
-  but the graph is a read. Existing admission conventions need checking before
-  choosing REFUSED vs READ_ONLY; the answer should match how other read paths
-  behave, not be invented here.
-* **§40 MISSING_INPUT** — `RuleOutcome.required_assumption_codes` exists and
-  `projection.py` already computes a required-vs-supplied difference. Whether
-  that generalises to a deterministic missing-input state, or only covers
-  projections, needs measuring before the node type is promised.
-* **§19 evidence readiness** — `evidence_status` on a candidate has four values
-  (`documented_verified`, `documented_unverified`, `user_attested`,
-  `incomplete`). Whether `READY / PARTIAL / MISSING / NOT_REQUIRED / UNKNOWN`
-  can be derived from those plus `rule_required_document` without inference is
-  the question; if it cannot, the graph should surface the existing four rather
-  than invent a fifth vocabulary.
+Each was answered by reading the convention that already exists rather than
+choosing one.
+
+### §33 deletion cutoff — REFUSED, and it needs no new code
+
+`db_authed` in `app/api/deps.py` is described in its own docstring as "THE
+central lifecycle boundary", and it applies `assert_may_act` to every protected
+route — **reads included**. `_BLOCKING_STATES` is `frozenset(LifecycleState)`,
+i.e. every state, so a lifecycle row in any state refuses the request with
+`AccountDeletionInProgress` (403).
+
+The only exemption in the repository is `db_authed_lifecycle_exempt`, and it is
+reserved for the deletion endpoints themselves — requesting deletion again and
+reading its status. Granting the graph a second exemption would be inventing a
+policy; using `db_authed` inherits the existing one.
+
+Reads are not incidentally covered, they are *deliberately* covered. The
+`assert_account_active` docstring names reading a scenario as a route that
+needed the cutoff added, because that read persists the freshness transition it
+just evaluated. The graph assembles from freshness and scenario state, so it is
+the same shape.
+
+**Decision: the graph endpoint takes `db_authed` like every other protected
+route, and an account past its cutoff is REFUSED with 403.**
+
+### §40 MISSING_INPUT — projection-scoped only
+
+`required_assumption_codes` reads as a general facility and is not one. Its
+column comment scopes it explicitly — "Assumption codes that must be present and
+satisfied before a **projection** may be generated" — and the only consumer is
+`ProjectionAuthorization`, whose sole reader is `projection.authorize()`. There
+it produces a genuinely deterministic result: `missing = required - available`,
+returned as `NOT_GENERATED_MISSING_ASSUMPTIONS` with the codes attached.
+
+It does **not** generalise, and the evaluator shows why. A rule condition on a
+fact the user has not supplied simply evaluates falsy, and
+`rules_service._load_impacts` coerces an absent fact to `Decimal(0)`:
+
+```python
+elif fi.literal_value is not None:
+    variables[fi.param_name] = Decimal(str(fi.literal_value))
+else:
+    variables[fi.param_name] = Decimal(0)
+```
+
+So the tax engine does not distinguish *ineligible because the law says no* from
+*ineligible because we do not know*. Deriving a general `MISSING_INPUT` would
+mean the graph deciding which facts a rule needed — inference, and precisely the
+second rules engine §4 forbids.
+
+**Decision: `MISSING_INPUT` is emitted for projections only, carrying
+`ProjectionDecision.missing_assumption_codes` verbatim. It is not emitted for
+facts, tax state or opportunities.**
+
+### §19 evidence readiness — derivable, but on a second axis
+
+The join is exact, not approximate. `rules.rule_required_document.
+document_type_code` references `ref.document_type(code)` and
+`docs.document.document_type_id` references `ref.document_type(id)` — the same
+table, so required-versus-held is a set difference over a shared vocabulary with
+no mapping layer to get wrong.
+
+`necessity` is constrained to `required / recommended / conditional`, which
+supplies the readiness states honestly:
+
+```
+no required rows for the rule version   NOT_REQUIRED
+every required type held                READY
+some held                               PARTIAL
+none held                               MISSING
+necessity = 'conditional'               UNKNOWN
+```
+
+"Held" means a `docs.document` of that type with `deleted_at IS NULL` and
+`status = 'processed'` — the only status in the CHECK vocabulary meaning
+successful ingestion; `quarantined` and `failed` are not evidence and
+`uploaded` / `processing` are not yet.
+
+`UNKNOWN` is not a hedge. Whether a `conditional` document applies is carried
+only in a free-text `note`, so asserting MISSING for one would require reading
+prose and deciding — inference again. UNKNOWN is the truthful state.
+
+**But readiness must not be folded into `evidence_status`.** They answer
+different questions: `evidence_status` describes how well the inputs to a
+computed figure are supported, while readiness describes whether the documents
+the rule demands are held. The repository already refuses exactly this kind of
+collapse one level down — `EvidenceStatus` is documented as "Never collapsed
+into CalculationBasis: a precisely calculated figure over unverified data must
+show both facts."
+
+**Decision: `EVIDENCE` nodes carry both — `evidence_status` verbatim from the
+candidate, and a separate derived `readiness` from required-document coverage.
+Neither is derived from the other.**
