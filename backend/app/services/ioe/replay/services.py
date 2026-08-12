@@ -314,6 +314,15 @@ class PortfolioReplayService:
             "objective_delta": c.money(portfolio.objective_delta),
             "search_budget_exhausted": portfolio.search_budget_exhausted,
             "savings": breakdown,
+            # SORTED BY candidate_key, BECAUSE THE WRITER SEALED THEM THAT WAY.
+            # `PortfolioAssemblyState` emits `sorted(state.exclusions)` — keyed
+            # by candidate_key — so the hash was taken over that order. This
+            # rebuild used raw fetch order from an unordered SELECT, which
+            # agrees with it only by luck: any different plan or page layout
+            # reorders the list and an untampered portfolio reports
+            # PORTFOLIO_HASH_MISMATCH, the alert that means evidence was
+            # altered. Caught by CI on a fresh database, where the orders
+            # diverged.
             "exclusions": [
                 {
                     "candidate_key": keys.get(x.candidate_id, ""),
@@ -326,7 +335,9 @@ class PortfolioReplayService:
                     "shared_resource_code": x.shared_resource_code,
                     "resolution_options": list(x.resolution_options or []),
                 }
-                for x in exclusions
+                for x in sorted(
+                    exclusions, key=lambda e: keys.get(e.candidate_id, "")
+                )
             ],
             "deferred_count": portfolio.deferred_count,
             "excluded_count": portfolio.excluded_count,

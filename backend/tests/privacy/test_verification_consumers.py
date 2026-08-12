@@ -39,13 +39,14 @@ import psycopg2
 import pytest
 from sqlalchemy import event, select
 
-from app.database.models import StrategyPortfolio
+from app.database.models import OptimizationRun, StrategyPortfolio
 from app.database.session import unit_of_work
 from app.privacy.classification import LIFECYCLE
 from app.services.analysis.service import AnalysisService
 from app.services.ioe.domain.integrity import EntityType
 from app.services.ioe.domain.scenario import ScenarioSpec
 from app.services.ioe.orchestrator import OptimizationOrchestrator
+from app.services.ioe.replay.resolver import ReplayDependencyResolver
 from app.services.ioe.replay.verification import IntegrityVerificationService
 from app.services.ioe.scenario.service import ScenarioService
 from tests.conftest import owner_dsn
@@ -350,3 +351,40 @@ async def test_the_sealed_portfolio_cannot_be_deleted_at_all():
 
     # And the artifact is untouched: still there, still verifying.
     assert await _verify_all(user_id, run_id, portfolio_id, scenario_id) == _ALL_VERIFIED
+
+
+async def test_the_portfolio_rebuild_orders_exclusions_the_way_the_writer_sealed_them():
+    """A REAL DEFECT, found by CI on a fresh database (Entry 11B6I).
+
+    `PortfolioAssemblyState` seals exclusions as `sorted(state.exclusions)` —
+    keyed by candidate_key. `PortfolioReplayService._rebuild` read them back with
+    an UNORDERED `SELECT` and hashed them in raw fetch order. The two agree only
+    by luck; any different plan or page layout reorders the list, and then an
+    untampered portfolio reports `PORTFOLIO_HASH_MISMATCH` — the alert whose
+    entire meaning is "this evidence was altered".
+
+    It surfaced as a baseline verification failing before any deletion, on CI,
+    where the fixture population differs from a saturated local database.
+
+    Asserted as the ordering CONTRACT rather than by trying to provoke a
+    particular physical row order, which no test can do reliably.
+    """
+    from app.services.ioe.replay.services import PortfolioReplayService
+
+    user_id, run_id, portfolio_id, _scenario = await _sealed_chain()
+
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        portfolio = await session.get(StrategyPortfolio, portfolio_id)
+        deps = await ReplayDependencyResolver(session, user_id).for_optimization(
+            await session.get(OptimizationRun, run_id))
+        canonical, _runs = await PortfolioReplayService(user_id)._rebuild(
+            session, portfolio, deps)
+
+    keys = [e["candidate_key"] for e in canonical["exclusions"]]
+    if len(keys) < 2:
+        pytest.skip("fewer than two exclusions — ordering is not observable here")
+    assert keys == sorted(keys), (
+        "the rebuild emitted exclusions in fetch order; the writer sealed them "
+        "sorted by candidate_key, so the hash will disagree whenever the two "
+        "orders differ"
+    )

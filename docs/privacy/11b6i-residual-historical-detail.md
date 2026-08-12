@@ -112,6 +112,30 @@ tenant data whose CRUD is the PD-1 model, with RLS as the isolation boundary
 that `test_one_tenant_cannot_delete_anothers_rows` proves. Revoking there would
 have broken a certified invariant to fix a hole that does not exist.
 
+## A production defect CI found, unrelated to privacy
+
+The first full-suite run on a **fresh** database failed with a portfolio
+reporting `PORTFOLIO_HASH_MISMATCH` **at baseline** — before any deletion, on an
+artifact nothing had touched.
+
+Cause: `PortfolioAssemblyState` seals exclusions as `sorted(state.exclusions)`,
+keyed by candidate_key (`domain/portfolio.py:559`). `PortfolioReplayService.
+_rebuild` read them back with an **unordered `SELECT`** and hashed them in raw
+fetch order. The two agree only by luck — insertion order usually resembles the
+sorted order — and any different plan or page layout separates them.
+
+The consequence is the worst kind available in this system: an untampered
+portfolio raises the alert whose entire meaning is *this evidence was altered*.
+
+Fixed by sorting the rebuild's exclusions by `candidate_key`, matching the
+writer. `test_the_portfolio_rebuild_orders_exclusions_the_way_the_writer_sealed_them`
+asserts the ordering contract rather than trying to provoke a particular
+physical row order, which no test can do reliably.
+
+This is why the local suite passing twice was not evidence: a saturated local
+database and a fresh CI database populate the fixtures differently, and only one
+of them exposed the bug.
+
 ## The phase
 
 `HISTORICAL_DETAIL_CLEANUP`, migration `0064`, SQL `58_historical_detail_cleanup.sql`.
