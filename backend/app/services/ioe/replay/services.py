@@ -494,9 +494,16 @@ class ScenarioReplayService:
                         exc.reason, IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE)
                 ) from exc
 
-            sealed_result = await session.scalar(
-                select(ScenarioResult).where(
-                    ScenarioResult.scenario_id == scenario_id)
+            # Loaded only for a version that binds it. A v1 result hash commits
+            # to nothing in this row, so reading it would add `ioe.scenario_result`
+            # to what every verification consumes — a measured privacy input
+            # (`tests/privacy/test_verification_consumers.py`), not an
+            # implementation detail.
+            sealed_result = (
+                await session.scalar(
+                    select(ScenarioResult).where(
+                        ScenarioResult.scenario_id == scenario_id))
+                if sealed_schema_version == SCENARIO_RESULT_SCHEMA_V2 else None
             )
 
         pinned = PinnedScenarioSpec(

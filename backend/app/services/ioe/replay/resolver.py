@@ -50,6 +50,7 @@ from app.services.ioe.domain.integrity import (
     DependencyUnavailable,
     IntegrityReason,
 )
+from app.services.ioe.domain.scenario import SCENARIO_RESULT_SCHEMA_V2
 from app.services.ioe.frozen.models import (
     FrozenSnapshotError,
     reconstruct_tax_input,
@@ -320,17 +321,28 @@ class ReplayDependencyResolver:
             baseline_input_snapshot_hash=snapshot_hash,
             rule_snapshot_id=snapshot_id,
             rule_snapshot_hash=snapshot_hash_stored,
-            # Read back from the SEALED result rather than left empty.
+            # Read back from the SEALED result, but ONLY for a version that
+            # needs it.
             #
-            # A v1 replay never touches this: `_compute` evaluates no rules, so
-            # the field was inert and `[]` was honest. A v2 replay rebuilds the
-            # counterfactual derived state, which is an evaluation over exactly
-            # the versions this scenario pinned — and `[]` does not mean "not
-            # applicable" to the evaluator, it means "nothing was pinned", so
-            # leaving it would have rebuilt an empty candidate set for every
-            # scenario and reported a confident mismatch against real evidence.
-            pinned_rule_version_ids=await self.scenario_pinned_rule_versions(
-                scenario.id),
+            # A v1 replay evaluates no rules — `_compute` never consults them —
+            # so the pin is inert and reading it would be a query issued to be
+            # discarded. It would also be a visible one: `tests/privacy/
+            # test_verification_consumers.py` measures exactly which tables
+            # verification reads, because that measurement is what a purge is
+            # built on, and quietly adding `ioe.scenario_result` to the read set
+            # of every v1 verification would change a privacy input as a side
+            # effect of a v2 feature.
+            #
+            # A v2 replay does need it: it rebuilds the counterfactual derived
+            # state, which is an evaluation over exactly the versions this
+            # scenario pinned. `[]` does not mean "not applicable" to the
+            # evaluator, it means "nothing was pinned", so leaving it empty
+            # would rebuild an empty candidate set and report a confident
+            # mismatch against real sealed evidence.
+            pinned_rule_version_ids=(
+                await self.scenario_pinned_rule_versions(scenario.id)
+                if scenario.result_schema_version == SCENARIO_RESULT_SCHEMA_V2
+                else []),
             version_manifest=manifest,
             objective_code=str(scenario.objective_code or ""),
             objective_version=str(scenario.objective_version or ""),

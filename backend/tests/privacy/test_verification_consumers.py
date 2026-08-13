@@ -73,6 +73,21 @@ BLOCKERS = (
 
 #: MEASURED, not asserted from lineage. Every member is read by
 #: `IntegrityVerificationService.verify` and every non-member is not.
+#:
+#: THIS SET IS VERSION-DEPENDENT, and the version it is measured under is v1.
+#: Entry 12B1 Phase A2 gave scenario replay a v2 path that reads
+#: `ioe.scenario_result` — for its sealed counterfactual derived state and for
+#: the rule-version set that state was evaluated over. Both reads are guarded on
+#: the SEALED schema version, so a v1 verification still reads exactly the eight
+#: tables below and this census remains accurate for every artifact production
+#: currently writes.
+#:
+#: It stops being accurate the moment production writes v2.
+#: `test_a_v2_verification_additionally_reads_the_result_row` measures the v2
+#: read set here, so the change is recorded rather than discovered, and
+#: `ioe.scenario_result` must be reclassified `replay_dependency=True` before
+#: `CURRENT_SCENARIO_RESULT_SCHEMA_VERSION` is moved to v2 — a purge built on
+#: today's census would destroy a row that a v2 verification needs.
 VERIFICATION_READS = frozenset({
     "ioe.optimization_candidate",
     "ioe.portfolio_exclusion",
@@ -235,6 +250,75 @@ async def test_verification_reads_exactly_the_measured_set():
         f"the set of blocker tables verification reads has changed: "
         f"newly read {sorted(read - set(VERIFICATION_READS))}, "
         f"no longer read {sorted(set(VERIFICATION_READS) - read)}"
+    )
+
+
+async def test_a_v2_verification_additionally_reads_the_result_row():
+    """THE PENDING CENSUS CHANGE, measured now rather than at activation.
+
+    A v2 scenario binds a counterfactual derived state into its result hash, so
+    verifying one reads `ioe.scenario_result` — first for the rule-version set
+    the state was evaluated over, then for the state itself. That is one more
+    blocker table than the v1 census above records.
+
+    Production writes v1, so the census is still accurate today, and the reads
+    are guarded on the sealed version so they cannot leak into a v1
+    verification. This test exists so that stops being true LOUDLY: when
+    `CURRENT_SCENARIO_RESULT_SCHEMA_VERSION` moves to v2,
+    `ioe.scenario_result` has to be reclassified `replay_dependency=True`
+    first, or a purge built on the v1 census will destroy a row that
+    verification needs.
+    """
+    from app.services.ioe.domain.scenario import SCENARIO_RESULT_SCHEMA_V2
+
+    tag = uuid.uuid4().hex[:8].upper()
+    for i in range(2):
+        lever, resource = _LEVERS[i % len(_LEVERS)]
+        await _publish(f"V2C{tag}_{i}", lever, str(2000 + i * 400), resource)
+
+    user_id = await _live_account()
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        analysis_id = (await AnalysisService(session).run(user_id, 2025)).id
+
+    outcome = await ScenarioService(user_id)._simulate(
+        analysis_id,
+        ScenarioSpec.parse([{"lever_code": "INCREASE_RRSP_DEDUCTION",
+                             "parameters": {"amount": Decimal("5000")}}]),
+        result_schema_version=SCENARIO_RESULT_SCHEMA_V2,
+    )
+
+    with _SqlWatch() as watch:
+        result = await IntegrityVerificationService(user_id).verify(
+            EntityType.SCENARIO, outcome.scenario_id)
+    assert str(result.status) == "verified", (result.status, result.reason_code)
+
+    v2_read = watch.read_tables()
+    assert "ioe.scenario_result" in v2_read, (
+        "a v2 verification did not read the row carrying its derived state")
+    assert v2_read - set(VERIFICATION_READS) == {"ioe.scenario_result"}, (
+        f"v2 verification reads more than the one extra table this entry "
+        f"accounted for: {sorted(v2_read - set(VERIFICATION_READS))}")
+
+
+def test_the_result_row_is_not_yet_declared_a_replay_dependency():
+    """The other side of the same fact, stated so it cannot drift.
+
+    `replay_dependency` describes what verification consumes for artifacts that
+    EXIST. Every scenario production has ever written is v1, and a v1
+    verification does not read this row — so declaring it True today would
+    overstate what is consumed. The guard is the test above plus this one:
+    together they say "not yet, and here is exactly when".
+    """
+    assert LIFECYCLE["ioe.scenario_result"].replay_dependency is False
+    from app.services.ioe.domain.scenario import (
+        CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+        SCENARIO_RESULT_SCHEMA_V1,
+    )
+
+    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V1, (
+        "production now writes a version whose verification reads "
+        "ioe.scenario_result; reclassify it replay_dependency=True and move it "
+        "into VERIFICATION_READS before shipping this"
     )
 
 
