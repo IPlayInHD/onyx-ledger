@@ -70,7 +70,6 @@ from app.services.ioe.domain.freshness import (
 )
 from app.services.ioe.domain.scenario import (
     CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
-    SCENARIO_RESULT_SCHEMA_VERSION,
     SCENARIO_SPEC_VERSION,
     FreshnessStatus,
     ScenarioSpec,
@@ -254,7 +253,7 @@ class ScenarioService:
         manifest = {
             "scenario_service_version": SCENARIO_SERVICE_VERSION,
             "scenario_spec_version": SCENARIO_SPEC_VERSION,
-            "scenario_result_schema_version": SCENARIO_RESULT_SCHEMA_VERSION,
+            "scenario_result_schema_version": CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
             "tax_engine_version": ENGINE_VERSION,
             "engine_reference_data_version": engine_data.REFERENCE_DATA_VERSION,
             "rules_evaluator_contract_version": CONTRACT_VERSION,
@@ -460,7 +459,7 @@ class ScenarioService:
                 lever_registry_version=lever_registry.LEVER_REGISTRY_VERSION,
                 objective_code=pinned.objective_code,
                 objective_version=pinned.objective_version,
-                result_schema_version=SCENARIO_RESULT_SCHEMA_VERSION,
+                result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
                 version_manifest=pinned.version_manifest,
                 manifest_hash=pinned.manifest_hash,
                 idempotency_key=idempotency_key,
@@ -633,7 +632,7 @@ class ScenarioService:
                 tax_delta=computed["tax_delta"],
                 net_benefit=computed["objective_delta"],
                 calculation_basis="scenario_estimate",
-                result_schema_version=SCENARIO_RESULT_SCHEMA_VERSION,
+                result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
                 objective_code=pinned.objective_code,
                 objective_version=pinned.objective_version,
                 objective_value_baseline=computed["objective_baseline"],

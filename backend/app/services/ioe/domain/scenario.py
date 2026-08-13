@@ -50,10 +50,21 @@ SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS = frozenset({
     SCENARIO_RESULT_SCHEMA_V1, SCENARIO_RESULT_SCHEMA_V2,
 })
 
-#: Kept for existing importers. Deliberately NOT the authority any more — the
-#: canonicalizer takes an explicit version, so this name can no longer decide
-#: how a historical artifact is interpreted.
-SCENARIO_RESULT_SCHEMA_VERSION = SCENARIO_RESULT_SCHEMA_V1
+# DELIBERATELY ABSENT: a bare `SCENARIO_RESULT_SCHEMA_VERSION`.
+#
+# It used to exist as an alias for v1 and it was a trap. A reverted activation
+# attempt flipped the write version and left THREE sites still writing the
+# alias — the version manifest and both row-level persistence sites — so new
+# scenarios stored "I am v1" beside a hash computed as v2, and replay correctly
+# refused them with RESULT_HASH_MISMATCH. The bug was not the three lines; it
+# was that two constants both read as plausible answers to "what version is
+# this write". So there is now exactly one answer per question:
+#
+#     new writes          CURRENT_SCENARIO_RESULT_SCHEMA_VERSION
+#     historical replay   the version stored on the row
+#     protocol dispatch   SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS
+#
+# Adding a general-purpose alias back would restore the ambiguity.
 
 
 class UnsupportedResultSchemaVersion(ValueError):
@@ -466,7 +477,6 @@ __all__ = [
     "MAX_LEVERS_PER_SCENARIO",
     "SCENARIO_RESULT_SCHEMA_V1",
     "SCENARIO_RESULT_SCHEMA_V2",
-    "SCENARIO_RESULT_SCHEMA_VERSION",
     "SCENARIO_SPEC_VERSION",
     "SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS",
     "AssumptionRequest",
