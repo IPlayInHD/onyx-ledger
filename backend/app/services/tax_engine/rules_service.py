@@ -77,16 +77,36 @@ class RulesEvaluatorService:
         an in-flight optimization keeps evaluating the snapshot it started with.
         Passing an empty collection means "no rules pinned" and yields nothing;
         that is distinct from passing None, which means "resolve now".
+
+        WHEN A PIN IS SUPPLIED, THE PIN IS THE WHOLE AUTHORITY — there is no
+        `status` predicate beside it, and that absence is deliberate.
+
+        The publication flow permits exactly one published version per rule and
+        tax year (`uq_rule_version_published`), so publishing R2 necessarily
+        moves R1 to `superseded`. A live status filter applied on top of an
+        explicit pin therefore did not narrow the pin, it EMPTIED it: a scenario
+        that pinned R1 lost the rule the moment R2 appeared, and the sealed
+        evidence silently stopped carrying R1's deadlines, required documents
+        and dependencies. Not substituted with R2's — gone. That is the opposite
+        of "keeps evaluating the snapshot it started with", which this method
+        has always claimed to do.
+
+        The published-only guarantee is not lost, because it is enforced where
+        it can be enforced correctly. `RuleSnapshotService._collect` selects
+        `status == 'published'` when the snapshot is CAPTURED, and
+        `PinnedSnapshot.version_ids()` is the only producer of this argument. So
+        every pinned id was published at pin time, which is the fact the sealed
+        artifact is entitled to rely on. Re-asserting it at evaluation time
+        re-reads today's world and is exactly the defect.
         """
-        stmt = select(TaxRuleVersion).where(
-            TaxRuleVersion.tax_year == tax_year,
-            TaxRuleVersion.status == "published",
-        )
+        stmt = select(TaxRuleVersion).where(TaxRuleVersion.tax_year == tax_year)
         if pinned_rule_version_ids is not None:
             pinned = list(pinned_rule_version_ids)
             if not pinned:
                 return []
             stmt = stmt.where(TaxRuleVersion.id.in_(pinned))
+        else:
+            stmt = stmt.where(TaxRuleVersion.status == "published")
         versions = list(await self.s.scalars(stmt))
         if not versions:
             return []
