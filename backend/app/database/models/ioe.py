@@ -767,8 +767,14 @@ class ScenarioResult(Base):
     # candidate set it evaluated against its own pinned rule versions. NULL on
     # scenarios sealed before 12B1, which are never backfilled — evaluating
     # today's rules against an old seal would fabricate historical evidence.
+    # `none_as_null` is load-bearing, not tidiness. JSONB renders Python `None`
+    # as the JSON value `null` by default, which is NOT SQL NULL — so a v1 seal
+    # passing `None` here stored a non-NULL payload beside a NULL hash and was
+    # rejected by `ck_counterfactual_derived_state_paired`. Worse, had the CHECK
+    # not existed, a v2 row could have satisfied "payload IS NOT NULL" while
+    # containing nothing at all.
     counterfactual_derived_state: Mapped[dict | None] = mapped_column(
-        JSONB,
+        JSONB(none_as_null=True),
         comment="The sealed counterfactual derived state: the TaxEngineService line items and the pinned-rule candidate set this scenario evaluated. Canonicalized before hashing. NULL on scenarios sealed before Entry 12B1, which are never backfilled.",
     )
     counterfactual_derived_state_hash: Mapped[str | None] = mapped_column(
