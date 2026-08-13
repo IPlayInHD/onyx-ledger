@@ -1,0 +1,183 @@
+{
+  "01_minimal_no_changes": {
+    "canonical_payload": {
+      "changes": [],
+      "objective_delta": "0.00",
+      "objective_value_baseline": "20000.00",
+      "objective_value_scenario": "20000.00",
+      "result_schema_version": "1.0.0",
+      "scenario_tax": "20000.00",
+      "support": {
+        "assumption_adjusted_score": "92.110000",
+        "cap_applied": true,
+        "cap_reason_code": "ASSUMPTION_BEARING_RESULT",
+        "display_support_score": "80.000000",
+        "raw_support_score": "92.110000"
+      },
+      "tax_delta": "0.00"
+    },
+    "canonical_text_bytes": 377,
+    "canonical_text_sha256": "fb68f866bca7f75258a7e6305c75646fcc41ae8777d9e291b1218afd98c03d08",
+    "feature_counts": {
+      "cap_applied": true,
+      "changes": 0,
+      "has_assumption_adjustment": false
+    },
+    "result_schema_version": "1.0.0",
+    "scenario_result_hash": "898b1f7a88cddc4e495b5fb4dd0f65b987237089cec4c6270c3d1a772d7a3a30"
+  },
+  "02_multiple_levers": {
+    "canonical_payload": {
+      "changes": [
+        {
+          "apply_order": 0,
+          "field": "rrsp_deduction",
+          "lever_code": "rrsp_contribution",
+          "new_value": "5000.00"
+        },
+        {
+          "apply_order": 1,
+          "field": "fhsa_deduction",
+          "lever_code": "fhsa_contribution",
+          "new_value": "8000.00"
+        }
+      ],
+      "objective_delta": "1500.00",
+      "objective_value_baseline": "20000.00",
+      "objective_value_scenario": "18500.00",
+      "result_schema_version": "1.0.0",
+      "scenario_tax": "18500.00",
+      "support": {
+        "assumption_adjusted_score": "92.110000",
+        "cap_applied": true,
+        "cap_reason_code": "ASSUMPTION_BEARING_RESULT",
+        "display_support_score": "80.000000",
+        "raw_support_score": "92.110000"
+      },
+      "tax_delta": "1500.00"
+    },
+    "canonical_text_bytes": 578,
+    "canonical_text_sha256": "f0064f328496d61c957d50942fa14c75553df10e117441e61440985544169ca7",
+    "feature_counts": {
+      "cap_applied": true,
+      "changes": 2,
+      "has_assumption_adjustment": false
+    },
+    "result_schema_version": "1.0.0",
+    "scenario_result_hash": "12f7d51e3b600caa8bc0c9f333b931f4c98480e98a7eb6175f6e4f970067abef"
+  },
+  "03_typed_assumptions": {
+    "canonical_payload": {
+      "changes": [
+        {
+          "apply_order": 0,
+          "field": "rrsp_deduction",
+          "lever_code": "rrsp_contribution",
+          "new_value": "3000.00"
+        }
+      ],
+      "objective_delta": "1000.00",
+      "objective_value_baseline": "20000.00",
+      "objective_value_scenario": "19000.00",
+      "result_schema_version": "1.0.0",
+      "scenario_tax": "19000.00",
+      "support": {
+        "assumption_adjusted_score": "44.950000",
+        "cap_applied": false,
+        "cap_reason_code": null,
+        "display_support_score": "44.950000",
+        "raw_support_score": "92.110000"
+      },
+      "tax_delta": "1000.00"
+    },
+    "canonical_text_bytes": 458,
+    "canonical_text_sha256": "6bfdcaba51436857c2c671ec140fa7e23923cc89cf0b4f18f5d5ba630e97f19d",
+    "feature_counts": {
+      "cap_applied": false,
+      "changes": 1,
+      "has_assumption_adjustment": true
+    },
+    "result_schema_version": "1.0.0",
+    "scenario_result_hash": "ac2a9e011f539f8ea1a14ea9ac075345901b7bf58713a9280c5911bf04d2406c"
+  },
+  "04_incomplete_evidence": {
+    "canonical_payload": {
+      "changes": [
+        {
+          "apply_order": 0,
+          "field": "rrsp_deduction",
+          "lever_code": "rrsp_contribution",
+          "new_value": "900.00"
+        }
+      ],
+      "objective_delta": "249.75",
+      "objective_value_baseline": "20000.00",
+      "objective_value_scenario": "19750.25",
+      "result_schema_version": "1.0.0",
+      "scenario_tax": "19750.25",
+      "support": {
+        "assumption_adjusted_score": "7.520000",
+        "cap_applied": false,
+        "cap_reason_code": null,
+        "display_support_score": "7.520000",
+        "raw_support_score": "44.740000"
+      },
+      "tax_delta": "249.75"
+    },
+    "canonical_text_bytes": 453,
+    "canonical_text_sha256": "552bac1c2869c9972c54b5d813431f71a68daa40d339a3d908d96e6c5e4c2721",
+    "feature_counts": {
+      "cap_applied": false,
+      "changes": 1,
+      "has_assumption_adjustment": true
+    },
+    "result_schema_version": "1.0.0",
+    "scenario_result_hash": "1e75cdc115b1f59b9b102794200b97321b7b67ea5b3646ee6968e2dff7c6e6e2"
+  },
+  "05_projection_horizon": {
+    "canonical_payload": {
+      "changes": [
+        {
+          "apply_order": 0,
+          "field": "rrsp_deduction",
+          "lever_code": "rrsp_contribution",
+          "new_value": "6000.00"
+        },
+        {
+          "apply_order": 1,
+          "field": "donations",
+          "lever_code": "donation",
+          "new_value": "1200.50"
+        }
+      ],
+      "objective_delta": "2749.90",
+      "objective_value_baseline": "20000.00",
+      "objective_value_scenario": "17250.10",
+      "result_schema_version": "1.0.0",
+      "scenario_tax": "17250.10",
+      "support": {
+        "assumption_adjusted_score": "15.070000",
+        "cap_applied": false,
+        "cap_reason_code": null,
+        "display_support_score": "15.070000",
+        "raw_support_score": "57.100000"
+      },
+      "tax_delta": "2749.90"
+    },
+    "canonical_text_bytes": 542,
+    "canonical_text_sha256": "6fa881b7060b8cfecf17e2817bdc50d60245fd5e5cc706ed822e305dae60c528",
+    "feature_counts": {
+      "cap_applied": false,
+      "changes": 2,
+      "has_assumption_adjustment": true
+    },
+    "result_schema_version": "1.0.0",
+    "scenario_result_hash": "0032e4a0d5f89d914b1bc09f6062317cb1582f9e24622c9881471e12e257739d"
+  },
+  "_provenance": {
+    "captured_before_any_edit_to_canonical_result": true,
+    "captured_from_sha": "71b393c",
+    "note": "Frozen v1 protocol. Regenerating these from refactored code would make the compatibility proof circular.",
+    "spec_hash_used": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}
