@@ -22,6 +22,7 @@ from decimal import Decimal
 from sqlalchemy import (
     ARRAY,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -713,7 +714,20 @@ class ScenarioInputChange(Base):
 
 class ScenarioResult(Base):
     __tablename__ = "scenario_result"
-    __table_args__ = {"schema": "ioe"}
+    __table_args__ = (
+        # Both or neither. A payload without its hash cannot be verified and a
+        # hash without its payload cannot be recomputed; either half alone
+        # claims more integrity than it has. "Neither" stays legal because that
+        # is exactly what every pre-12B1 sealed scenario looks like.
+        CheckConstraint(
+            "(counterfactual_derived_state IS NULL "
+            "AND counterfactual_derived_state_hash IS NULL) "
+            "OR (counterfactual_derived_state IS NOT NULL "
+            "AND counterfactual_derived_state_hash IS NOT NULL)",
+            name="ck_counterfactual_derived_state_paired",
+        ),
+        {"schema": "ioe"},
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     scenario_id: Mapped[uuid.UUID] = mapped_column(
@@ -746,6 +760,21 @@ class ScenarioResult(Base):
     objective_value_baseline: Mapped[Decimal | None] = mapped_column(MONEY)
     objective_value_scenario: Mapped[Decimal | None] = mapped_column(MONEY)
     objective_delta: Mapped[Decimal | None] = mapped_column(MONEY)
+
+    # ---- Entry 12B1: the sealed counterfactual derived state ----
+    # What the counterfactual tax state CONTAINED, not only what it totalled:
+    # the TaxEngineService line items this scenario already computed, and the
+    # candidate set it evaluated against its own pinned rule versions. NULL on
+    # scenarios sealed before 12B1, which are never backfilled — evaluating
+    # today's rules against an old seal would fabricate historical evidence.
+    counterfactual_derived_state: Mapped[dict | None] = mapped_column(
+        JSONB,
+        comment="The sealed counterfactual derived state: the TaxEngineService line items and the pinned-rule candidate set this scenario evaluated. Canonicalized before hashing. NULL on scenarios sealed before Entry 12B1, which are never backfilled.",
+    )
+    counterfactual_derived_state_hash: Mapped[str | None] = mapped_column(
+        Text,
+        comment="domain_hash(DOMAIN_COUNTERFACTUAL_DERIVED_STATE, payload). Bound into scenario_result_hash for result schema v2 and later, so mutating the payload invalidates verification.",
+    )
     created_at: Mapped[datetime] = created_at_col()
 
 
