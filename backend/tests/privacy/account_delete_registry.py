@@ -167,7 +167,7 @@ REGISTRY: dict[str, Entry] = {
         ),
         evidence_references=(
             "db/sql/08_analysis.sql",
-            "app/services/ioe/replay/resolver.py:170",
+            "app/services/ioe/replay/resolver.py:171",
             "tests/security/test_sealed_history_after_purge.py:464",
         ),
     ),
@@ -942,7 +942,7 @@ REGISTRY: dict[str, Entry] = {
             "replay both verify afterwards."
         ),
         evidence_references=(
-            "app/services/ioe/replay/resolver.py:170",
+            "app/services/ioe/replay/resolver.py:171",
             "app/services/ioe/replay/resolver.py:272",
             "tests/privacy/surface_census.py",
         ),

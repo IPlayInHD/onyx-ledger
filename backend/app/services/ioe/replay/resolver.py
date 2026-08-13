@@ -35,6 +35,7 @@ from app.database.models import (
     RunRuleSnapshot,
     RunRuleVersion,
     Scenario,
+    ScenarioResult,
 )
 from app.services.ioe.domain import assumptions as assumption_registry
 from app.services.ioe.domain import canonical as c
@@ -219,6 +220,36 @@ class ReplayDependencyResolver:
         ))
         return [r.tax_rule_version_id for r in rows]
 
+    async def scenario_pinned_rule_versions(
+        self, scenario_id: uuid.UUID
+    ) -> list[uuid.UUID]:
+        """The rule-version set a scenario actually evaluated, from its seal.
+
+        Scenarios have no `RunRuleVersion` rows — that table belongs to
+        optimization. The equivalent sealed statement is
+        `ScenarioResult.affected_rule_versions`, written in the same
+        transaction as the seal and covered by the result table's immutability
+        trigger. It is not itself inside the result hash, but it does not need
+        to be: it determines the derived state, the derived state determines
+        the inner hash, and the inner hash is bound into the outer one — so
+        editing it makes a v2 scenario fail verification.
+
+        Missing rows return empty rather than raising. A scenario sealed before
+        this column carried anything is a v1 artifact whose replay does not
+        consult rules at all, and refusing it here would turn a working v1
+        replay into an unavailable dependency.
+        """
+        rows = await self.s.scalars(
+            select(ScenarioResult.affected_rule_versions).where(
+                ScenarioResult.scenario_id == scenario_id)
+        )
+        pinned: list[uuid.UUID] = []
+        for stored in rows:
+            for value in stored or ():
+                pinned.append(
+                    value if isinstance(value, uuid.UUID) else uuid.UUID(str(value)))
+        return pinned
+
     async def for_optimization(self, run: OptimizationRun) -> ResolvedDependencies:
         manifest = dict(run.version_manifest or {})
         if not manifest or not run.optimization_result_hash:
@@ -289,7 +320,17 @@ class ReplayDependencyResolver:
             baseline_input_snapshot_hash=snapshot_hash,
             rule_snapshot_id=snapshot_id,
             rule_snapshot_hash=snapshot_hash_stored,
-            pinned_rule_version_ids=[],
+            # Read back from the SEALED result rather than left empty.
+            #
+            # A v1 replay never touches this: `_compute` evaluates no rules, so
+            # the field was inert and `[]` was honest. A v2 replay rebuilds the
+            # counterfactual derived state, which is an evaluation over exactly
+            # the versions this scenario pinned — and `[]` does not mean "not
+            # applicable" to the evaluator, it means "nothing was pinned", so
+            # leaving it would have rebuilt an empty candidate set for every
+            # scenario and reported a confident mismatch against real evidence.
+            pinned_rule_version_ids=await self.scenario_pinned_rule_versions(
+                scenario.id),
             version_manifest=manifest,
             objective_code=str(scenario.objective_code or ""),
             objective_version=str(scenario.objective_version or ""),
