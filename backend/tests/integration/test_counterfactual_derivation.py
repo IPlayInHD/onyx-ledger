@@ -160,7 +160,7 @@ async def _record_successor(old_id: uuid.UUID, new_id: uuid.UUID) -> None:
 
 async def _pin(service: ScenarioService, analysis_id: uuid.UUID, spec: ScenarioSpec):
     async with unit_of_work(user_id=service.user_id, actor_type="user") as s:
-        return await service._pin_specification(s, analysis_id, spec)
+        return await service._pin_specification(s, analysis_id, spec, result_schema_version="1.0.0")
 
 
 async def _derive(service: ScenarioService, pinned, computed):

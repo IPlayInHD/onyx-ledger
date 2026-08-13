@@ -450,7 +450,7 @@ async def test_the_frozen_baseline_is_never_mutated_by_a_lever():
 
     service = ScenarioService(uid)
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        pinned = await service._pin_specification(s, analysis_id, _spec("8000"))
+        pinned = await service._pin_specification(s, analysis_id, _spec("8000"), result_schema_version="1.0.0")
 
     before = pinned.frozen.baseline_clone()
     service._compute(pinned)

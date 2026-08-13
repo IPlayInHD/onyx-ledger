@@ -29,6 +29,7 @@ from app.database.models import (
     PortfolioMember,
     ResourceLedgerEntry,
     Scenario,
+    ScenarioResult,
     StrategyPortfolio,
 )
 from app.database.session import unit_of_work
@@ -39,6 +40,7 @@ from app.services.ioe.domain.integrity import (
     IntegrityReason,
     SealedEvidenceIncomplete,
 )
+from app.services.ioe.domain.scenario import SCENARIO_RESULT_SCHEMA_V2
 from app.services.ioe.frozen import FrozenScenarioInputService, FrozenSnapshotError
 from app.services.ioe.frozen.models import (
     PINNED_SCENARIO_BASELINE_HASH_MISMATCH,
@@ -53,11 +55,20 @@ from app.services.ioe.replay.resolver import (
     ReplayDependencyResolver,
     ResolvedDependencies,
 )
+from app.services.ioe.scenario import counterfactual
 
 if TYPE_CHECKING:   # runtime import stays local: the domain module imports back
     from app.services.ioe.domain.scenario import ScenarioSpec
 
 MONEY = Decimal("0.01")
+
+#: Returned in place of a reconciled counterfactual hash when the sealed
+#: derived state cannot be reconciled. Deliberately not a hash: binding it into
+#: the outer canonical result guarantees the result-hash comparison fails, so a
+#: corrupted v2 artifact reports MISMATCH through the ordinary path instead of
+#: needing a second verdict channel. It can never collide with a real digest
+#: because it is not 64 hex characters.
+_IRRECONCILABLE_DERIVED_STATE = "COUNTERFACTUAL_DERIVED_STATE_IRRECONCILABLE"
 
 # A scenario refusal, expressed in the verifier's vocabulary. Everything that is
 # not specifically about the baseline RESULT is a snapshot-level dependency
@@ -483,6 +494,11 @@ class ScenarioReplayService:
                         exc.reason, IntegrityReason.BASELINE_SNAPSHOT_UNAVAILABLE)
                 ) from exc
 
+            sealed_result = await session.scalar(
+                select(ScenarioResult).where(
+                    ScenarioResult.scenario_id == scenario_id)
+            )
+
         pinned = PinnedScenarioSpec(
             analysis_id=scenario.base_analysis_id,
             tax_year=deps.tax_year,
@@ -490,7 +506,7 @@ class ScenarioReplayService:
             frozen=frozen,
             rule_snapshot_id=deps.rule_snapshot_id,
             rule_snapshot_hash=deps.rule_snapshot_hash,
-            pinned_rule_version_ids=[],
+            pinned_rule_version_ids=list(deps.pinned_rule_version_ids),
             objective_code=deps.objective_code,
             objective_version=deps.objective_version,
             version_manifest=deps.version_manifest,
@@ -501,6 +517,12 @@ class ScenarioReplayService:
 
         service = ScenarioService(self.user_id)
         computed = service._compute(pinned)
+
+        derived_hash: str | None = None
+        if sealed_schema_version == SCENARIO_RESULT_SCHEMA_V2:
+            derived_hash = await self._verify_counterfactual_state(
+                service, pinned, computed, sealed_result)
+
         # THE VERSION COMES FROM THE ROW, never from the current-write constant.
         # A sealed scenario was hashed under the contract it named, and replay
         # exists to reproduce that contract — reading the build's current
@@ -512,6 +534,7 @@ class ScenarioReplayService:
             result=service.canonical_result(
                 computed,
                 result_schema_version=sealed_schema_version,
+                counterfactual_derived_state_hash=derived_hash,
             ),
         )
 
@@ -519,6 +542,60 @@ class ScenarioReplayService:
             expected_hash=expected, actual_hash=actual, expected_spec_hash=spec_hash,
             engine_runs=1, mismatch_reason=IntegrityReason.RESULT_HASH_MISMATCH,
         )
+
+    async def _verify_counterfactual_state(
+        self,
+        service: Any,
+        pinned: Any,
+        computed: dict,
+        sealed_result: ScenarioResult | None,
+    ) -> str:
+        """Reconcile a v2 scenario's sealed counterfactual state, and return the
+        hash the outer result must be canonicalized with.
+
+        TWO INDEPENDENT CHECKS, because they catch different edits and neither
+        subsumes the other.
+
+        1. THE STORED PAYLOAD AGAINST THE STORED DIGEST. Hashing the bytes that
+           are actually in the column is the only thing that notices a payload
+           edited in place, or a digest edited beside an intact payload. A
+           rebuild cannot see either: it would agree with the true digest in
+           both cases and report VERIFIED over corrupted evidence.
+
+        2. THE REBUILD AGAINST THE STORED DIGEST. Hashing a fresh derivation is
+           the only thing that notices the underlying determination no longer
+           reproducing — a pinned rule whose data moved, a builder whose output
+           changed.
+
+        Both feed the same verdict rather than raising, so a corrupted artifact
+        is reported through the ordinary mismatch path instead of as an
+        exception the caller has to interpret.
+        """
+        if (sealed_result is None
+                or sealed_result.counterfactual_derived_state is None
+                or not sealed_result.counterfactual_derived_state_hash):
+            # A v2 seal without its evidence is not a mismatch — there is
+            # nothing to compare against. Fail closed as incomplete.
+            raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
+
+        stored_payload = sealed_result.counterfactual_derived_state
+        stored_hash = sealed_result.counterfactual_derived_state_hash
+
+        if counterfactual.payload_hash(stored_payload) != stored_hash:
+            # The row contradicts itself. Returning the stored hash here would
+            # let the outer comparison succeed over evidence that does not
+            # match its own digest, so return a value that cannot reconcile and
+            # let the ordinary result-hash comparison report the mismatch.
+            return _IRRECONCILABLE_DERIVED_STATE
+
+        async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
+            rebuilt = await service.build_counterfactual_derived_state(
+                session, pinned, computed)
+        rebuilt_hash = counterfactual.derived_state_hash(rebuilt)
+
+        if rebuilt_hash != stored_hash:
+            return _IRRECONCILABLE_DERIVED_STATE
+        return rebuilt_hash
 
     @staticmethod
     async def _sealed_spec(

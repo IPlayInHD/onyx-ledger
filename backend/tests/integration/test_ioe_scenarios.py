@@ -309,7 +309,7 @@ async def test_historical_replay_reproduces_both_hashes():
         stored_spec_hash = scenario.scenario_spec_hash
         stored_result_hash = scenario.scenario_result_hash
         rebuilt_spec = await ScenarioService._load_spec(s, scenario)
-        pinned = await service._pin_specification(s, analysis_id, rebuilt_spec)
+        pinned = await service._pin_specification(s, analysis_id, rebuilt_spec, result_schema_version="1.0.0")
 
     assert pinned.spec_hash == stored_spec_hash, "spec hash did not replay"
 
@@ -667,7 +667,7 @@ async def test_a_rule_published_after_pinning_is_not_in_the_scenarios_snapshot()
     service = ScenarioService(uid)
     spec = ScenarioSpec.parse([_lever()])
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        pinned = await service._pin_specification(s, analysis_id, spec)
+        pinned = await service._pin_specification(s, analysis_id, spec, result_schema_version="1.0.0")
     assert original in pinned.pinned_rule_version_ids
 
     intruder = await _publish_rule(f"P5RACE_B_{_suffix()}")
@@ -682,7 +682,7 @@ async def test_a_rule_published_after_pinning_is_not_in_the_scenarios_snapshot()
     # A run started AFTER the publication legitimately sees the new rule — that
     # is the difference the pinning exists to create.
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        later = await service._pin_specification(s, analysis_id, spec)
+        later = await service._pin_specification(s, analysis_id, spec, result_schema_version="1.0.0")
     assert intruder in later.pinned_rule_version_ids
     assert later.spec_hash != pinned.spec_hash, (
         "a changed rule set must change the scenario's identity"

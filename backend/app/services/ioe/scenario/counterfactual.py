@@ -265,13 +265,38 @@ def canonical_payload(state: CounterfactualDerivedState) -> dict[str, Any]:
     }
 
 
+def canonical_payload_and_hash(
+    state: CounterfactualDerivedState,
+) -> tuple[dict[str, Any], str]:
+    """The payload to persist and the hash OF THAT EXACT OBJECT.
+
+    Persistence must store a payload and a digest that provably describe each
+    other. Calling `canonical_payload` once for the column and again inside
+    `derived_state_hash` would leave two objects where there should be one, and
+    any future divergence between those calls would be sealed as a
+    self-inconsistent artifact — a row whose own hash does not verify, which
+    replay would report as corruption long after the cause was gone.
+    """
+    payload = canonical_payload(state)
+    return payload, c.domain_hash(c.DOMAIN_COUNTERFACTUAL_DERIVED_STATE, payload)
+
+
 def derived_state_hash(state: CounterfactualDerivedState) -> str:
     """Domain-separated, through the existing canonicalizer. `domain_hash`
     refuses unregistered domains, which is what makes reuse enforceable rather
     than a convention."""
-    return c.domain_hash(
-        c.DOMAIN_COUNTERFACTUAL_DERIVED_STATE, canonical_payload(state)
-    )
+    return canonical_payload_and_hash(state)[1]
+
+
+def payload_hash(payload: dict[str, Any]) -> str:
+    """Hash a payload READ BACK from storage.
+
+    Replay needs this: rebuilding the state and hashing the rebuild proves the
+    determination still reproduces, but it says nothing about whether the bytes
+    in the column still match the digest beside them. Only hashing what is
+    actually stored can catch a payload edited in place.
+    """
+    return c.domain_hash(c.DOMAIN_COUNTERFACTUAL_DERIVED_STATE, payload)
 
 
 def _as_decimal(value: Any) -> Decimal:

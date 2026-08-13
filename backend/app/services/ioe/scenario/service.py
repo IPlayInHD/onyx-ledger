@@ -70,10 +70,13 @@ from app.services.ioe.domain.freshness import (
 )
 from app.services.ioe.domain.scenario import (
     CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+    SCENARIO_RESULT_SCHEMA_V2,
     SCENARIO_SPEC_VERSION,
+    SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS,
     FreshnessStatus,
     ScenarioSpec,
     StaleReason,
+    UnsupportedResultSchemaVersion,
     canonical_scenario_result,
 )
 from app.services.ioe.domain.workflow import WorkflowStateMachine
@@ -215,8 +218,18 @@ class ScenarioService:
         session: AsyncSession,
         analysis_id: uuid.UUID,
         spec: ScenarioSpec,
+        *,
+        result_schema_version: str,
     ) -> PinnedScenarioSpec:
         """Resolve and pin EVERY material input, then compute the spec hash.
+
+        `result_schema_version` HAS NO DEFAULT on purpose. The manifest records
+        which result contract this scenario will be sealed under, and the
+        manifest hash feeds the spec hash — so a caller that let this default
+        while writing a v2 row would reproduce the reverted activation defect
+        exactly: the row would say v2 and the manifest inside its own identity
+        would say v1. Making it required means that mistake cannot be made by
+        omission, only by writing the wrong thing on purpose.
 
         The baseline RESULT is pinned alongside the baseline inputs. Pinning only
         the inputs would leave a stored delta unable to show what it was a delta
@@ -256,7 +269,7 @@ class ScenarioService:
         manifest = {
             "scenario_service_version": SCENARIO_SERVICE_VERSION,
             "scenario_spec_version": SCENARIO_SPEC_VERSION,
-            "scenario_result_schema_version": CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+            "scenario_result_schema_version": result_schema_version,
             "tax_engine_version": ENGINE_VERSION,
             "engine_reference_data_version": engine_data.REFERENCE_DATA_VERSION,
             "rules_evaluator_contract_version": CONTRACT_VERSION,
@@ -429,10 +442,62 @@ class ScenarioService:
         idempotency_key: str | None = None,
         refreshed_from_scenario_id: uuid.UUID | None = None,
     ) -> ScenarioOutcome:
+        """THE PUBLIC ENTRY POINT. It has no schema-version parameter and will
+        not grow one.
+
+        Which contract a new scenario is sealed under is a property of the
+        build, not a request field. If a caller could choose it, a customer
+        request would decide what evidence a sealed artifact carries and what
+        contract it is hashed under — so the choice stays on the inside of this
+        module, expressed once, in the one write authority below.
+        """
+        return await self._simulate(
+            analysis_id, spec,
+            idempotency_key=idempotency_key,
+            refreshed_from_scenario_id=refreshed_from_scenario_id,
+            result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+        )
+
+    async def _simulate(
+        self,
+        analysis_id: uuid.UUID,
+        spec: ScenarioSpec,
+        *,
+        idempotency_key: str | None = None,
+        refreshed_from_scenario_id: uuid.UUID | None = None,
+        result_schema_version: str,
+    ) -> ScenarioOutcome:
+        """THE INTERNAL SEAM (Entry 12B1 Phase A2).
+
+        Private, and reachable only from inside this package. It exists so that
+        a v2 artifact can be created, sealed and replayed end to end while
+        ordinary production creation keeps writing v1 — the capability is
+        proved before it is switched on, rather than switched on and then
+        proved.
+
+        It is NOT runtime version negotiation. There is no fallback, no "latest",
+        and no widening: an unsupported version raises here, before a header row
+        exists, so a scenario can never be created under a contract this build
+        cannot also canonicalize and replay.
+
+        One version travels from this argument to every version-bearing field —
+        the manifest inside the spec hash, the Scenario row, the ScenarioResult
+        row and the canonicalization used for hashing. They cannot disagree
+        because there is nothing else for any of them to read.
+        """
+        if result_schema_version not in SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS:
+            raise UnsupportedResultSchemaVersion(
+                f"cannot create a scenario under unsupported result schema "
+                f"version {result_schema_version!r}"
+            )
+
         # ---- TX-1: pin, resolve idempotency, create the header ----
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             try:
-                pinned = await self._pin_specification(session, analysis_id, spec)
+                pinned = await self._pin_specification(
+                    session, analysis_id, spec,
+                    result_schema_version=result_schema_version,
+                )
             except ScenarioFrozenInputError as exc:
                 # Fail closed BEFORE the header exists: an unresolvable baseline
                 # produces no scenario row, no levers, no assumptions and no
@@ -462,7 +527,7 @@ class ScenarioService:
                 lever_registry_version=lever_registry.LEVER_REGISTRY_VERSION,
                 objective_code=pinned.objective_code,
                 objective_version=pinned.objective_version,
-                result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+                result_schema_version=result_schema_version,
                 version_manifest=pinned.version_manifest,
                 manifest_hash=pinned.manifest_hash,
                 idempotency_key=idempotency_key,
@@ -531,7 +596,10 @@ class ScenarioService:
 
         # ---- TX-2: persist evidence and seal, atomically ----
         try:
-            result_hash = await self._persist(scenario_id, pinned, computed)
+            result_hash = await self._persist(
+                scenario_id, pinned, computed,
+                result_schema_version=result_schema_version,
+            )
         except Exception:  # noqa: BLE001
             await self._fail(scenario_id, ERROR_PERSISTENCE_FAILED)
             raise
@@ -625,22 +693,54 @@ class ScenarioService:
 
     # ---------------------------------------------------------------- TX-2 ---
     async def _persist(
-        self, scenario_id: uuid.UUID, pinned: PinnedScenarioSpec, computed: dict
+        self, scenario_id: uuid.UUID, pinned: PinnedScenarioSpec, computed: dict,
+        *, result_schema_version: str,
     ) -> str:
-        result_payload = self.canonical_result(
-            computed,
-            # What NEW seals are written as. v2 is defined but not
-            # activated: nothing writes counterfactual derived state yet.
-            result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
-        )
-        result_hash = c.scenario_result_hash(
-            spec_hash=pinned.spec_hash, result=result_payload
-        )
+        """TX-2. Every piece of evidence a seal commits to is built INSIDE this
+        transaction, before the seal.
 
+        The ordering matters more than it looks. A v2 artifact binds a
+        counterfactual derived state through its hash, so the state, its
+        canonical payload and that payload's digest all have to exist before
+        the outer result hash can be computed at all — and the outer hash is
+        what the seal records. Building the derived state after the commit
+        would leave a window in which a scenario claimed to be v2, carried a
+        hash over evidence, and had no evidence; the CHECK constraint would
+        reject the row, but only after the seal had already been written by a
+        different statement. Doing the work here means the failure mode is a
+        rolled-back transaction instead of a torn historical artifact.
+
+        For v1 the derived state is not built at all. A v1 seal binds nothing
+        to it, so building it would cost a rules evaluation per scenario to
+        produce something no hash covers and no column stores.
+        """
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             scenario = await session.get(Scenario, scenario_id)
             if scenario is None:
                 raise NotFound("Scenario not found")
+
+            derived_payload: dict | None = None
+            derived_hash: str | None = None
+            if result_schema_version == SCENARIO_RESULT_SCHEMA_V2:
+                # The certified Phase A1 builder, reused rather than
+                # reimplemented — persistence and replay verification must
+                # derive the same state from the same inputs or the hash they
+                # agree on means nothing.
+                derived_payload, derived_hash = (
+                    counterfactual.canonical_payload_and_hash(
+                        await self.build_counterfactual_derived_state(
+                            session, pinned, computed)
+                    )
+                )
+
+            result_payload = self.canonical_result(
+                computed,
+                result_schema_version=result_schema_version,
+                counterfactual_derived_state_hash=derived_hash,
+            )
+            result_hash = c.scenario_result_hash(
+                spec_hash=pinned.spec_hash, result=result_payload
+            )
 
             session.add(RunRuleSnapshot(
                 scenario_id=scenario_id, snapshot_id=pinned.rule_snapshot_id,
@@ -655,7 +755,9 @@ class ScenarioService:
                 tax_delta=computed["tax_delta"],
                 net_benefit=computed["objective_delta"],
                 calculation_basis="scenario_estimate",
-                result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+                result_schema_version=result_schema_version,
+                counterfactual_derived_state=derived_payload,
+                counterfactual_derived_state_hash=derived_hash,
                 objective_code=pinned.objective_code,
                 objective_version=pinned.objective_version,
                 objective_value_baseline=computed["objective_baseline"],

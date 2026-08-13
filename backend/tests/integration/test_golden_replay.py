@@ -93,7 +93,7 @@ async def test_scenario_spec_and_result_hashes_replay_from_stored_rows():
         sealed_result_hash = stored.scenario_result_hash
         # rebuilt ENTIRELY from persisted rows
         rebuilt = await ScenarioService._load_spec(s, stored)
-        pinned = await service._pin_specification(s, analysis_id, rebuilt)
+        pinned = await service._pin_specification(s, analysis_id, rebuilt, result_schema_version="1.0.0")
 
     assert pinned.spec_hash == sealed_spec_hash, "scenario spec hash did not replay"
 
@@ -197,7 +197,7 @@ async def test_a_version_change_produces_a_new_identity():
     )
 
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        pinned = await service._pin_specification(s, analysis_id, spec)
+        pinned = await service._pin_specification(s, analysis_id, spec, result_schema_version="1.0.0")
     original = pinned.spec_hash
 
     # move a pinned version; the identity must move with it
@@ -228,7 +228,7 @@ async def test_a_tampered_result_is_detectable_by_recomputing_the_hash():
                 ScenarioResult.scenario_id == outcome.scenario_id)
         )
         rebuilt = await ScenarioService._load_spec(s, stored)
-        pinned = await service._pin_specification(s, analysis_id, rebuilt)
+        pinned = await service._pin_specification(s, analysis_id, rebuilt, result_schema_version="1.0.0")
         sealed = stored.scenario_result_hash
 
     computed = service._compute(pinned)

@@ -181,8 +181,38 @@ def test_an_unsupported_version_fails_closed(version):
 
 
 def test_production_still_writes_v1():
-    """§19. v2 is defined, not activated."""
+    """§21. v2 is now reachable end to end, and still not activated.
+
+    Rewritten for Phase A2. It used to assert that `_persist` named the write
+    authority literally, which stopped being the right question once one chosen
+    version began travelling from the seam to every field. The property that
+    actually matters is unchanged and is asserted directly: the PUBLIC entry
+    point chooses the write authority, and the write authority is still v1.
+    """
     assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == "1.0.0"
-    source = inspect.getsource(ScenarioService._persist)
+    source = inspect.getsource(ScenarioService.simulate)
     assert "result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION" in source
     assert "SCENARIO_RESULT_SCHEMA_V2" not in source
+
+
+def test_the_public_entry_point_has_no_schema_version_parameter():
+    """§2. The seam is internal. A public parameter would let a request decide
+    what contract its own evidence is sealed under."""
+    public = inspect.signature(ScenarioService.simulate).parameters
+    assert "result_schema_version" not in public
+
+    internal = inspect.signature(ScenarioService._simulate).parameters
+    assert internal["result_schema_version"].kind is (
+        inspect.Parameter.KEYWORD_ONLY)
+    assert internal["result_schema_version"].default is inspect.Parameter.empty
+
+
+def test_the_seam_refuses_an_unsupported_version_before_anything_is_created():
+    """No fallback and no widening: an unsupported version must not reach the
+    point where a header row exists."""
+    import asyncio
+
+    for version in ("0.9.0", "3.0.0", "latest", ""):
+        with pytest.raises(UnsupportedResultSchemaVersion):
+            asyncio.run(ScenarioService(user_id=None)._simulate(
+                None, None, result_schema_version=version))  # type: ignore[arg-type]

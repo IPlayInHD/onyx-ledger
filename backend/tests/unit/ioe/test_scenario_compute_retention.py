@@ -254,32 +254,44 @@ async def test_deriving_without_the_retained_engine_output_is_refused(missing):
 
 
 # ---------------------------------------------------------------------------
-# §11 — A1 builds the capability and persists nothing
+# A v1 seal still carries no counterfactual state
 # ---------------------------------------------------------------------------
-def test_phase_a1_writes_no_counterfactual_state():
-    """The scope boundary, enforced rather than promised. Persistence, replay
-    interpretation and schema activation are Phase A2; a stray write here would
-    seal a v1 row beside v2 evidence."""
-    source = pathlib.Path(inspect.getfile(ScenarioService)).read_text()
-    tree = ast.parse(source)
+def test_a_v1_seal_never_builds_or_writes_counterfactual_state():
+    """SUPERSEDES the Phase A1 boundary test, which asserted that `_persist`
+    mentioned nothing counterfactual at all. Phase A2 wires the builder in, so
+    that assertion is obsolete — but the property it protected is not, and is
+    asserted more precisely here: every counterfactual write in `_persist` must
+    sit behind a v2 guard.
 
+    A v1 seal binds nothing to the derived state, so building one would cost a
+    rules evaluation per scenario to produce something no hash covers and no
+    column stores — and writing one would put evidence beside a hash that does
+    not commit to it.
+    """
+    source = pathlib.Path(inspect.getfile(ScenarioService)).read_text()
     persist = next(
-        node for node in ast.walk(tree)
+        node for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "_persist"
     )
-    rendered = ast.unparse(persist)
-    for forbidden in ("counterfactual_derived_state",
-                      "counterfactual_derived_state_hash",
-                      "build_counterfactual_derived_state"):
-        assert forbidden not in rendered, (
-            f"_persist references {forbidden}: Phase A1 derives the "
-            "counterfactual state and writes none of it")
 
-    # and nothing calls the builder from production code yet
-    assert "build_counterfactual_derived_state" in source
-    calls = [
-        ast.unparse(node.func) for node in ast.walk(tree)
+    guarded: list[ast.AST] = []
+    for node in ast.walk(persist):
+        if isinstance(node, ast.If) and "SCENARIO_RESULT_SCHEMA_V2" in (
+                ast.unparse(node.test)):
+            guarded.extend(ast.walk(node))
+    guarded_ids = {id(n) for n in guarded}
+
+    unguarded = [
+        f"line {node.lineno}: {ast.unparse(node)}"
+        for node in ast.walk(persist)
         if isinstance(node, ast.Call)
+        and ast.unparse(node.func).endswith("build_counterfactual_derived_state")
+        and id(node) not in guarded_ids
     ]
-    assert not [x for x in calls if x.endswith("build_counterfactual_derived_state")], (
-        "the builder is wired into a caller; A1 defines the capability only")
+    assert unguarded == [], (
+        "these counterfactual derivations run for every scenario, including "
+        "v1 seals that bind nothing to them:\n  " + "\n  ".join(unguarded))
+
+    # the column values must likewise be conditional, never a bare build
+    assert "SCENARIO_RESULT_SCHEMA_V2" in ast.unparse(persist), (
+        "_persist writes counterfactual columns without distinguishing v2")

@@ -471,7 +471,7 @@ async def test_every_execution_relevant_pin_changes_the_scenario_identity():
     uid, analysis_id = await _analysis()
     service = ScenarioService(uid)
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        pinned = await service._pin_specification(s, analysis_id, _spec())
+        pinned = await service._pin_specification(s, analysis_id, _spec(), result_schema_version="1.0.0")
 
     baseline_hash = service.compute_spec_hash(pinned)
     assert baseline_hash == pinned.spec_hash
@@ -540,9 +540,9 @@ async def test_non_semantic_metadata_does_not_change_the_identity():
     service = ScenarioService(uid)
 
     async with unit_of_work(user_id=uid, actor_type="user") as s:
-        plain = await service._pin_specification(s, analysis_id, _spec())
+        plain = await service._pin_specification(s, analysis_id, _spec(), result_schema_version="1.0.0")
         labelled = await service._pin_specification(
-            s, analysis_id, _spec(label="a name", note="a note"))
+            s, analysis_id, _spec(label="a name", note="a note"), result_schema_version="1.0.0")
     assert plain.spec_hash == labelled.spec_hash
 
 
