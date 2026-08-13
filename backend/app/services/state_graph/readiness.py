@@ -61,6 +61,28 @@ class RequirementCoverage:
     satisfying_document_ids: tuple[str, ...]
 
 
+def readiness_for(necessity: str, *, present: bool) -> EvidenceReadiness:
+    """THE readiness decision. Presence of the required TYPE, and nothing else.
+
+    Extracted so a second caller can reuse it rather than restate it. Note what
+    it does not take: no document ids, no count, no dates. That is not a
+    simplification made here — it is what `resolve_requirement` always computed,
+    which is exactly why a sealed historical snapshot needs to carry governed
+    type codes and nothing more.
+
+    `Entry 12B1` (historical held evidence) resolves requirements against a
+    SEALED set of type codes through this same function, so historical readiness
+    and current readiness cannot drift apart by being implemented twice.
+    """
+    if necessity == NECESSITY_CONDITIONAL:
+        return EvidenceReadiness.UNKNOWN
+    if necessity == NECESSITY_RECOMMENDED:
+        # Recommended is not a readiness blocker: its absence never makes a
+        # rule's evidence incomplete, so reporting MISSING would overstate it.
+        return EvidenceReadiness.READY if present else EvidenceReadiness.NOT_REQUIRED
+    return EvidenceReadiness.READY if present else EvidenceReadiness.MISSING
+
+
 def resolve_requirement(
     requirement: DocumentRequirement,
     held_document_ids_by_type: Mapping[str, Sequence[str]],
@@ -70,22 +92,9 @@ def resolve_requirement(
     that this function stays a pure statement about set membership."""
     held = tuple(sorted(held_document_ids_by_type.get(requirement.document_type_code, ())))
 
-    if requirement.necessity == NECESSITY_CONDITIONAL:
-        readiness = EvidenceReadiness.UNKNOWN
-    elif requirement.necessity == NECESSITY_RECOMMENDED:
-        # Recommended is not a readiness blocker: its absence never makes a
-        # rule's evidence incomplete, so reporting MISSING would overstate it.
-        readiness = (
-            EvidenceReadiness.READY if held else EvidenceReadiness.NOT_REQUIRED
-        )
-    elif held:
-        readiness = EvidenceReadiness.READY
-    else:
-        readiness = EvidenceReadiness.MISSING
-
     return RequirementCoverage(
         requirement=requirement,
-        readiness=readiness,
+        readiness=readiness_for(requirement.necessity, present=bool(held)),
         satisfying_document_ids=held,
     )
 

@@ -91,8 +91,9 @@ from app.services.ioe.frozen.models import (
     assert_current_scenario_policy,
 )
 from app.services.ioe.portfolio.service import to_tax_input
-from app.services.ioe.scenario import counterfactual
+from app.services.ioe.scenario import counterfactual, held_evidence
 from app.services.ioe.scenario.counterfactual import CounterfactualDerivedState
+from app.services.ioe.scenario.held_evidence import HistoricalHeldEvidenceSnapshot
 from app.services.ioe.snapshot.service import RuleSnapshotService
 from app.services.tax_engine.contracts import CONTRACT_VERSION
 from app.services.tax_engine.core import data as engine_data
@@ -722,6 +723,13 @@ class ScenarioService:
             derived_payload: dict | None = None
             derived_hash: str | None = None
             if result_schema_version == SCENARIO_RESULT_SCHEMA_V2:
+                # T1, captured inside TX-2 and therefore inside the same
+                # transaction as the seal. Capturing after the commit would
+                # describe a library that had already moved on; capturing in a
+                # separate transaction would leave a window where the scenario
+                # is sealed against evidence nothing recorded.
+                baseline_held_evidence = await held_evidence.capture_held_evidence(
+                    session, self.user_id, pinned.tax_year)
                 # The certified Phase A1 builder, reused rather than
                 # reimplemented — persistence and replay verification must
                 # derive the same state from the same inputs or the hash they
@@ -729,7 +737,8 @@ class ScenarioService:
                 derived_payload, derived_hash = (
                     counterfactual.canonical_payload_and_hash(
                         await self.build_counterfactual_derived_state(
-                            session, pinned, computed)
+                            session, pinned, computed,
+                            baseline_held_evidence=baseline_held_evidence)
                     )
                 )
 
@@ -866,6 +875,8 @@ class ScenarioService:
         session: AsyncSession,
         pinned: PinnedScenarioSpec,
         computed: dict,
+        *,
+        baseline_held_evidence: HistoricalHeldEvidenceSnapshot,
     ) -> CounterfactualDerivedState:
         """Derive the counterfactual state from an ALREADY-COMPUTED scenario.
 
@@ -896,8 +907,11 @@ class ScenarioService:
         exists now". That is why the list is built once and passed twice with no
         conditional between.
 
-        This method neither persists nor is called by persistence: Phase A1
-        builds the capability, Phase A2 decides where it is written.
+        `baseline_held_evidence` IS REQUIRED AND HAS NO DEFAULT. It is passed
+        in — captured from the live library at creation, loaded from the seal at
+        replay — and never fetched here. A default would let replay build a
+        March scenario against an empty or a June library and report the
+        difference as tampering.
         """
         for key in ("line_items", "facts"):
             if key not in computed:
@@ -921,6 +935,7 @@ class ScenarioService:
             line_items=computed["line_items"],
             opportunities=opportunities,
             pinned_rule_version_ids=pinned_rule_version_ids,
+            baseline_held_evidence=baseline_held_evidence,
         )
 
     # ---------------------------------------------------------------- TX-3 ---

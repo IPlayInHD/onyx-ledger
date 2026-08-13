@@ -55,7 +55,7 @@ from app.services.ioe.replay.resolver import (
     ReplayDependencyResolver,
     ResolvedDependencies,
 )
-from app.services.ioe.scenario import counterfactual
+from app.services.ioe.scenario import counterfactual, held_evidence
 
 if TYPE_CHECKING:   # runtime import stays local: the domain module imports back
     from app.services.ioe.domain.scenario import ScenarioSpec
@@ -595,9 +595,17 @@ class ScenarioReplayService:
             # let the ordinary result-hash comparison report the mismatch.
             return _IRRECONCILABLE_DERIVED_STATE
 
+        # THE SEALED SNAPSHOT, NOT THE LIVE LIBRARY. Held evidence is read back
+        # from the artifact under verification: re-capturing it would answer
+        # "what does this user hold today", and a slip uploaded after sealing
+        # would then surface as a hash mismatch indistinguishable from tampering.
+        sealed_evidence = held_evidence.from_payload(
+            stored_payload.get("baseline_held_evidence") or {})
+
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             rebuilt = await service.build_counterfactual_derived_state(
-                session, pinned, computed)
+                session, pinned, computed,
+                baseline_held_evidence=sealed_evidence)
         rebuilt_hash = counterfactual.derived_state_hash(rebuilt)
 
         if rebuilt_hash != stored_hash:

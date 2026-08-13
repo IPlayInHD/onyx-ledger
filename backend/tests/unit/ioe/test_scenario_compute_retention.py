@@ -23,6 +23,7 @@ import pytest
 
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.scenario.counterfactual import build_line_items
+from app.services.ioe.scenario.held_evidence import build_snapshot
 from app.services.ioe.scenario.service import ScenarioService
 from app.services.tax_engine.core.engine import TaxInput, compute
 from tests.unit.ioe.test_scenario_result_v1_protocol import NAMES, SPEC_HASH, _shapes
@@ -199,6 +200,11 @@ class _SessionThatMustNotBeUsed:
         )
 
 
+#: A scenario whose user held nothing. Explicit rather than defaulted: the
+#: builder refuses to invent held evidence, so a test must state it too.
+_EMPTY_EVIDENCE = build_snapshot(())
+
+
 class _Pinned:
     def __init__(self, ids):
         self.tax_year = 2025
@@ -214,9 +220,12 @@ async def test_an_empty_pinned_set_yields_no_candidates_without_querying():
         _SessionThatMustNotBeUsed(),          # type: ignore[arg-type]
         _Pinned([]),                          # type: ignore[arg-type]
         {"line_items": [], "facts": {}},
+        baseline_held_evidence=_EMPTY_EVIDENCE,
     )
     assert state.candidates == ()
     assert state.pinned_rule_version_ids == ()
+    # the builder took the snapshot it was handed; it did not go looking for one
+    assert state.baseline_held_evidence == _EMPTY_EVIDENCE
 
 
 def test_the_builder_does_not_collapse_an_empty_pin_set():
@@ -250,6 +259,7 @@ async def test_deriving_without_the_retained_engine_output_is_refused(missing):
             _SessionThatMustNotBeUsed(),      # type: ignore[arg-type]
             _Pinned([]),                      # type: ignore[arg-type]
             computed,
+            baseline_held_evidence=_EMPTY_EVIDENCE,
         )
 
 

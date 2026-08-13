@@ -44,6 +44,8 @@ from typing import Any
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import confidence as support
 from app.services.ioe.normalization.service import OpportunityNormalizationService
+from app.services.ioe.scenario import held_evidence
+from app.services.ioe.scenario.held_evidence import HistoricalHeldEvidenceSnapshot
 from app.services.tax_engine.contracts import OpportunityContractV2
 
 #: Bumped when the SEALED SHAPE changes in a way that could alter a
@@ -112,11 +114,28 @@ class CounterfactualCandidate:
 
 @dataclass(frozen=True)
 class CounterfactualDerivedState:
-    """Everything a later comparison needs, and nothing it can recompute."""
+    """Everything a later comparison needs, and nothing it can recompute.
+
+    ONE FIELD HERE IS NOT COUNTERFACTUAL. `baseline_held_evidence` is BASELINE
+    state — what the user actually held when the scenario was sealed — and the
+    scenario did not cause it and cannot change it. It rides in this artifact
+    because it must be sealed in the same transaction, bound by the same hash
+    and removed by the same retention rule as everything else here; giving it a
+    second column and a second digest would buy nothing but another thing to
+    disagree.
+
+    A comparison uses it on BOTH sides. The baseline and the counterfactual are
+    resolved against the SAME held evidence, so a `READY → MISSING` transition
+    means "this scenario requires a document you do not have", never "your
+    document library changed".
+    """
 
     line_items: tuple[CounterfactualLineItem, ...]
     candidates: tuple[CounterfactualCandidate, ...]
     pinned_rule_version_ids: tuple[str, ...]
+    #: T1 baseline context, NOT a counterfactual output. `None` only for states
+    #: built before Entry 12B1 sealed held evidence.
+    baseline_held_evidence: HistoricalHeldEvidenceSnapshot | None = None
     schema_version: str = COUNTERFACTUAL_DERIVED_STATE_SCHEMA_VERSION
 
 
@@ -212,11 +231,21 @@ def build_derived_state(
     line_items: Sequence[dict],
     opportunities: Sequence[OpportunityContractV2],
     pinned_rule_version_ids: Sequence[Any],
+    baseline_held_evidence: HistoricalHeldEvidenceSnapshot | None = None,
 ) -> CounterfactualDerivedState:
+    """`baseline_held_evidence` is an INPUT, never something this builder goes
+    and fetches.
+
+    That is the whole boundary. Creation captures it from the live library once
+    and passes it here; replay loads the SEALED one and passes that. If the
+    builder queried documents itself, replay would rebuild a March scenario
+    against June's library and report a mismatch caused by an upload.
+    """
     return CounterfactualDerivedState(
         line_items=build_line_items(line_items),
         candidates=build_candidates(opportunities),
         pinned_rule_version_ids=tuple(sorted(str(v) for v in pinned_rule_version_ids)),
+        baseline_held_evidence=baseline_held_evidence,
     )
 
 
@@ -226,6 +255,13 @@ def canonical_payload(state: CounterfactualDerivedState) -> dict[str, Any]:
     return {
         "schema_version": state.schema_version,
         "pinned_rule_version_ids": list(state.pinned_rule_version_ids),
+        # Named for what it is. A reader who sees "held evidence" inside a
+        # "counterfactual derived state" must be able to tell at a glance that
+        # it describes the baseline, not something the scenario produced.
+        "baseline_held_evidence": (
+            held_evidence.canonical_payload(state.baseline_held_evidence)
+            if state.baseline_held_evidence is not None else None
+        ),
         "line_items": [
             {
                 "kind": i.kind,

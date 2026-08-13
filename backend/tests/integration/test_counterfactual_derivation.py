@@ -41,7 +41,7 @@ from app.database.models import (
 from app.database.session import unit_of_work
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain.scenario import ScenarioSpec
-from app.services.ioe.scenario import counterfactual
+from app.services.ioe.scenario import counterfactual, held_evidence
 from app.services.ioe.scenario.service import ScenarioService
 from tests.conftest import frozen_snapshot
 
@@ -164,8 +164,17 @@ async def _pin(service: ScenarioService, analysis_id: uuid.UUID, spec: ScenarioS
 
 
 async def _derive(service: ScenarioService, pinned, computed):
+    """Capture held evidence and derive, the way creation does it.
+
+    The snapshot is captured rather than invented: these tests are about the
+    pinned-rule path, and handing the builder a fabricated evidence set would
+    make them agree with a fixture instead of with the database.
+    """
     async with unit_of_work(user_id=service.user_id, actor_type="user") as s:
-        return await service.build_counterfactual_derived_state(s, pinned, computed)
+        snapshot = await held_evidence.capture_held_evidence(
+            s, service.user_id, pinned.tax_year)
+        return await service.build_counterfactual_derived_state(
+            s, pinned, computed, baseline_held_evidence=snapshot)
 
 
 def _candidate(state, opportunity_code: str):
