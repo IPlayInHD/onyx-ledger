@@ -88,11 +88,14 @@ from app.services.ioe.frozen.models import (
     assert_current_scenario_policy,
 )
 from app.services.ioe.portfolio.service import to_tax_input
+from app.services.ioe.scenario import counterfactual
+from app.services.ioe.scenario.counterfactual import CounterfactualDerivedState
 from app.services.ioe.snapshot.service import RuleSnapshotService
 from app.services.tax_engine.contracts import CONTRACT_VERSION
 from app.services.tax_engine.core import data as engine_data
 from app.services.tax_engine.core.engine import compute
-from app.services.tax_engine.service import ENGINE_VERSION
+from app.services.tax_engine.rules_service import RulesEvaluatorService
+from app.services.tax_engine.service import ENGINE_VERSION, TaxEngineService
 
 SCENARIO_SERVICE_VERSION = "1.0.0"
 
@@ -566,7 +569,8 @@ class ScenarioService:
         # levers ran still has to equal the one taken before them.
         assert clone == frozen.baseline_clone(), "baseline input was mutated in place"
 
-        scenario_result = compute(to_tax_input(applied.inputs))
+        scenario_input = to_tax_input(applied.inputs)
+        scenario_result = compute(scenario_input)
         scenario_tax = scenario_result.total_payable.quantize(MONEY, ROUND_HALF_UP)
         tax_delta = (pinned.baseline_tax - scenario_tax).quantize(MONEY, ROUND_HALF_UP)
 
@@ -598,6 +602,25 @@ class ScenarioService:
             "objective_delta": objective_delta,
             "changes": applied.changes,
             "support": breakdown,
+            # ---- retained, not recomputed (Entry 12B1 Phase A1) ----
+            #
+            # Both of these were already produced by the single engine run above
+            # and then discarded. Keeping them costs nothing and is the only way
+            # a counterfactual derived state can be built WITHOUT running the
+            # engine a second time — a second run would be a second chance to
+            # disagree with the number this scenario was sealed from.
+            #
+            # `facts` deliberately goes through `TaxEngineService.facts_for`,
+            # which takes the already-computed result. The tempting alternative,
+            # `eligibility.engine_facts_for(inputs)`, re-enters `compute()`
+            # internally; `tests/unit/ioe/test_scenario_compute_retention.py`
+            # counts engine executions so that substitution cannot pass review.
+            #
+            # NEITHER KEY REACHES A HASH. `_canonical_result_v1` selects its
+            # fields by name, so this addition is inert for every sealed v1
+            # artifact — asserted directly, not assumed.
+            "line_items": [dict(item) for item in scenario_result.line_items],
+            "facts": TaxEngineService.facts_for(scenario_input, scenario_result),
         }
 
     # ---------------------------------------------------------------- TX-2 ---
@@ -734,6 +757,68 @@ class ScenarioService:
             computed,
             result_schema_version=result_schema_version,
             counterfactual_derived_state_hash=counterfactual_derived_state_hash,
+        )
+
+    async def build_counterfactual_derived_state(
+        self,
+        session: AsyncSession,
+        pinned: PinnedScenarioSpec,
+        computed: dict,
+    ) -> CounterfactualDerivedState:
+        """Derive the counterfactual state from an ALREADY-COMPUTED scenario.
+
+        THE ONE BUILDER. Every future caller — sealing, replay verification, a
+        comparison — goes through this method, because two builders would be two
+        chances to disagree about what a counterfactual state contains, and the
+        disagreement would surface as a hash mismatch that looked like data
+        corruption.
+
+        NOTHING IS RECOMPUTED HERE. The tax state arrives as
+        `computed["line_items"]`, retained from the single engine run in
+        `_compute`. The facts arrive as `computed["facts"]`, derived from that
+        same run's result. This method's only external call is the rules
+        evaluation, which the scenario never performed at all.
+
+        WHY THE PINNED SET IS PASSED THROUGH UNCHANGED. `evaluate` distinguishes
+        three cases, and all three are meaningful:
+
+            None        resolve today's published rules  — WRONG here, it would
+                        let a rule published after sealing enter a historical
+                        counterfactual
+            []          nothing was pinned, so nothing is eligible
+            [ids...]    exactly this immutable version set
+
+        So the list is forwarded as-is. An `or None` — the obvious-looking way
+        to "handle the empty case" — silently converts the second into the
+        first, turning "this scenario pinned no rules" into "evaluate whatever
+        exists now". That is why the list is built once and passed twice with no
+        conditional between.
+
+        This method neither persists nor is called by persistence: Phase A1
+        builds the capability, Phase A2 decides where it is written.
+        """
+        for key in ("line_items", "facts"):
+            if key not in computed:
+                # Refused rather than defaulted. Building from a computed dict
+                # that never retained the engine output would produce a
+                # perfectly well-formed derived state describing nothing, and
+                # an empty counterfactual is indistinguishable from a scenario
+                # in which nothing was eligible.
+                raise ValueError(
+                    f"computed result did not retain {key!r}; the counterfactual "
+                    "state cannot be derived without it"
+                )
+
+        pinned_rule_version_ids = list(pinned.pinned_rule_version_ids)
+        opportunities = await RulesEvaluatorService(session).evaluate(
+            pinned.tax_year,
+            computed["facts"],
+            pinned_rule_version_ids=pinned_rule_version_ids,
+        )
+        return counterfactual.build_derived_state(
+            line_items=computed["line_items"],
+            opportunities=opportunities,
+            pinned_rule_version_ids=pinned_rule_version_ids,
         )
 
     # ---------------------------------------------------------------- TX-3 ---
