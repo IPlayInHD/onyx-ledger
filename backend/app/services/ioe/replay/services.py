@@ -440,6 +440,14 @@ class ScenarioReplayService:
                 session, self.user_id).for_scenario(scenario)
             expected = scenario.scenario_result_hash
             spec_hash = scenario.scenario_spec_hash or ""
+            # A sealed row that does not say which contract it was hashed under
+            # cannot be replayed against any contract. Fail closed as an
+            # unavailable dependency rather than assuming v1: assuming would
+            # produce a confident MISMATCH for an artifact nobody can interpret.
+            sealed_schema_version = scenario.result_schema_version
+            if not sealed_schema_version:
+                raise DependencyUnavailable(
+                    IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
             spec = await self._sealed_spec(session, scenario_id)
 
             # The replay is confined to the same frozen input production was
@@ -493,8 +501,19 @@ class ScenarioReplayService:
 
         service = ScenarioService(self.user_id)
         computed = service._compute(pinned)
+        # THE VERSION COMES FROM THE ROW, never from the current-write constant.
+        # A sealed scenario was hashed under the contract it named, and replay
+        # exists to reproduce that contract — reading the build's current
+        # version here is precisely the defect this fix removes, because it
+        # would make every historical hash follow whatever the newest code
+        # writes. An unsupported version raises rather than falling back.
         actual = c.scenario_result_hash(
-            spec_hash=spec_hash, result=service.canonical_result(computed))
+            spec_hash=spec_hash,
+            result=service.canonical_result(
+                computed,
+                result_schema_version=sealed_schema_version,
+            ),
+        )
 
         return ReplayOutcome(
             expected_hash=expected, actual_hash=actual, expected_spec_hash=spec_hash,

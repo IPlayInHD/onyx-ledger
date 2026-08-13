@@ -317,7 +317,7 @@ async def test_historical_replay_reproduces_both_hashes():
     replayed_result_hash = __import__(
         "app.services.ioe.domain.canonical", fromlist=["c"]
     ).scenario_result_hash(
-        spec_hash=pinned.spec_hash, result=service.canonical_result(computed)
+        spec_hash=pinned.spec_hash, result=service.canonical_result(computed, result_schema_version="1.0.0")
     )
     assert replayed_result_hash == stored_result_hash, "result hash did not replay"
 

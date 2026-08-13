@@ -99,7 +99,7 @@ async def test_scenario_spec_and_result_hashes_replay_from_stored_rows():
 
     computed = service._compute(pinned)
     replayed = c.scenario_result_hash(
-        spec_hash=pinned.spec_hash, result=service.canonical_result(computed)
+        spec_hash=pinned.spec_hash, result=service.canonical_result(computed, result_schema_version="1.0.0")
     )
     assert replayed == sealed_result_hash, "scenario result hash did not replay"
 
@@ -232,7 +232,7 @@ async def test_a_tampered_result_is_detectable_by_recomputing_the_hash():
         sealed = stored.scenario_result_hash
 
     computed = service._compute(pinned)
-    payload = service.canonical_result(computed)
+    payload = service.canonical_result(computed, result_schema_version="1.0.0")
     assert c.scenario_result_hash(spec_hash=pinned.spec_hash, result=payload) == sealed
 
     # a single cent of drift changes the hash

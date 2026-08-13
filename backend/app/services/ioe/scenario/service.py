@@ -69,11 +69,13 @@ from app.services.ioe.domain.freshness import (
     FRESHNESS_POLICY_VERSION,
 )
 from app.services.ioe.domain.scenario import (
+    CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
     SCENARIO_RESULT_SCHEMA_VERSION,
     SCENARIO_SPEC_VERSION,
     FreshnessStatus,
     ScenarioSpec,
     StaleReason,
+    canonical_scenario_result,
 )
 from app.services.ioe.domain.workflow import WorkflowStateMachine
 from app.services.ioe.frozen import (
@@ -603,7 +605,12 @@ class ScenarioService:
     async def _persist(
         self, scenario_id: uuid.UUID, pinned: PinnedScenarioSpec, computed: dict
     ) -> str:
-        result_payload = self.canonical_result(computed)
+        result_payload = self.canonical_result(
+            computed,
+            # What NEW seals are written as. v2 is defined but not
+            # activated: nothing writes counterfactual derived state yet.
+            result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+        )
         result_hash = c.scenario_result_hash(
             spec_hash=pinned.spec_hash, result=result_payload
         )
@@ -703,39 +710,32 @@ class ScenarioService:
         return tuple(out)
 
     @staticmethod
-    def canonical_result(computed: dict) -> dict:
+    def canonical_result(
+        computed: dict,
+        *,
+        result_schema_version: str,
+        counterfactual_derived_state_hash: str | None = None,
+    ) -> dict:
         """The exact payload the result hash is taken over.
 
         Static and free of any session or clock so a replay can rebuild it from
         stored columns and get the same hash.
+
+        `result_schema_version` IS REQUIRED and has no default. It used to be
+        read from a module constant, which meant replay canonicalized historical
+        artifacts under whatever contract the current build declared — so
+        bumping that constant would have invalidated every sealed scenario.
+        A caller must now state which contract it means: creation passes what it
+        writes, replay passes what the row was sealed under.
+
+        Delegates to the one dispatcher in `domain/scenario.py` so no second
+        interpretation of a version can grow here.
         """
-        breakdown = computed["support"]
-        return {
-            "scenario_tax": c.money(computed["scenario_tax"]),
-            "tax_delta": c.money(computed["tax_delta"]),
-            "objective_value_baseline": c.money(computed["objective_baseline"]),
-            "objective_value_scenario": c.money(computed["objective_scenario"]),
-            "objective_delta": c.money(computed["objective_delta"]),
-            "result_schema_version": SCENARIO_RESULT_SCHEMA_VERSION,
-            "support": {
-                "raw_support_score": c.rate(breakdown.raw_support_score),
-                "assumption_adjusted_score": c.rate(
-                    breakdown.assumption_adjusted_score
-                ),
-                "display_support_score": c.rate(breakdown.display_support_score),
-                "cap_applied": breakdown.cap_applied,
-                "cap_reason_code": breakdown.cap_reason_code,
-            },
-            "changes": [
-                {
-                    "apply_order": ch.apply_order,
-                    "lever_code": ch.lever_code,
-                    "field": ch.field,
-                    "new_value": str(ch.new_value),
-                }
-                for ch in computed["changes"]
-            ],
-        }
+        return canonical_scenario_result(
+            computed,
+            result_schema_version=result_schema_version,
+            counterfactual_derived_state_hash=counterfactual_derived_state_hash,
+        )
 
     # ---------------------------------------------------------------- TX-3 ---
     async def _fail(self, scenario_id: uuid.UUID, error_code: str) -> None:

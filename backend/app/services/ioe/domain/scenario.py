@@ -27,7 +27,144 @@ from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import levers as lever_registry
 
 SCENARIO_SPEC_VERSION = "1.0.0"
-SCENARIO_RESULT_SCHEMA_VERSION = "1.0.0"
+
+# ---------------------------------------------------------------------------
+# Scenario result schema versions
+#
+# TWO DIFFERENT QUESTIONS, kept apart on purpose. "What do new writes use" and
+# "what can replay still interpret" are not the same, and conflating them is the
+# exact defect this vocabulary exists to prevent: `canonical_result` used to
+# read the current-write constant while canonicalizing HISTORICAL artifacts, so
+# bumping the constant would have silently rewritten the contract every sealed
+# scenario was hashed under.
+# ---------------------------------------------------------------------------
+SCENARIO_RESULT_SCHEMA_V1 = "1.0.0"
+SCENARIO_RESULT_SCHEMA_V2 = "2.0.0"
+
+#: What NEW seals are written as. Still v1: Entry 12B1 defines v2 but does not
+#: activate it, and nothing writes counterfactual derived state yet.
+CURRENT_SCENARIO_RESULT_SCHEMA_VERSION = SCENARIO_RESULT_SCHEMA_V1
+
+#: What REPLAY can interpret. Strictly a superset of the write version.
+SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS = frozenset({
+    SCENARIO_RESULT_SCHEMA_V1, SCENARIO_RESULT_SCHEMA_V2,
+})
+
+#: Kept for existing importers. Deliberately NOT the authority any more — the
+#: canonicalizer takes an explicit version, so this name can no longer decide
+#: how a historical artifact is interpreted.
+SCENARIO_RESULT_SCHEMA_VERSION = SCENARIO_RESULT_SCHEMA_V1
+
+
+class UnsupportedResultSchemaVersion(ValueError):
+    """A sealed artifact names a schema version this build cannot interpret.
+
+    Raised rather than resolved. Falling back to v1, to v2, or to "current"
+    would produce a hash under a contract the artifact was never sealed with,
+    and report the resulting mismatch as though the data had changed.
+    """
+
+
+def _canonical_result_v1(computed: dict) -> dict:
+    """THE FROZEN v1 PROTOCOL. Historical, and therefore immutable.
+
+    Every sealed v1 scenario in the database was hashed from exactly this
+    shape. Renaming a key, reordering a field, changing a null, or tightening a
+    Decimal here silently invalidates all of them, so nothing in this function
+    may be tidied. `tests/golden/scenario_result_v1_vectors.json` holds five
+    vectors captured before this function was ever touched, and they are the
+    authority — if they disagree with this code, this code is wrong.
+    """
+    breakdown = computed["support"]
+    return {
+        "scenario_tax": c.money(computed["scenario_tax"]),
+        "tax_delta": c.money(computed["tax_delta"]),
+        "objective_value_baseline": c.money(computed["objective_baseline"]),
+        "objective_value_scenario": c.money(computed["objective_scenario"]),
+        "objective_delta": c.money(computed["objective_delta"]),
+        "result_schema_version": SCENARIO_RESULT_SCHEMA_V1,
+        "support": {
+            "raw_support_score": c.rate(breakdown.raw_support_score),
+            "assumption_adjusted_score": c.rate(
+                breakdown.assumption_adjusted_score
+            ),
+            "display_support_score": c.rate(breakdown.display_support_score),
+            "cap_applied": breakdown.cap_applied,
+            "cap_reason_code": breakdown.cap_reason_code,
+        },
+        "changes": [
+            {
+                "apply_order": ch.apply_order,
+                "lever_code": ch.lever_code,
+                "field": ch.field,
+                "new_value": str(ch.new_value),
+            }
+            for ch in computed["changes"]
+        ],
+    }
+
+
+def _canonical_result_v2(
+    computed: dict, *, counterfactual_derived_state_hash: str
+) -> dict:
+    """v1's semantics plus the binding that makes v2 worth having.
+
+    The outer payload carries the derived state's HASH, not a second copy of the
+    artifact: the counterfactual derived state already has its own
+    domain-separated hash, and duplicating a 21KB payload into the result hash
+    would buy nothing except a larger hash input.
+    """
+    payload = _canonical_result_v1(computed)
+    payload["result_schema_version"] = SCENARIO_RESULT_SCHEMA_V2
+    payload["counterfactual_derived_state_hash"] = counterfactual_derived_state_hash
+    return payload
+
+
+def canonical_scenario_result(
+    computed: dict,
+    *,
+    result_schema_version: str,
+    counterfactual_derived_state_hash: str | None = None,
+) -> dict:
+    """THE single version-dispatch authority for scenario result canonicalization.
+
+    `result_schema_version` is REQUIRED and has no default. That is the whole
+    fix: a caller must say which contract it means, so creation can say "what I
+    write" and replay can say "what this row was sealed under", and neither can
+    accidentally inherit the other's answer from a module constant.
+
+    Creation, replay and integrity all arrive here. Integrity verifies THROUGH
+    replay, so there is one interpretation of any given version — a second
+    dispatcher elsewhere is what would let two components disagree about what a
+    sealed artifact means.
+    """
+    if result_schema_version == SCENARIO_RESULT_SCHEMA_V1:
+        if counterfactual_derived_state_hash is not None:
+            # Fail closed rather than ignore. Silently dropping it would let a
+            # caller believe v2 evidence was bound when the bytes say v1.
+            raise UnsupportedResultSchemaVersion(
+                "a v1 scenario result cannot carry a counterfactual derived-state "
+                "hash: v1 is frozen historical protocol and must not absorb v2 "
+                "semantics"
+            )
+        return _canonical_result_v1(computed)
+
+    if result_schema_version == SCENARIO_RESULT_SCHEMA_V2:
+        if not counterfactual_derived_state_hash:
+            raise UnsupportedResultSchemaVersion(
+                "a v2 scenario result requires a counterfactual derived-state "
+                "hash: v2 exists to bind that evidence, so sealing without it "
+                "would claim a binding that is not there"
+            )
+        return _canonical_result_v2(
+            computed,
+            counterfactual_derived_state_hash=counterfactual_derived_state_hash,
+        )
+
+    raise UnsupportedResultSchemaVersion(
+        f"unsupported scenario result schema version: {result_schema_version!r}; "
+        f"this build interprets {sorted(SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS)}"
+    )
 
 MAX_LEVERS_PER_SCENARIO = 25
 MAX_ASSUMPTIONS_PER_SCENARIO = 25
@@ -324,14 +461,20 @@ def _refuse_executable_shapes(payload: dict, where: str) -> None:
 
 
 __all__ = [
+    "CURRENT_SCENARIO_RESULT_SCHEMA_VERSION",
     "MAX_ASSUMPTIONS_PER_SCENARIO",
     "MAX_LEVERS_PER_SCENARIO",
+    "SCENARIO_RESULT_SCHEMA_V1",
+    "SCENARIO_RESULT_SCHEMA_V2",
     "SCENARIO_RESULT_SCHEMA_VERSION",
     "SCENARIO_SPEC_VERSION",
+    "SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS",
     "AssumptionRequest",
     "FreshnessStatus",
     "LeverRequest",
     "ScenarioSpec",
     "ScenarioSpecError",
     "StaleReason",
+    "UnsupportedResultSchemaVersion",
+    "canonical_scenario_result",
 ]

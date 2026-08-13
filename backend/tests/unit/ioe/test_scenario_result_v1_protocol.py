@@ -105,7 +105,8 @@ def _canonical(name: str) -> dict:
     `result_schema_version`, exactly one line here changes — and it must be
     passed the v1 version explicitly, which is the behaviour under test.
     """
-    return ScenarioService.canonical_result(_shapes()[name])
+    return ScenarioService.canonical_result(
+        _shapes()[name], result_schema_version="1.0.0")
 
 
 # ---------------------------------------------------------------------------
