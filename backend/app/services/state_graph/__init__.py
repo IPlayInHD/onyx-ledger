@@ -23,17 +23,36 @@ from .contracts import (
     TaxStateGraph,
 )
 from .loader import GraphLoader, GraphSources
+from .scenario_projection import (
+    EDGE_COMPARISON_POLICY,
+    NODE_COMPARISON_POLICY,
+    PROJECTION_CONTRACT_VERSION,
+    Comparability,
+    ComparabilityPolicy,
+    FamilyApplicability,
+    ScenarioComparableGraph,
+    ScenarioProjectionError,
+    canonical_projection_payload,
+    canonical_projection_text,
+    project_scenario_comparable_graph,
+)
 from .service import TaxStateGraphService
 
 __all__ = [
+    "EDGE_COMPARISON_POLICY",
     "GRAPH_CONTRACT_VERSION",
     "LIVE_EDGE_TYPES",
     "LIVE_NODE_TYPES",
+    "NODE_COMPARISON_POLICY",
     "PRODUCERS",
+    "PROJECTION_CONTRACT_VERSION",
     "RESERVED_EDGE_TYPES",
     "RESERVED_NODE_TYPES",
+    "Comparability",
+    "ComparabilityPolicy",
     "EdgeType",
     "EvidenceReadiness",
+    "FamilyApplicability",
     "GraphEdge",
     "GraphLoader",
     "GraphNode",
@@ -41,7 +60,12 @@ __all__ = [
     "NodeFreshness",
     "NodeType",
     "Provenance",
+    "ScenarioComparableGraph",
+    "ScenarioProjectionError",
     "TaxStateGraph",
     "TaxStateGraphService",
     "assemble_graph",
+    "canonical_projection_payload",
+    "canonical_projection_text",
+    "project_scenario_comparable_graph",
 ]
