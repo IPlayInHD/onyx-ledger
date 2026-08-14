@@ -658,3 +658,210 @@ async def test_the_snapshot_costs_almost_nothing_to_seal():
     # A tuple of governed codes. If this ever approaches the candidate payload
     # it would mean the contract grew beyond type codes.
     assert stress["evidence_canonical_bytes"] < 4096, report
+
+
+# ===========================================================================
+# §16 — historical source bundles, loaded from the seal and nothing else
+# ===========================================================================
+@pytest.mark.asyncio
+async def test_both_historical_sides_load_from_sealed_state_only():
+    """THE CENTRAL §16 ACCEPTANCE PROOF.
+
+    Every statement the load issues is recorded. The customer read path may not
+    run the tax engine, the rules evaluator or the optimizer, and may not touch
+    `docs.document` — doing any of it would answer a question about the sealing
+    date using today's inputs.
+    """
+    from sqlalchemy import event
+
+    from app.services.ioe.scenario import historical_source as hs
+
+    uid, analysis_id = await _user_with_analysis()
+    await _hold(uid, "T4")
+    outcome = await _seal_v2(uid, analysis_id)
+
+    statements: list[str] = []
+
+    def record(conn, cur, statement, parameters, context, executemany):
+        statements.append(statement.lower())
+
+    from app.database.session import engine
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            baseline, counterfactual = await hs.load_sealed_sides(
+                s, uid, outcome.scenario_id)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
+
+    assert [x for x in statements if "docs.document" in x] == [], (
+        "the historical read touched the live document library")
+
+    # the sealed families are present and are the sealed values
+    assert counterfactual.line_items, "TAX_STATE not sealed"
+    assert counterfactual.candidates, "OPPORTUNITY not sealed"
+    assert baseline.facts, "FACT not frozen"
+    assert baseline.held_evidence.document_type_codes == ("T4",)
+    assert counterfactual.held_evidence == baseline.held_evidence, (
+        "the two sides disagree about what the user held")
+    assert baseline.resource == hs.NOT_APPLICABLE_IN_SINGLE_SCENARIO_COMPARISON
+    assert counterfactual.resource == (
+        hs.NOT_APPLICABLE_IN_SINGLE_SCENARIO_COMPARISON)
+    assert counterfactual.applied_changes, "sealed lever changes missing"
+    assert baseline.applied_changes == (), (
+        "the baseline side carries scenario changes it should not")
+    assert counterfactual.scenario_metadata["result_schema_version"] == "2.0.0"
+
+
+@pytest.mark.asyncio
+async def test_the_historical_loader_runs_no_engine_evaluator_or_optimizer():
+    """The other half of §3: counted executions, not just absent SQL."""
+    import app.services.ioe.portfolio.eligibility as eligibility
+    import app.services.ioe.portfolio.service as portfolio
+    import app.services.tax_engine.core.engine as engine_module
+    import app.services.tax_engine.rules_service as rules_module
+    from app.services.ioe.scenario import historical_source as hs
+
+    uid, analysis_id = await _user_with_analysis()
+    await _hold(uid, "T4")
+    outcome = await _seal_v2(uid, analysis_id)
+
+    engine_runs: list[int] = []
+    evaluations: list[int] = []
+    real_compute = engine_module.compute
+    real_evaluate = rules_module.RulesEvaluatorService.evaluate
+
+    def counting_compute(inp):
+        engine_runs.append(1)
+        return real_compute(inp)
+
+    async def counting_evaluate(self, *a, **kw):
+        evaluations.append(1)
+        return await real_evaluate(self, *a, **kw)
+
+    for module in (engine_module, portfolio, eligibility):
+        if getattr(module, "compute", None) is not None:
+            module.compute = counting_compute          # type: ignore[assignment]
+    rules_module.RulesEvaluatorService.evaluate = counting_evaluate  # type: ignore[method-assign]
+    try:
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            await hs.load_sealed_sides(s, uid, outcome.scenario_id)
+    finally:
+        for module in (engine_module, portfolio, eligibility):
+            if getattr(module, "compute", None) is not None:
+                module.compute = real_compute          # type: ignore[assignment]
+        rules_module.RulesEvaluatorService.evaluate = real_evaluate  # type: ignore[method-assign]
+
+    assert engine_runs == [], f"TaxEngineService ran {len(engine_runs)} times"
+    assert evaluations == [], (
+        f"RulesEvaluatorService ran {len(evaluations)} times")
+
+
+@pytest.mark.asyncio
+async def test_the_historical_sides_do_not_move_when_live_state_moves():
+    """§4. Seal, then churn financials, rules and documents. The sealed sides
+    must be byte-identical afterwards."""
+    from app.services.ioe.scenario import historical_source as hs
+
+    uid, analysis_id = await _user_with_analysis()
+    await _hold(uid, "T4")
+    outcome = await _seal_v2(uid, analysis_id)
+
+    async def sides():
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            return await hs.load_sealed_sides(s, uid, outcome.scenario_id)
+
+    before_baseline, before_counterfactual = await sides()
+
+    # A. documents move
+    await _hold(uid, "RRSP")
+    # B. financial facts move
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        row = await s.scalar(select(IncomeSource).where(
+            IncomeSource.user_id == uid))
+        row.amount = Decimal("250000")
+    # C. rules move — a brand new published rule for the same year
+    await _publish_unrelated_rule()
+
+    after_baseline, after_counterfactual = await sides()
+
+    assert after_baseline == before_baseline
+    assert after_counterfactual == before_counterfactual
+
+
+async def _publish_unrelated_rule() -> None:
+    from datetime import date
+
+    from app.database.models import (
+        Jurisdiction,
+        RuleOutcome,
+        TaxRule,
+        TaxRuleVersion,
+    )
+
+    async with unit_of_work(actor_type="admin") as s:
+        jurisdiction = await s.scalar(
+            select(Jurisdiction).where(Jurisdiction.code == "FED"))
+        code = f"HSX_{uuid.uuid4().hex[:8].upper()}"
+        rule = TaxRule(code=code, name=code, category="deduction",
+                       jurisdiction_id=jurisdiction.id)
+        s.add(rule)
+        await s.flush()
+        version = TaxRuleVersion(
+            tax_rule_id=rule.id, tax_year=TAX_YEAR,
+            effective_date=date(TAX_YEAR, 1, 1), status="published",
+            description="post-seal rule", eligibility_basis_codes=["BASIS_HSX"])
+        s.add(version)
+        await s.flush()
+        s.add(RuleOutcome(
+            rule_version_id=version.id, outcome_type="recommend", priority=1,
+            title_template="post-seal opportunity"))
+        await s.flush()
+
+
+@pytest.mark.asyncio
+async def test_readiness_over_the_bundle_uses_the_certified_function():
+    """§6. Baseline and counterfactual resolve against the SAME T1 held state,
+    so only a changed REQUIREMENT can move a verdict."""
+    from app.services.ioe.scenario import historical_source as hs
+    from app.services.state_graph.contracts import EvidenceReadiness
+    from app.services.state_graph.readiness import DocumentRequirement
+
+    uid, analysis_id = await _user_with_analysis()
+    await _hold(uid, "T4")
+    outcome = await _seal_v2(uid, analysis_id)
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        baseline, counterfactual = await hs.load_sealed_sides(
+            s, uid, outcome.scenario_id)
+
+    assert baseline.held_evidence == counterfactual.held_evidence
+
+    held_only = DocumentRequirement(
+        rule_version_id="r", document_type_code="T4", necessity="required")
+    absent = DocumentRequirement(
+        rule_version_id="r", document_type_code="RRSP", necessity="required")
+    from app.services.ioe.scenario.held_evidence import historical_readiness
+
+    (_, ready), = historical_readiness(baseline.held_evidence, [held_only])
+    (_, missing), = historical_readiness(
+        counterfactual.held_evidence, [absent])
+    assert ready is EvidenceReadiness.READY
+    assert missing is EvidenceReadiness.MISSING
+
+
+@pytest.mark.asyncio
+async def test_a_v1_scenario_has_no_historical_bundle_to_load():
+    """Fails closed rather than reconstructing. A v1 seal never carried the
+    counterfactual state, so there is nothing historical to read — and building
+    it from today's sources is exactly what this path exists to prevent."""
+    from app.services.ioe.domain.integrity import DependencyUnavailable
+    from app.services.ioe.scenario import historical_source as hs
+
+    uid, analysis_id = await _user_with_analysis()
+    outcome = await ScenarioService(uid)._simulate(
+        analysis_id, _spec(), result_schema_version=SCENARIO_RESULT_SCHEMA_V1)
+
+    with pytest.raises(DependencyUnavailable):
+        async with unit_of_work(user_id=uid, actor_type="user") as s:
+            await hs.load_sealed_sides(s, uid, outcome.scenario_id)
