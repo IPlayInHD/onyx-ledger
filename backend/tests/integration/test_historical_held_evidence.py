@@ -678,6 +678,12 @@ async def test_both_historical_sides_load_from_sealed_state_only():
 
     uid, analysis_id = await _user_with_analysis()
     await _hold(uid, "T4")
+    # PUBLISHED EXPLICITLY, not inherited. This test asserts the sealed
+    # candidate set is non-empty, and candidates come from the pinned rules
+    # evaluation — so without a rule of its own it was asserting on whatever
+    # other tests happened to leave in the shared database, and passed only
+    # because of that pollution.
+    await _publish_rule("source-bundle candidate source")
     outcome = await _seal_v2(uid, analysis_id)
 
     statements: list[str] = []
@@ -781,7 +787,7 @@ async def test_the_historical_sides_do_not_move_when_live_state_moves():
             IncomeSource.user_id == uid))
         row.amount = Decimal("250000")
     # C. rules move — a brand new published rule for the same year
-    await _publish_unrelated_rule()
+    await _publish_rule("post-seal rule")
 
     after_baseline, after_counterfactual = await sides()
 
@@ -789,7 +795,15 @@ async def test_the_historical_sides_do_not_move_when_live_state_moves():
     assert after_counterfactual == before_counterfactual
 
 
-async def _publish_unrelated_rule() -> None:
+async def _publish_rule(description: str) -> None:
+    """A published rule for the tax year, with an outcome so it yields a
+    candidate.
+
+    Used for two different jobs, which is why `description` is explicit: as a
+    PRECONDITION before sealing (so a sealed scenario actually has candidates to
+    assert on) and as a POST-SEAL mutation (so the no-drift proof has a real
+    rule change to ignore).
+    """
     from datetime import date
 
     from app.database.models import (
@@ -810,12 +824,12 @@ async def _publish_unrelated_rule() -> None:
         version = TaxRuleVersion(
             tax_rule_id=rule.id, tax_year=TAX_YEAR,
             effective_date=date(TAX_YEAR, 1, 1), status="published",
-            description="post-seal rule", eligibility_basis_codes=["BASIS_HSX"])
+            description=description, eligibility_basis_codes=["BASIS_HSX"])
         s.add(version)
         await s.flush()
         s.add(RuleOutcome(
             rule_version_id=version.id, outcome_type="recommend", priority=1,
-            title_template="post-seal opportunity"))
+            title_template=f"{description} opportunity"))
         await s.flush()
 
 
