@@ -38,6 +38,7 @@ from app.services.ioe.domain.scenario import (
     CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
     SCENARIO_RESULT_SCHEMA_V1,
     SCENARIO_RESULT_SCHEMA_V2,
+    SCENARIO_RESULT_SCHEMA_V3,
 )
 from app.services.ioe.replay.verification import IntegrityVerificationService
 from app.services.ioe.scenario import counterfactual
@@ -261,28 +262,39 @@ async def test_all_version_bearing_fields_agree(version):
 
 
 @pytest.mark.asyncio
-async def test_ordinary_production_creation_writes_v2_end_to_end():
+async def test_ordinary_production_creation_writes_v3_end_to_end():
     """§7 OF PHASE B — THE ACTUAL ACTIVATION ACCEPTANCE PROOF.
 
     The PUBLIC path, not the internal seam. Everything A2 proved through
     `_simulate` must now be true of the call ordinary product code makes.
+
+    The write version has moved again, to v3, and the proof is unchanged in
+    shape: the public path names the constant, and every version-bearing field
+    agrees with it. A row saying one version beside a hash computed under
+    another is the exact defect this test exists to catch.
     """
     uid, analysis_id = await _user_with_analysis()
     await _publish_rules(1)
     outcome = await ScenarioService(uid).simulate(analysis_id, _spec())
     scenario, result = await _rows(uid, outcome.scenario_id)
 
-    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2
-    assert scenario.result_schema_version == SCENARIO_RESULT_SCHEMA_V2
-    assert result.result_schema_version == SCENARIO_RESULT_SCHEMA_V2
+    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V3
+    assert scenario.result_schema_version == SCENARIO_RESULT_SCHEMA_V3
+    assert result.result_schema_version == SCENARIO_RESULT_SCHEMA_V3
     assert scenario.version_manifest["scenario_result_schema_version"] == (
-        SCENARIO_RESULT_SCHEMA_V2)
+        SCENARIO_RESULT_SCHEMA_V3)
 
     payload = result.counterfactual_derived_state
     assert payload is not None
     assert result.counterfactual_derived_state_hash
     assert payload["baseline_held_evidence"] is not None, (
-        "an ordinary v2 seal carries no held-evidence snapshot")
+        "an ordinary v3 seal carries no held-evidence snapshot")
+    # WHAT v3 ADDS. Sealed, and present as a list rather than absent — the
+    # distinction the baseline side's authority turns on.
+    assert payload["baseline_candidates"] is not None, (
+        "an ordinary v3 seal carries no BASELINE opportunity set, which is the "
+        "whole reason v3 exists")
+    assert isinstance(payload["baseline_candidates"], list)
     assert counterfactual.payload_hash(payload) == (
         result.counterfactual_derived_state_hash)
     assert (await _verify(uid, outcome.scenario_id)).status is IntegrityStatus.VERIFIED

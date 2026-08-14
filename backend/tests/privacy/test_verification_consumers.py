@@ -75,8 +75,9 @@ BLOCKERS = (
 #: `IntegrityVerificationService.verify` and every non-member is not.
 #:
 #: THIS SET IS VERSION-DEPENDENT. Below is what EVERY verification reads,
-#: whatever schema version the artifact was sealed under; `VERIFICATION_READS_V2`
-#: adds the one table a v2 scenario additionally needs. Both are traced, and
+#: whatever schema version the artifact was sealed under;
+#: `VERIFICATION_READS_WITH_DERIVED_STATE` adds the one table a scenario sealed
+#: under a derived-state-bearing contract additionally needs. Both are traced, and
 #: `test_replay_dependency_declares_consumption_not_lineage` holds the privacy
 #: classification to whichever matches the version production actually writes —
 #: so the census and the purge model cannot drift apart when that version moves.
@@ -91,9 +92,15 @@ VERIFICATION_READS_V1 = frozenset({
     "ioe.strategy_portfolio",
 })
 
-#: What a v2 scenario verification reads on top of the v1 set. Measured by
+#: What a verification reads on top of the v1 set once the sealed contract
+#: BINDS a counterfactual derived state. Measured by
 #: `test_a_v2_verification_additionally_reads_the_result_row`.
-VERIFICATION_READS_V2 = VERIFICATION_READS_V1 | {"ioe.scenario_result"}
+#:
+#: Named for the property rather than for one version: v2 and v3 both bind that
+#: state and both therefore read the row, and a set named after a single
+#: version would have gone quietly wrong the moment a third one existed.
+VERIFICATION_READS_WITH_DERIVED_STATE = (
+    VERIFICATION_READS_V1 | {"ioe.scenario_result"})
 
 
 def _verification_reads_for_production() -> frozenset[str]:
@@ -105,11 +112,11 @@ def _verification_reads_for_production() -> frozenset[str]:
     """
     from app.services.ioe.domain.scenario import (
         CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
-        SCENARIO_RESULT_SCHEMA_V2,
+        DERIVED_STATE_BEARING_VERSIONS,
     )
 
-    if CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2:
-        return frozenset(VERIFICATION_READS_V2)
+    if CURRENT_SCENARIO_RESULT_SCHEMA_VERSION in DERIVED_STATE_BEARING_VERSIONS:
+        return frozenset(VERIFICATION_READS_WITH_DERIVED_STATE)
     return frozenset(VERIFICATION_READS_V1)
 
 
@@ -333,11 +340,15 @@ def test_the_result_row_is_declared_exactly_when_production_needs_it():
     """
     from app.services.ioe.domain.scenario import (
         CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
-        SCENARIO_RESULT_SCHEMA_V2,
+        DERIVED_STATE_BEARING_VERSIONS,
     )
 
+    # THE REAL QUESTION IS "does the written contract bind a derived state",
+    # not "is the written contract v2". Asked as the latter, this gate went
+    # false the moment v3 shipped — and would have demanded that a table every
+    # v3 verification reads be declassified as a replay dependency.
     production_reads_it = (
-        CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2)
+        CURRENT_SCENARIO_RESULT_SCHEMA_VERSION in DERIVED_STATE_BEARING_VERSIONS)
     assert LIFECYCLE["ioe.scenario_result"].replay_dependency is (
         production_reads_it), (
         "ioe.scenario_result.replay_dependency does not match the version "

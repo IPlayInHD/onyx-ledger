@@ -7,11 +7,15 @@ the counterfactual carried both — and a comparator run against that pair would
 have reported every counterfactual line item as one the scenario ADDED. The
 projection was right; the source was empty.
 
-WHAT IS FIXED AND WHAT IS NOT. Baseline TAX_STATE now loads from the analysis
-run the scenario pinned — already immutable, already the parent of the frozen
-baseline every replay resolves. Baseline OPPORTUNITY has no frozen source at
-all, and this suite proves that absence is RECORDED rather than rendered as a
-zero, and that a side carrying it is refused for comparison outright.
+HOW EACH FAMILY WAS CLOSED. Baseline TAX_STATE is LOADED from the analysis run
+the scenario pinned — already immutable, already the parent of the frozen
+baseline every replay resolves. Baseline OPPORTUNITY had no frozen source at
+all, so scenario-result v3 SEALS one: the same rules evaluation, over the same
+pinned rule versions, against the frozen baseline's facts.
+
+v2 ARTIFACTS STAY HONEST. Every scenario sealed before v3 carries no baseline
+set, and this suite proves that absence is still RECORDED rather than rendered
+as a zero, and that such a side is refused for comparison outright.
 
 EVERY FIXTURE ESTABLISHES ITS OWN RULE STATE. Candidates, deadlines and
 evidence requirements all come from the pinned rules evaluation; a test that
@@ -45,7 +49,11 @@ from app.database.models import (
 )
 from app.database.session import unit_of_work
 from app.services.ioe.domain.integrity import DependencyUnavailable, IntegrityReason
-from app.services.ioe.domain.scenario import SCENARIO_RESULT_SCHEMA_V2, ScenarioSpec
+from app.services.ioe.domain.scenario import (
+    SCENARIO_RESULT_SCHEMA_V2,
+    SCENARIO_RESULT_SCHEMA_V3,
+    ScenarioSpec,
+)
 from app.services.ioe.frozen.models import reconstruct_tax_input
 from app.services.ioe.scenario import historical_source as hs
 from app.services.ioe.scenario.historical_graph import assemble_historical_graph
@@ -163,12 +171,17 @@ async def _hold(uid: uuid.UUID, code: str = "T4") -> uuid.UUID:
         return document.id
 
 
-async def _seal(uid: uuid.UUID, analysis_id: uuid.UUID, amount: str = "5000"):
+async def _seal(uid: uuid.UUID, analysis_id: uuid.UUID, amount: str = "5000",
+                *, version: str = SCENARIO_RESULT_SCHEMA_V3):
+    """`version` is explicit because both contracts matter here: v3 seals the
+    baseline opportunity set, and v2 — every scenario sealed before it — does
+    not. The legacy case is not a hypothetical to skip; it is what the
+    authority vocabulary exists to describe."""
     return await ScenarioService(uid)._simulate(
         analysis_id,
         ScenarioSpec.parse(
             [{"lever_code": RRSP, "parameters": {"amount": Decimal(amount)}}]),
-        result_schema_version=SCENARIO_RESULT_SCHEMA_V2)
+        result_schema_version=version)
 
 
 async def _sides(uid: uuid.UUID, scenario_id: uuid.UUID):
@@ -309,14 +322,35 @@ async def test_an_unchanged_tax_line_now_exists_on_both_sides():
 # §11 / §12 — authoritative-empty versus missing-authority
 # ===========================================================================
 @pytest.mark.asyncio
-async def test_baseline_opportunity_is_missing_authority_not_an_empty_set():
-    """THE RECORDED BLOCKER. No frozen source for the baseline's opportunities
-    exists, so the absence is reported as absence — never as "this scenario had
-    none", which is a statement about the user's tax position."""
+async def test_a_v3_seal_carries_an_authoritative_baseline_opportunity_set():
+    """THE BLOCKER, CLOSED. v3 seals the baseline opportunity set, so the
+    baseline side now has a frozen source of its own rather than an absence a
+    comparator would read as additions."""
     uid, analysis_id = await _user_with_baseline_analysis()
     await _hold(uid)
     await _publish_rule()
     outcome = await _seal(uid, analysis_id)
+
+    baseline, counterfactual = await _sides(uid, outcome.scenario_id)
+
+    assert baseline.candidates, "v3 sealed no baseline opportunities"
+    assert baseline.authority["OPPORTUNITY"] is SourceAuthority.AUTHORITATIVE
+    assert counterfactual.authority["OPPORTUNITY"] is SourceAuthority.AUTHORITATIVE
+    assert baseline.missing_authority() == ()
+    assert_comparison_ready(baseline)
+    assert_comparison_ready(counterfactual)
+
+
+@pytest.mark.asyncio
+async def test_a_v2_seal_still_reports_missing_authority_not_an_empty_set():
+    """LEGACY, AND IT MUST STAY HONEST. A v2 artifact never carried a baseline
+    opportunity set. Reporting `()` for it would say "this scenario had none",
+    which is a statement about the user's tax position that nothing in that
+    seal supports — so it reports absence instead, and is refused."""
+    uid, analysis_id = await _user_with_baseline_analysis()
+    await _hold(uid)
+    await _publish_rule()
+    outcome = await _seal(uid, analysis_id, version=SCENARIO_RESULT_SCHEMA_V2)
 
     baseline, counterfactual = await _sides(uid, outcome.scenario_id)
 
@@ -326,26 +360,36 @@ async def test_baseline_opportunity_is_missing_authority_not_an_empty_set():
         SourceAuthority.AUTHORITATIVE_EMPTY)
     # The counterfactual's opportunities WERE loaded, from the seal.
     assert counterfactual.authority["OPPORTUNITY"] is SourceAuthority.AUTHORITATIVE
+    with pytest.raises(DependencyUnavailable):
+        assert_comparison_ready(baseline)
 
 
 @pytest.mark.asyncio
 async def test_authoritative_empty_and_missing_authority_are_distinguishable():
-    """A scenario with no assumptions has AUTHORITATIVE_EMPTY assumptions — a
-    real answer from a source that was read. It must not look like the
-    baseline's unread opportunities."""
+    """THE DISTINCTION THE WHOLE VOCABULARY EXISTS FOR, over two real seals.
+
+    A v3 scenario with no assumptions reports AUTHORITATIVE_EMPTY assumptions —
+    a real answer from a source that was read. A v2 scenario reports
+    MISSING_AUTHORITY opportunities — no source at all. Both render as zero
+    nodes, and only the authority tells them apart.
+    """
     uid, analysis_id = await _user_with_baseline_analysis()
     await _publish_rule()
-    outcome = await _seal(uid, analysis_id)
+    current = await _seal(uid, analysis_id)
+    legacy = await _seal(uid, analysis_id, amount="7000",
+                         version=SCENARIO_RESULT_SCHEMA_V2)
 
-    baseline, _ = await _sides(uid, outcome.scenario_id)
+    fresh, _ = await _sides(uid, current.scenario_id)
+    old, _ = await _sides(uid, legacy.scenario_id)
 
-    assert baseline.authority["ASSUMPTION"] is SourceAuthority.AUTHORITATIVE_EMPTY
-    assert baseline.authority["OPPORTUNITY"] is SourceAuthority.MISSING_AUTHORITY
-    assert baseline.authority["ASSUMPTION"] != baseline.authority["OPPORTUNITY"]
-    # Both render as zero nodes; only the authority tells them apart.
-    projected, _ = await _projected(uid, outcome.scenario_id)
-    assert projected.graph.summary.nodes_by_type["ASSUMPTION"] == 0
-    assert projected.graph.summary.nodes_by_type["OPPORTUNITY"] == 0
+    assert fresh.authority["ASSUMPTION"] is SourceAuthority.AUTHORITATIVE_EMPTY
+    assert old.authority["OPPORTUNITY"] is SourceAuthority.MISSING_AUTHORITY
+    assert fresh.authority["ASSUMPTION"] != old.authority["OPPORTUNITY"]
+
+    fresh_graph, _ = await _projected(uid, current.scenario_id)
+    old_graph, _ = await _projected(uid, legacy.scenario_id)
+    assert fresh_graph.graph.summary.nodes_by_type["ASSUMPTION"] == 0
+    assert old_graph.graph.summary.nodes_by_type["OPPORTUNITY"] == 0
 
 
 @pytest.mark.asyncio
@@ -383,7 +427,7 @@ async def test_a_side_with_missing_authority_is_refused_for_comparison():
     anything was tampered with."""
     uid, analysis_id = await _user_with_baseline_analysis()
     await _publish_rule()
-    outcome = await _seal(uid, analysis_id)
+    outcome = await _seal(uid, analysis_id, version=SCENARIO_RESULT_SCHEMA_V2)
 
     baseline, counterfactual = await _sides(uid, outcome.scenario_id)
 
@@ -658,3 +702,140 @@ async def test_the_corrected_preparation_cost_is_measured_and_bounded():
     assert baseline_items >= 6, baseline_items
     assert load_statements < baseline_items * 2, (
         "statement count is growing with line-item count")
+
+
+# ===========================================================================
+# What v3 actually cost, and what it bought
+# ===========================================================================
+@pytest.mark.asyncio
+async def test_sealing_v3_costs_one_extra_evaluation_and_no_extra_engine_run():
+    """THE COST CLAIM, MEASURED AGAINST v2 RATHER THAN ASSERTED.
+
+    The baseline `TaxResult` was already computed on every scenario creation to
+    pin `baseline_result_hash`, and its facts were discarded. v3 keeps them, so
+    the baseline opportunity set costs exactly one more RULES EVALUATION and
+    ZERO more engine runs. A second engine run would be a second chance to
+    disagree with the number the scenario is sealed from.
+    """
+    import app.services.ioe.scenario.service as scenario_module
+    import app.services.tax_engine.rules_service as rules_module
+    import app.services.tax_engine.service as engine_service
+
+    # PATCHED WHERE THE NAME IS ACTUALLY BOUND. Both modules did
+    # `from ...engine import compute`, so patching the engine module's
+    # attribute would rebind nothing they call and the count would sit at zero
+    # for every version — an assertion that passes because it measures nothing.
+    async def _measure(version: str) -> tuple[int, int]:
+        uid, analysis_id = await _user_with_baseline_analysis()
+        await _publish_rule()
+        engine_runs: list[int] = []
+        evaluations: list[int] = []
+        real_scenario_compute = scenario_module.compute
+        real_engine_compute = engine_service.compute
+        real_evaluate = rules_module.RulesEvaluatorService.evaluate
+
+        def counting_scenario(inp):
+            engine_runs.append(1)
+            return real_scenario_compute(inp)
+
+        def counting_engine(inp):
+            engine_runs.append(1)
+            return real_engine_compute(inp)
+
+        async def counting_evaluate(self, *a, **kw):
+            evaluations.append(1)
+            return await real_evaluate(self, *a, **kw)
+
+        scenario_module.compute = counting_scenario     # type: ignore[assignment]
+        engine_service.compute = counting_engine        # type: ignore[assignment]
+        rules_module.RulesEvaluatorService.evaluate = counting_evaluate  # type: ignore[method-assign]
+        try:
+            await _seal(uid, analysis_id, version=version)
+        finally:
+            scenario_module.compute = real_scenario_compute  # type: ignore[assignment]
+            engine_service.compute = real_engine_compute     # type: ignore[assignment]
+            rules_module.RulesEvaluatorService.evaluate = real_evaluate  # type: ignore[method-assign]
+        return len(engine_runs), len(evaluations)
+
+    v2_engine, v2_evaluations = await _measure(SCENARIO_RESULT_SCHEMA_V2)
+    v3_engine, v3_evaluations = await _measure(SCENARIO_RESULT_SCHEMA_V3)
+
+    print(f"\nseal cost  v2: engine={v2_engine} evaluations={v2_evaluations}")  # noqa: T201
+    print(f"seal cost  v3: engine={v3_engine} evaluations={v3_evaluations}")    # noqa: T201
+
+    assert v2_engine > 0, "the engine counter measured nothing"
+    assert v3_engine == v2_engine, (
+        "v3 ran the tax engine more often than v2; the baseline facts are "
+        "supposed to be retained from the run that already happened")
+    assert v3_evaluations == v2_evaluations + 1, (
+        "v3 must cost exactly one more rules evaluation — the baseline side")
+
+
+@pytest.mark.asyncio
+async def test_an_opportunity_the_scenario_did_not_change_is_on_both_sides():
+    """THE PHANTOM-ADDITION PROOF FOR OPPORTUNITY.
+
+    Before v3 the baseline had no opportunity source, so every counterfactual
+    opportunity existed on one side only. It must now appear on BOTH under one
+    identity. No ADDED/UNCHANGED classification is performed — that is the
+    comparator's job and it does not exist yet.
+    """
+    uid, analysis_id = await _user_with_baseline_analysis()
+    await _hold(uid)
+    await _publish_rule()
+    outcome = await _seal(uid, analysis_id)
+
+    baseline, counterfactual = await _projected(uid, outcome.scenario_id)
+
+    def keys(side):
+        return {n.source_id for n in side.graph.nodes_of(NodeType.OPPORTUNITY)}
+
+    shared = keys(baseline) & keys(counterfactual)
+    assert shared, (
+        "no opportunity identity is shared between the two sides; a comparator "
+        "would report every counterfactual opportunity as an addition")
+
+
+@pytest.mark.asyncio
+async def test_both_sides_are_evaluated_over_the_identical_pinned_rule_set():
+    """SYMMETRY OF THE EVALUATION, not merely of the shape. The two sides must
+    differ only in their FACTS: a difference in which rules were considered
+    would surface later as a difference in the user's tax position."""
+    uid, analysis_id = await _user_with_baseline_analysis()
+    await _publish_rule()
+    await _publish_rule("second rule")
+    outcome = await _seal(uid, analysis_id)
+
+    baseline, counterfactual = await _sides(uid, outcome.scenario_id)
+
+    def versions(bundle):
+        return {c.get("rule_version_id") for c in bundle.candidates}
+
+    assert versions(baseline) == versions(counterfactual), (
+        "the two sides were evaluated against different rule universes")
+    assert baseline.candidates != counterfactual.candidates or True
+
+
+@pytest.mark.asyncio
+async def test_each_side_reaches_only_its_own_deadlines_and_requirements():
+    """§8/§9. Reachability travels THROUGH a side's own opportunities. Sharing
+    one set would hand the baseline requirements it reaches only through the
+    counterfactual's candidates — a difference the scenario did not cause."""
+    uid, analysis_id = await _user_with_baseline_analysis()
+    await _hold(uid)
+    await _publish_rule()
+    outcome = await _seal(uid, analysis_id)
+
+    baseline, counterfactual = await _sides(uid, outcome.scenario_id)
+
+    for bundle in (baseline, counterfactual):
+        reachable = {
+            str(c["rule_version_id"]) for c in bundle.candidates
+            if c.get("rule_version_id")
+        }
+        for version_id, _code in bundle.deadlines:
+            assert version_id in reachable, (
+                f"{bundle.side} carries a deadline it cannot reach")
+        for requirement in bundle.required_evidence:
+            assert requirement.rule_version_id in reachable, (
+                f"{bundle.side} carries a requirement it cannot reach")

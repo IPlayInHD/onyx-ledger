@@ -43,6 +43,10 @@ from typing import Any
 
 from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import confidence as support
+from app.services.ioe.domain.scenario import (
+    SCENARIO_RESULT_SCHEMA_V2,
+    SCENARIO_RESULT_SCHEMA_V3,
+)
 from app.services.ioe.normalization.service import OpportunityNormalizationService
 from app.services.ioe.scenario import held_evidence
 from app.services.ioe.scenario.held_evidence import HistoricalHeldEvidenceSnapshot
@@ -51,7 +55,43 @@ from app.services.tax_engine.contracts import OpportunityContractV2
 #: Bumped when the SEALED SHAPE changes in a way that could alter a
 #: derived-state hash for unchanged inputs. Distinct from the scenario result
 #: schema version, which governs the result hash contract.
-COUNTERFACTUAL_DERIVED_STATE_SCHEMA_VERSION = "1.0.0"
+#:
+#: v1 is FROZEN: every derived state sealed under scenario-result v2 was hashed
+#: from exactly that shape, and adding a key to it unconditionally would change
+#: the digest of artifacts nobody touched — reported as corruption long after
+#: the cause was gone. So `canonical_payload` dispatches on the state's own
+#: version, for the same reason `canonical_scenario_result` dispatches on the
+#: row's.
+DERIVED_STATE_SCHEMA_V1 = "1.0.0"
+#: v2 adds `baseline_candidates`: the sealed BASELINE opportunity set, so a
+#: comparison has an authoritative frozen source on both sides.
+DERIVED_STATE_SCHEMA_V2 = "2.0.0"
+
+#: What NEW derived states are built as.
+COUNTERFACTUAL_DERIVED_STATE_SCHEMA_VERSION = DERIVED_STATE_SCHEMA_V2
+
+SUPPORTED_DERIVED_STATE_SCHEMA_VERSIONS = frozenset({
+    DERIVED_STATE_SCHEMA_V1, DERIVED_STATE_SCHEMA_V2,
+})
+
+
+class UnsupportedDerivedStateVersion(ValueError):
+    """A sealed derived state names a shape this build cannot canonicalize."""
+
+
+#: WHICH DERIVED-STATE SHAPE EACH RESULT CONTRACT SEALS.
+#:
+#: The two version lines are separate — one governs the outer result hash, the
+#: other the payload that hash binds — but they are not INDEPENDENT: a scenario
+#: sealed as result-v2 must carry a derived state shaped as v1, because that is
+#: what every result-v2 artifact in the database already carries. Leaving the
+#: derived-state version to default instead would have made a newly created v2
+#: scenario seal a v2 payload, so "v2" would mean two different things
+#: depending on when the row was written.
+DERIVED_STATE_FOR_RESULT_VERSION: dict[str, str] = {
+    SCENARIO_RESULT_SCHEMA_V2: DERIVED_STATE_SCHEMA_V1,
+    SCENARIO_RESULT_SCHEMA_V3: DERIVED_STATE_SCHEMA_V2,
+}
 
 #: Structured absence for scenarios sealed before this capability existed.
 #: Never a backfill: evaluating today's rules against an old sealed scenario
@@ -136,6 +176,16 @@ class CounterfactualDerivedState:
     #: T1 baseline context, NOT a counterfactual output. `None` only for states
     #: built before Entry 12B1 sealed held evidence.
     baseline_held_evidence: HistoricalHeldEvidenceSnapshot | None = None
+    #: BASELINE state, and the second field here that is not counterfactual.
+    #: The same rules evaluation, over the same pinned rule versions, against
+    #: the frozen baseline's facts instead of the scenario's — so the two sides
+    #: are the same KIND of object and can be held against each other at all.
+    #:
+    #: `None` means the state predates v2 of this contract and carries no
+    #: baseline opportunity set. It is emphatically not an empty one: a
+    #: comparator handed `()` would read every counterfactual opportunity as one
+    #: the scenario created.
+    baseline_candidates: tuple[CounterfactualCandidate, ...] | None = None
     schema_version: str = COUNTERFACTUAL_DERIVED_STATE_SCHEMA_VERSION
 
 
@@ -232,6 +282,8 @@ def build_derived_state(
     opportunities: Sequence[OpportunityContractV2],
     pinned_rule_version_ids: Sequence[Any],
     baseline_held_evidence: HistoricalHeldEvidenceSnapshot | None = None,
+    baseline_opportunities: Sequence[OpportunityContractV2] | None = None,
+    schema_version: str = COUNTERFACTUAL_DERIVED_STATE_SCHEMA_VERSION,
 ) -> CounterfactualDerivedState:
     """`baseline_held_evidence` is an INPUT, never something this builder goes
     and fetches.
@@ -240,18 +292,117 @@ def build_derived_state(
     and passes it here; replay loads the SEALED one and passes that. If the
     builder queried documents itself, replay would rebuild a March scenario
     against June's library and report a mismatch caused by an upload.
+
+    `baseline_opportunities` is the same kind of input and obeys the same rule:
+    it is the result of evaluating the SAME pinned rule versions against the
+    frozen baseline's facts, performed by the caller that holds a session, and
+    normalized and scored through the identical path the counterfactual set
+    uses. Building it any other way would make the two sides different kinds of
+    object and the comparison meaningless.
+
+    `schema_version` is explicit so replay can rebuild a state under the
+    contract its row was sealed under rather than under this build's current one.
     """
+    if schema_version not in SUPPORTED_DERIVED_STATE_SCHEMA_VERSIONS:
+        raise UnsupportedDerivedStateVersion(
+            f"unsupported derived-state schema version: {schema_version!r}")
+    if schema_version == DERIVED_STATE_SCHEMA_V1 and baseline_opportunities is not None:
+        # Fail closed rather than drop it. Silently discarding would let a
+        # caller believe the baseline side was sealed when the bytes say v1.
+        raise UnsupportedDerivedStateVersion(
+            "a v1 derived state cannot carry a baseline opportunity set: v1 is "
+            "frozen historical shape and must not absorb v2 semantics")
+    if schema_version == DERIVED_STATE_SCHEMA_V2 and baseline_opportunities is None:
+        # Refused HERE rather than at canonicalization. A state built without
+        # the set is already wrong, and letting it exist until something tries
+        # to hash it moves the error a long way from the caller that caused it.
+        # An authoritatively empty baseline is `()`; `None` means "not
+        # evaluated", which v2 has no way to express.
+        raise UnsupportedDerivedStateVersion(
+            "a v2 derived state requires a baseline opportunity set: v2 exists "
+            "to seal it, so building without one would claim a source that is "
+            "not there. An authoritatively empty set is `()`, not `None`.")
+
     return CounterfactualDerivedState(
         line_items=build_line_items(line_items),
         candidates=build_candidates(opportunities),
         pinned_rule_version_ids=tuple(sorted(str(v) for v in pinned_rule_version_ids)),
         baseline_held_evidence=baseline_held_evidence,
+        baseline_candidates=(
+            build_candidates(baseline_opportunities)
+            if baseline_opportunities is not None else None
+        ),
+        schema_version=schema_version,
     )
+
+
+def _candidate_payload(candidate: CounterfactualCandidate) -> dict[str, Any]:
+    """One candidate's sealed shape.
+
+    Extracted so the baseline and counterfactual sets are rendered by the same
+    code: two renderers would be two chances to describe the same kind of object
+    differently, and a comparison would report the difference as the user's.
+    """
+    return {
+        "candidate_key": candidate.candidate_key,
+        "opportunity_code": candidate.opportunity_code,
+        "rule_version_id": candidate.rule_version_id,
+        "eligibility_status": candidate.eligibility_status,
+        "eligibility_basis_codes": (
+            list(candidate.eligibility_basis_codes)
+            if candidate.eligibility_basis_codes is not None else None
+        ),
+        "calculation_basis": candidate.calculation_basis,
+        "calculated_impact": candidate.calculated_impact,
+        "economic_effect_type": candidate.economic_effect_type,
+        "reversibility": candidate.reversibility,
+        "required_documents": [list(d) for d in candidate.required_documents],
+        "applicable_deadlines": list(candidate.applicable_deadlines),
+        "dependencies": [list(d) for d in candidate.dependencies],
+        "shared_resource_codes": list(candidate.shared_resource_codes),
+        "raw_support_score": candidate.raw_support_score,
+        "assumption_adjusted_score": candidate.assumption_adjusted_score,
+        "display_support_score": candidate.display_support_score,
+        "support_cap_applied": candidate.support_cap_applied,
+        "support_cap_reason_code": candidate.support_cap_reason_code,
+    }
 
 
 def canonical_payload(state: CounterfactualDerivedState) -> dict[str, Any]:
     """The exact payload that is hashed, exposed so a test can assert what
-    enters the hash rather than infer it from a digest."""
+    enters the hash rather than infer it from a digest.
+
+    VERSION-DISPATCHED, for the reason the module header gives: a v1 state must
+    render exactly the shape it was sealed from, with no `baseline_candidates`
+    key at all. Adding the key with a `null` value would still change the bytes,
+    and therefore the digest, of every artifact already in the database.
+    """
+    if state.schema_version not in SUPPORTED_DERIVED_STATE_SCHEMA_VERSIONS:
+        raise UnsupportedDerivedStateVersion(
+            f"unsupported derived-state schema version: "
+            f"{state.schema_version!r}")
+
+    payload = _canonical_payload_v1(state)
+    if state.schema_version == DERIVED_STATE_SCHEMA_V1:
+        if state.baseline_candidates is not None:
+            raise UnsupportedDerivedStateVersion(
+                "a v1 derived state carries a baseline opportunity set; the "
+                "shape and the version disagree")
+        return payload
+
+    if state.baseline_candidates is None:
+        raise UnsupportedDerivedStateVersion(
+            "a v2 derived state requires a baseline opportunity set: v2 exists "
+            "to seal it, and an absent one would claim a source that is not "
+            "there. An authoritatively empty set is `()`, not `None`.")
+    payload["baseline_candidates"] = [
+        _candidate_payload(x) for x in state.baseline_candidates]
+    return payload
+
+
+def _canonical_payload_v1(state: CounterfactualDerivedState) -> dict[str, Any]:
+    """THE FROZEN v1 SHAPE. Every derived state sealed under scenario-result v2
+    was hashed from exactly this, so nothing in it may be tidied."""
     return {
         "schema_version": state.schema_version,
         "pinned_rule_version_ids": list(state.pinned_rule_version_ids),
@@ -272,32 +423,11 @@ def canonical_payload(state: CounterfactualDerivedState) -> dict[str, Any]:
             }
             for i in state.line_items
         ],
-        "candidates": [
-            {
-                "candidate_key": x.candidate_key,
-                "opportunity_code": x.opportunity_code,
-                "rule_version_id": x.rule_version_id,
-                "eligibility_status": x.eligibility_status,
-                "eligibility_basis_codes": (
-                    list(x.eligibility_basis_codes)
-                    if x.eligibility_basis_codes is not None else None
-                ),
-                "calculation_basis": x.calculation_basis,
-                "calculated_impact": x.calculated_impact,
-                "economic_effect_type": x.economic_effect_type,
-                "reversibility": x.reversibility,
-                "required_documents": [list(d) for d in x.required_documents],
-                "applicable_deadlines": list(x.applicable_deadlines),
-                "dependencies": [list(d) for d in x.dependencies],
-                "shared_resource_codes": list(x.shared_resource_codes),
-                "raw_support_score": x.raw_support_score,
-                "assumption_adjusted_score": x.assumption_adjusted_score,
-                "display_support_score": x.display_support_score,
-                "support_cap_applied": x.support_cap_applied,
-                "support_cap_reason_code": x.support_cap_reason_code,
-            }
-            for x in state.candidates
-        ],
+        # Rendered by the SAME function the baseline set uses. The two lists
+        # describe the same kind of object, so two renderers would be two
+        # chances to describe them differently — and a comparison would report
+        # that difference as the user's.
+        "candidates": [_candidate_payload(x) for x in state.candidates],
     }
 
 

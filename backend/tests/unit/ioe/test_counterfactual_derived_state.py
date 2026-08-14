@@ -66,6 +66,19 @@ def _opportunity(code: str, version: uuid.UUID, **overrides) -> OpportunityContr
 # ---------------------------------------------------------------------------
 # §7 — support.compute() must be candidate-local, or parity is unreachable
 # ---------------------------------------------------------------------------
+
+def _derived(**kwargs):
+    """Every test in this file is about the COUNTERFACTUAL shape.
+
+    The baseline opportunity set that v2 of the sealed contract requires is
+    therefore authoritatively EMPTY here — `[]`, a positive statement that the
+    baseline was evaluated and nothing was eligible. It is deliberately not
+    `None`, which the builder refuses because it would mean "never evaluated".
+    """
+    kwargs.setdefault("baseline_opportunities", [])
+    return build_derived_state(**kwargs)
+
+
 def test_support_computation_takes_no_portfolio_context():
     """The §7 hard stop, asserted against the real signature.
 
@@ -144,9 +157,9 @@ def test_the_hash_is_invariant_under_evaluator_output_order():
     """SQL row order and evaluator emission order are not facts about the
     user's counterfactual state."""
     a, b = _opportunity("opp_a", V1), _opportunity("opp_b", V2)
-    forward = build_derived_state(
+    forward = _derived(
         line_items=[], opportunities=[a, b], pinned_rule_version_ids=[V1, V2])
-    reverse = build_derived_state(
+    reverse = _derived(
         line_items=[], opportunities=[b, a], pinned_rule_version_ids=[V2, V1])
     assert derived_state_hash(forward) == derived_state_hash(reverse)
 
@@ -162,10 +175,10 @@ def test_line_items_are_ordered_by_meaning_not_by_engine_emission():
 
 def test_a_changed_candidate_changes_the_hash():
     """The other half of determinism: sensitive to what it commits to."""
-    base = build_derived_state(
+    base = _derived(
         line_items=[], opportunities=[_opportunity("opp_a", V1)],
         pinned_rule_version_ids=[V1])
-    changed = build_derived_state(
+    changed = _derived(
         line_items=[],
         opportunities=[_opportunity(
             "opp_a", V1, calculated_impact=Decimal("9999.99"))],
@@ -198,7 +211,7 @@ def test_an_empty_candidate_set_is_sealed_rather_than_absent():
     """§46. A scenario that legitimately changes no eligibility must seal an
     EMPTY set, which is a positive statement. Missing evidence is a different
     condition and must not read the same."""
-    state = build_derived_state(
+    state = _derived(
         line_items=[], opportunities=[], pinned_rule_version_ids=[V1])
     assert state.candidates == ()
     assert derived_state_hash(state)
@@ -212,7 +225,7 @@ def test_shared_resources_are_sealed_as_requirements_not_allocations():
     sealed = build_candidates([_opportunity("opp_a", V1)])[0]
     assert sealed.shared_resource_codes == ("RRSP_ROOM", "TFSA_ROOM")
     fields = canonical_payload(
-        build_derived_state(line_items=[], opportunities=[_opportunity("opp_a", V1)],
+        _derived(line_items=[], opportunities=[_opportunity("opp_a", V1)],
                             pinned_rule_version_ids=[V1]))["candidates"][0]
     for ledger_field in ("capacity", "allocated", "remaining", "pool_scope"):
         assert ledger_field not in fields
@@ -231,7 +244,7 @@ def test_requirements_and_deadlines_travel_with_the_candidate():
 def test_money_is_canonical_and_never_a_bare_decimal():
     """§50. A bare Decimal is ambiguous in a canonical payload and a float is
     refused outright; both would be hash defects."""
-    state = build_derived_state(
+    state = _derived(
         line_items=[{"kind": "credit", "label": "A", "amount": Decimal("1.005")}],
         opportunities=[_opportunity("opp_a", V1)],
         pinned_rule_version_ids=[V1])
@@ -246,7 +259,7 @@ def test_a_float_amount_is_refused_rather_than_silently_scaled():
 
 
 def test_the_schema_version_enters_the_hash():
-    state = build_derived_state(
+    state = _derived(
         line_items=[], opportunities=[], pinned_rule_version_ids=[])
     assert canonical_payload(state)["schema_version"] == (
         COUNTERFACTUAL_DERIVED_STATE_SCHEMA_VERSION
@@ -256,7 +269,7 @@ def test_the_schema_version_enters_the_hash():
 def test_the_pinned_rule_set_is_sealed_with_the_state():
     """Without it, a reader cannot tell which rule universe produced the
     candidate set, and §47's "no current-rule contamination" is unprovable."""
-    state = build_derived_state(
+    state = _derived(
         line_items=[], opportunities=[], pinned_rule_version_ids=[V2, V1])
     assert state.pinned_rule_version_ids == tuple(sorted([str(V1), str(V2)]))
 

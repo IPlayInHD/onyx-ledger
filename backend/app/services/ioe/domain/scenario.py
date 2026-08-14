@@ -40,21 +40,40 @@ SCENARIO_SPEC_VERSION = "1.0.0"
 # ---------------------------------------------------------------------------
 SCENARIO_RESULT_SCHEMA_V1 = "1.0.0"
 SCENARIO_RESULT_SCHEMA_V2 = "2.0.0"
+SCENARIO_RESULT_SCHEMA_V3 = "3.0.0"
 
-#: What NEW seals are written as. v2 since Entry 12B1 Phase B: every new
-#: scenario seals its counterfactual derived state, the baseline held-evidence
-#: snapshot it was resolved against, and a result hash that binds both.
+#: What NEW seals are written as. v3 since Entry 12B: the sealed derived state
+#: now carries the BASELINE opportunity set alongside the counterfactual one, so
+#: a Before-You-Act comparison has an authoritative frozen source on both sides
+#: instead of an absent one that a comparator would read as additions.
+#:
+#: v2 IS NOT REINTERPRETED. Its outer payload shape is unchanged and every
+#: sealed v2 row still verifies under v2 — the difference lives inside the
+#: derived state, whose own schema version dispatches its canonical form.
 #:
 #: MOVING THIS CONSTANT IS A PRIVACY EVENT, not only a format change. A v2
 #: verification reads `ioe.scenario_result`, which a v1 verification never
 #: touches, so the table becomes a replay dependency the moment this line
 #: changes. `tests/privacy/test_verification_consumers.py` holds the
 #: classification to whatever this says — reclassify first, move this second.
-CURRENT_SCENARIO_RESULT_SCHEMA_VERSION = SCENARIO_RESULT_SCHEMA_V2
+#: v3 reads the same table as v2, so the consumer set does not widen again.
+CURRENT_SCENARIO_RESULT_SCHEMA_VERSION = SCENARIO_RESULT_SCHEMA_V3
 
 #: What REPLAY can interpret. Strictly a superset of the write version.
 SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS = frozenset({
     SCENARIO_RESULT_SCHEMA_V1, SCENARIO_RESULT_SCHEMA_V2,
+    SCENARIO_RESULT_SCHEMA_V3,
+})
+
+#: Which versions BIND a counterfactual derived state.
+#:
+#: Named because the question "does this version carry sealed derived state"
+#: was previously asked as `== SCENARIO_RESULT_SCHEMA_V2` in five places. The
+#: moment a third such version existed, every one of those became a silent
+#: "no" for v3 — a v3 scenario would have sealed its evidence and then had
+#: replay decline to read it. One constant, asked once per site.
+DERIVED_STATE_BEARING_VERSIONS = frozenset({
+    SCENARIO_RESULT_SCHEMA_V2, SCENARIO_RESULT_SCHEMA_V3,
 })
 
 # DELIBERATELY ABSENT: a bare `SCENARIO_RESULT_SCHEMA_VERSION`.
@@ -138,6 +157,28 @@ def _canonical_result_v2(
     return payload
 
 
+def _canonical_result_v3(
+    computed: dict, *, counterfactual_derived_state_hash: str
+) -> dict:
+    """v2's OUTER SHAPE EXACTLY, under a new version.
+
+    Nothing is added out here, and that is deliberate. What v3 adds — the sealed
+    BASELINE opportunity set — lives inside the counterfactual derived state,
+    which already has its own domain-separated hash that this payload binds. So
+    the only outer differences are the version string and the digest that
+    version's derived-state contract produces.
+
+    Written as its own function rather than as `_canonical_result_v2` with a
+    parameter: v2 is now frozen historical protocol, and a shared body is one
+    edit away from silently rewriting the contract every sealed v2 row was
+    hashed under. That is exactly the defect the version dispatch exists for.
+    """
+    payload = _canonical_result_v1(computed)
+    payload["result_schema_version"] = SCENARIO_RESULT_SCHEMA_V3
+    payload["counterfactual_derived_state_hash"] = counterfactual_derived_state_hash
+    return payload
+
+
 def canonical_scenario_result(
     computed: dict,
     *,
@@ -175,6 +216,18 @@ def canonical_scenario_result(
                 "would claim a binding that is not there"
             )
         return _canonical_result_v2(
+            computed,
+            counterfactual_derived_state_hash=counterfactual_derived_state_hash,
+        )
+
+    if result_schema_version == SCENARIO_RESULT_SCHEMA_V3:
+        if not counterfactual_derived_state_hash:
+            raise UnsupportedResultSchemaVersion(
+                "a v3 scenario result requires a counterfactual derived-state "
+                "hash: v3 exists to bind BOTH sides' sealed opportunity sets, "
+                "so sealing without it would claim a binding that is not there"
+            )
+        return _canonical_result_v3(
             computed,
             counterfactual_derived_state_hash=counterfactual_derived_state_hash,
         )
@@ -480,10 +533,12 @@ def _refuse_executable_shapes(payload: dict, where: str) -> None:
 
 __all__ = [
     "CURRENT_SCENARIO_RESULT_SCHEMA_VERSION",
+    "DERIVED_STATE_BEARING_VERSIONS",
     "MAX_ASSUMPTIONS_PER_SCENARIO",
     "MAX_LEVERS_PER_SCENARIO",
     "SCENARIO_RESULT_SCHEMA_V1",
     "SCENARIO_RESULT_SCHEMA_V2",
+    "SCENARIO_RESULT_SCHEMA_V3",
     "SCENARIO_SPEC_VERSION",
     "SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS",
     "AssumptionRequest",

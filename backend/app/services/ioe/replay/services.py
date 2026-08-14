@@ -40,7 +40,7 @@ from app.services.ioe.domain.integrity import (
     IntegrityReason,
     SealedEvidenceIncomplete,
 )
-from app.services.ioe.domain.scenario import SCENARIO_RESULT_SCHEMA_V2
+from app.services.ioe.domain.scenario import DERIVED_STATE_BEARING_VERSIONS
 from app.services.ioe.frozen import FrozenScenarioInputService, FrozenSnapshotError
 from app.services.ioe.frozen.models import (
     PINNED_SCENARIO_BASELINE_HASH_MISMATCH,
@@ -503,7 +503,8 @@ class ScenarioReplayService:
                 await session.scalar(
                     select(ScenarioResult).where(
                         ScenarioResult.scenario_id == scenario_id))
-                if sealed_schema_version == SCENARIO_RESULT_SCHEMA_V2 else None
+                if sealed_schema_version in DERIVED_STATE_BEARING_VERSIONS
+                else None
             )
 
         pinned = PinnedScenarioSpec(
@@ -526,7 +527,7 @@ class ScenarioReplayService:
         computed = service._compute(pinned)
 
         derived_hash: str | None = None
-        if sealed_schema_version == SCENARIO_RESULT_SCHEMA_V2:
+        if sealed_schema_version in DERIVED_STATE_BEARING_VERSIONS:
             derived_hash = await self._verify_counterfactual_state(
                 service, pinned, computed, sealed_result)
 
@@ -602,10 +603,21 @@ class ScenarioReplayService:
         sealed_evidence = held_evidence.from_payload(
             stored_payload.get("baseline_held_evidence") or {})
 
+        # THE SEALED DERIVED-STATE VERSION, NOT THIS BUILD'S CURRENT ONE. The
+        # same rule the outer result hash already follows: an artifact was
+        # hashed under the contract it names, so a rebuild under a newer one
+        # would report every older artifact as irreconcilable the moment the
+        # contract moved. Read from the payload itself, which is the only place
+        # that records what this row was actually sealed as.
+        sealed_derived_version = str(
+            stored_payload.get("schema_version")
+            or counterfactual.DERIVED_STATE_SCHEMA_V1)
+
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             rebuilt = await service.build_counterfactual_derived_state(
                 session, pinned, computed,
-                baseline_held_evidence=sealed_evidence)
+                baseline_held_evidence=sealed_evidence,
+                derived_state_schema_version=sealed_derived_version)
         rebuilt_hash = counterfactual.derived_state_hash(rebuilt)
 
         if rebuilt_hash != stored_hash:

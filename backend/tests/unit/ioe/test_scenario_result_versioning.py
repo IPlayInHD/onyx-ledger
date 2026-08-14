@@ -22,6 +22,7 @@ from app.services.ioe.domain.scenario import (
     CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
     SCENARIO_RESULT_SCHEMA_V1,
     SCENARIO_RESULT_SCHEMA_V2,
+    SCENARIO_RESULT_SCHEMA_V3,
     SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS,
     UnsupportedResultSchemaVersion,
     canonical_scenario_result,
@@ -69,14 +70,17 @@ def test_the_schema_version_has_no_default_and_cannot_be_omitted():
 def test_write_version_and_supported_versions_are_separate_concepts():
     """Replay must not infer what it can interpret from what it writes.
 
-    The point survives activation: the write version moved to v2 and the
-    SUPPORTED set did not shrink, because every v1 artifact ever sealed must
-    still be interpretable.
+    The point survives every activation: the write version has moved twice, to
+    v2 and then to v3, and the SUPPORTED set has only ever grown — every
+    artifact ever sealed must still be interpretable under the contract it
+    named.
     """
-    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2
+    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V3
     assert SCENARIO_RESULT_SCHEMA_V1 in SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS
+    assert SCENARIO_RESULT_SCHEMA_V2 in SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS
     assert SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS == {
-        SCENARIO_RESULT_SCHEMA_V1, SCENARIO_RESULT_SCHEMA_V2}
+        SCENARIO_RESULT_SCHEMA_V1, SCENARIO_RESULT_SCHEMA_V2,
+        SCENARIO_RESULT_SCHEMA_V3}
     assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION in (
         SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS)
 
@@ -186,20 +190,22 @@ def test_an_unsupported_version_fails_closed(version):
             _computed(), result_schema_version=version)
 
 
-def test_production_writes_v2_through_the_single_authority():
+def test_production_writes_v3_through_the_single_authority():
     """§13. ACTIVATED.
 
     The public entry point still chooses the one write authority — that never
     changed and is what made activation a single-line move. What changed is
     what the authority says.
     """
-    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == "2.0.0"
+    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == "3.0.0"
     source = inspect.getsource(ScenarioService.simulate)
     assert "result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION" in source
     # still no second authority: the public path names the constant, never a
     # version literal of its own
     assert "SCENARIO_RESULT_SCHEMA_V2" not in source
+    assert "SCENARIO_RESULT_SCHEMA_V3" not in source
     assert "2.0.0" not in source
+    assert "3.0.0" not in source
 
 
 def test_the_public_entry_point_has_no_schema_version_parameter():
@@ -219,7 +225,7 @@ def test_the_seam_refuses_an_unsupported_version_before_anything_is_created():
     point where a header row exists."""
     import asyncio
 
-    for version in ("0.9.0", "3.0.0", "latest", ""):
+    for version in ("0.9.0", "4.0.0", "latest", ""):
         with pytest.raises(UnsupportedResultSchemaVersion):
             asyncio.run(ScenarioService(user_id=None)._simulate(
                 None, None, result_schema_version=version))  # type: ignore[arg-type]

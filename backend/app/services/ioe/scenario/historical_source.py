@@ -27,10 +27,10 @@ already does: `scenario.base_analysis_id` pins exactly one run, its results are
 immutable once completed, and the run is the parent of the frozen baseline every
 replay resolves. Two different authoritative sources, neither recomputed.
 
-BASELINE OPPORTUNITY HAS NO SUCH SOURCE — A RECORDED BLOCKER
+BASELINE OPPORTUNITY IS SEALED SINCE v3, AND WAS NOT BORROWED
 -------------------------------------------------------------
-There is no frozen historical source for the baseline's OPPORTUNITY set, and
-this module does not invent one. Measured, not assumed:
+Two existing surfaces looked like sources and neither was one. Measured, not
+assumed:
 
   `reco.recommendation` is written per analysis by `AnalysisService.run`, but it
   is classified LIVE_USER_DATA_DELETE / LIVE_PRODUCT_STATE — live user-facing
@@ -47,10 +47,18 @@ this module does not invent one. Measured, not assumed:
   is the exact drift this module exists to prevent. A run may also not exist
   for the analysis at all.
 
-So the baseline reports `OPPORTUNITY = MISSING_AUTHORITY` and says so in a
-value. It does NOT report zero opportunities: a comparator handed a zero would
-read every counterfactual opportunity as one the scenario created.
+So scenario-result v3 SEALS the baseline set instead: the same rules
+evaluation, over the same pinned rule versions, against the frozen baseline's
+facts. A v2 artifact carries no such key and reports
+`OPPORTUNITY = MISSING_AUTHORITY` — never zero, because a comparator handed a
+zero would read every counterfactual opportunity as one the scenario created.
 `assert_comparison_ready` refuses such a side outright.
+
+REACHABILITY IS PER SIDE. Deadlines and required documents are reached THROUGH
+a side's own opportunities, so each side carries only what its own candidates
+pin. Sharing one set would hand the baseline requirements it reaches only
+through the counterfactual's candidates — a difference the scenario did not
+cause, presented as one it did.
 
 SEPARATE FROM REPLAY. Integrity verification MAY execute pinned authorities —
 that is how it proves a hash still reconciles. This path may not. The two have
@@ -83,7 +91,7 @@ from app.services.ioe.domain.integrity import (
     DependencyUnavailable,
     IntegrityReason,
 )
-from app.services.ioe.domain.scenario import SCENARIO_RESULT_SCHEMA_V2
+from app.services.ioe.domain.scenario import DERIVED_STATE_BEARING_VERSIONS
 from app.services.ioe.scenario import held_evidence
 from app.services.ioe.scenario.held_evidence import (
     HistoricalHeldEvidenceSnapshot,
@@ -234,7 +242,7 @@ async def load_sealed_sides(
     scenario = await session.get(Scenario, scenario_id)
     if scenario is None or scenario.user_id != user_id:
         raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
-    if scenario.result_schema_version != SCENARIO_RESULT_SCHEMA_V2:
+    if scenario.result_schema_version not in DERIVED_STATE_BEARING_VERSIONS:
         # Not a defect and not a fallback: a v1 seal never carried the
         # counterfactual state, so there is nothing historical to read.
         raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
@@ -280,8 +288,25 @@ async def load_sealed_sides(
     candidates = tuple(derived.get("candidates") or ())
     snapshot = held_evidence.from_payload(
         derived.get("baseline_held_evidence") or {})
-    deadlines = await _pinned_deadlines(session, candidates)
+
+    # THE BASELINE OPPORTUNITY SET, sealed since Entry 12B. `None` — the key
+    # absent — means the artifact predates that contract and genuinely has no
+    # baseline source; `[]` means it was evaluated and nothing was eligible.
+    # The two must not collapse: the first is MISSING_AUTHORITY, the second is
+    # a real answer a comparison may act on.
+    raw_baseline = derived.get("baseline_candidates")
+    baseline_loaded = raw_baseline is not None
+    baseline_candidates = tuple(raw_baseline or ())
+
+    # Reachability is PER SIDE, through that side's own opportunities. Sharing
+    # one set would give the baseline deadlines and requirements it reaches
+    # only through the counterfactual's candidates — a difference the scenario
+    # did not cause, presented as one it did.
+    deadlines = await _pinned_deadlines(session, candidates + baseline_candidates)
+    counterfactual_deadlines = _deadlines_for(deadlines, candidates)
+    baseline_deadlines = _deadlines_for(deadlines, baseline_candidates)
     required = _required_evidence(candidates)
+    baseline_required = _required_evidence(baseline_candidates)
 
     # The BASELINE tax state, from the analysis the scenario pinned. Loaded
     # rather than sealed a second time because it is already both: pinned by
@@ -305,6 +330,8 @@ async def load_sealed_sides(
         applied_changes: tuple[dict[str, Any], ...],
         line_items: tuple[dict[str, Any], ...],
         side_candidates: tuple[dict[str, Any], ...],
+        side_deadlines: tuple[tuple[str, str], ...],
+        side_required: tuple[DocumentRequirement, ...],
         *,
         tax_state_loaded: bool,
         opportunity_loaded: bool,
@@ -327,8 +354,8 @@ async def load_sealed_sides(
             applied_changes=applied_changes,
             line_items=line_items,
             candidates=side_candidates,
-            deadlines=deadlines,
-            required_evidence=required,
+            deadlines=side_deadlines,
+            required_evidence=side_required,
             held_evidence=snapshot,
             assumptions=assumptions,
             scenario_metadata=metadata,
@@ -344,9 +371,9 @@ async def load_sealed_sides(
                 # opportunities were never loaded has no authoritative
                 # reachability either, whatever rows happen to be in hand.
                 "DEADLINE": _authority(
-                    opportunity_loaded, present=bool(deadlines)),
+                    opportunity_loaded, present=bool(side_deadlines)),
                 "EVIDENCE_REQUIRED": _authority(
-                    opportunity_loaded, present=bool(required)),
+                    opportunity_loaded, present=bool(side_required)),
                 # Held evidence is the SAME sealed T1 snapshot on both sides —
                 # a scenario changes what evidence is required, never what the
                 # user possesses.
@@ -363,13 +390,15 @@ async def load_sealed_sides(
     # exists — see this module's docstring. `opportunity_loaded=False` is the
     # whole point: it makes the absence a recorded fact rather than a zero.
     baseline = _side(
-        SIDE_BASELINE, (), baseline_line_items, (),
+        SIDE_BASELINE, (), baseline_line_items, baseline_candidates,
+        baseline_deadlines, baseline_required,
         tax_state_loaded=baseline_tax_state_loaded,
-        opportunity_loaded=False,
+        opportunity_loaded=baseline_loaded,
     )
     counterfactual = _side(
         SIDE_COUNTERFACTUAL, changes,
         tuple(derived.get("line_items") or ()), candidates,
+        counterfactual_deadlines, required,
         tax_state_loaded=True,
         opportunity_loaded=True,
     )
@@ -450,6 +479,29 @@ async def _pinned_deadlines(
     )
     return tuple(sorted(
         (str(version_id), code) for version_id, code in rows.all()))
+
+
+def _deadlines_for(
+    deadlines: tuple[tuple[str, str], ...],
+    candidates: tuple[dict[str, Any], ...],
+) -> tuple[tuple[str, str], ...]:
+    """The subset of loaded deadlines ONE side's candidates actually reach.
+
+    Both sides' rule versions are read in a single query — the pins overlap
+    heavily and two queries would be two round trips for one answer — and the
+    result is then partitioned here. A deadline a side cannot reach through its
+    own opportunities is not that side's deadline, and carrying it would be
+    exactly the disconnected reachability that makes a comparison report a
+    difference nothing caused.
+    """
+    reachable = {
+        str(candidate["rule_version_id"])
+        for candidate in candidates if candidate.get("rule_version_id")
+    }
+    return tuple(
+        (version_id, code) for version_id, code in deadlines
+        if version_id in reachable
+    )
 
 
 def _required_evidence(

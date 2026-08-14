@@ -50,7 +50,7 @@ from app.services.ioe.domain.integrity import (
     DependencyUnavailable,
     IntegrityReason,
 )
-from app.services.ioe.domain.scenario import SCENARIO_RESULT_SCHEMA_V2
+from app.services.ioe.domain.scenario import DERIVED_STATE_BEARING_VERSIONS
 from app.services.ioe.frozen.models import (
     FrozenSnapshotError,
     reconstruct_tax_input,
@@ -341,7 +341,7 @@ class ReplayDependencyResolver:
             # mismatch against real sealed evidence.
             pinned_rule_version_ids=(
                 await self.scenario_pinned_rule_versions(scenario.id)
-                if scenario.result_schema_version == SCENARIO_RESULT_SCHEMA_V2
+                if scenario.result_schema_version in DERIVED_STATE_BEARING_VERSIONS
                 else []),
             version_manifest=manifest,
             objective_code=str(scenario.objective_code or ""),

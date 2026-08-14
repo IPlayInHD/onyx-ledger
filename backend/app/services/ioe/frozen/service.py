@@ -117,6 +117,13 @@ class FrozenAnalysisInputService:
         #     the one authority allowed to calculate tax
         baseline = TaxEngineService(self.s).run(tax_input)
         baseline_tax = baseline.total_payable.quantize(MONEY, ROUND_HALF_UP)
+        # RETAINED, NOT RECOMPUTED. The one permitted engine run just produced
+        # these; discarding them left the baseline opportunity set with no way
+        # to be evaluated except a second run that could disagree with the
+        # number this scenario is about to be sealed from. `facts_for` is the
+        # same pure mapping the counterfactual side uses, so the two sets are
+        # evaluated from facts derived identically.
+        baseline_facts = TaxEngineService.facts_for(tax_input, baseline)
         result_hash = baseline_result_pin(baseline_tax)
         if (
             expected_baseline_result_hash is not None
@@ -136,6 +143,7 @@ class FrozenAnalysisInputService:
             tax_input=tax_input,
             baseline_result_hash=result_hash,
             baseline_tax=baseline_tax,
+            baseline_facts=baseline_facts,
         )
 
 

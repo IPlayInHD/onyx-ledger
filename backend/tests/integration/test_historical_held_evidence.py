@@ -504,7 +504,12 @@ async def test_a_semantic_change_to_held_evidence_moves_both_hashes():
     from app.services.ioe.scenario import counterfactual
     from app.services.ioe.scenario.held_evidence import build_snapshot
 
-    base = dict(line_items=[], opportunities=[], pinned_rule_version_ids=[])
+    # `baseline_opportunities=[]` is the AUTHORITATIVELY EMPTY baseline set the
+    # current derived-state contract requires. This test is about held
+    # evidence, so both sides carry the same empty set and only the evidence
+    # differs — which is what makes the hash difference attributable.
+    base = dict(line_items=[], opportunities=[], pinned_rule_version_ids=[],
+                baseline_opportunities=[])
     one = counterfactual.build_derived_state(
         **base, baseline_held_evidence=build_snapshot(["T4"]))
     two = counterfactual.build_derived_state(

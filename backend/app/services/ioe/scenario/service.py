@@ -70,7 +70,7 @@ from app.services.ioe.domain.freshness import (
 )
 from app.services.ioe.domain.scenario import (
     CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
-    SCENARIO_RESULT_SCHEMA_V2,
+    DERIVED_STATE_BEARING_VERSIONS,
     SCENARIO_SPEC_VERSION,
     SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS,
     FreshnessStatus,
@@ -722,7 +722,7 @@ class ScenarioService:
 
             derived_payload: dict | None = None
             derived_hash: str | None = None
-            if result_schema_version == SCENARIO_RESULT_SCHEMA_V2:
+            if result_schema_version in DERIVED_STATE_BEARING_VERSIONS:
                 # T1, captured inside TX-2 and therefore inside the same
                 # transaction as the seal. Capturing after the commit would
                 # describe a library that had already moved on; capturing in a
@@ -738,7 +738,15 @@ class ScenarioService:
                     counterfactual.canonical_payload_and_hash(
                         await self.build_counterfactual_derived_state(
                             session, pinned, computed,
-                            baseline_held_evidence=baseline_held_evidence)
+                            baseline_held_evidence=baseline_held_evidence,
+                            # BOUND to the result contract being sealed, never
+                            # defaulted: a result-v2 row must carry the derived
+                            # shape every result-v2 row already carries, or
+                            # "v2" would mean two things depending on the date.
+                            derived_state_schema_version=(
+                                counterfactual.DERIVED_STATE_FOR_RESULT_VERSION[
+                                    result_schema_version]),
+                        )
                     )
                 )
 
@@ -877,6 +885,8 @@ class ScenarioService:
         computed: dict,
         *,
         baseline_held_evidence: HistoricalHeldEvidenceSnapshot,
+        derived_state_schema_version: str = (
+            counterfactual.COUNTERFACTUAL_DERIVED_STATE_SCHEMA_VERSION),
     ) -> CounterfactualDerivedState:
         """Derive the counterfactual state from an ALREADY-COMPUTED scenario.
 
@@ -926,16 +936,44 @@ class ScenarioService:
                 )
 
         pinned_rule_version_ids = list(pinned.pinned_rule_version_ids)
-        opportunities = await RulesEvaluatorService(session).evaluate(
+        evaluator = RulesEvaluatorService(session)
+        opportunities = await evaluator.evaluate(
             pinned.tax_year,
             computed["facts"],
             pinned_rule_version_ids=pinned_rule_version_ids,
         )
+        # THE SAME CALL, THE SAME PINNED SET, THE OTHER SIDE'S FACTS.
+        #
+        # Entry 12B: without this the baseline had no frozen opportunity source
+        # at all, and a comparator would have read every counterfactual
+        # opportunity as one the scenario created. Nothing new is computed —
+        # `baseline_facts` were produced by the single engine run that already
+        # pinned this scenario's baseline result and were previously discarded.
+        #
+        # Deliberately the identical evaluator instance, tax year and pinned
+        # list: the two sides must differ ONLY in their facts, or a difference
+        # in how they were evaluated would be reported as a difference in the
+        # user's tax position.
+        #
+        # SKIPPED ENTIRELY for a v1 derived state. Replay rebuilds under the
+        # contract the row was SEALED with, and a v1 artifact never carried a
+        # baseline set — evaluating one would change the rebuilt payload and
+        # report every sealed v1 artifact as irreconcilable.
+        baseline_opportunities = None
+        if (derived_state_schema_version
+                != counterfactual.DERIVED_STATE_SCHEMA_V1):
+            baseline_opportunities = await evaluator.evaluate(
+                pinned.tax_year,
+                dict(pinned.frozen.baseline_facts),
+                pinned_rule_version_ids=pinned_rule_version_ids,
+            )
         return counterfactual.build_derived_state(
             line_items=computed["line_items"],
             opportunities=opportunities,
             pinned_rule_version_ids=pinned_rule_version_ids,
             baseline_held_evidence=baseline_held_evidence,
+            baseline_opportunities=baseline_opportunities,
+            schema_version=derived_state_schema_version,
         )
 
     # ---------------------------------------------------------------- TX-3 ---

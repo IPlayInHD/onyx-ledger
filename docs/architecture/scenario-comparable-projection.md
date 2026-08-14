@@ -182,13 +182,33 @@ recomputed. Measured on a real sealed v2 scenario:
 | `OPPORTUNITY` | 0 | 0 — `MISSING_AUTHORITY` | 1 |
 | `RESOURCE` | inapplicable | inapplicable | inapplicable |
 
-**The other half is a recorded blocker.** No frozen historical source for the
-baseline's `OPPORTUNITY` set exists: `reco.recommendation` is
+**The other half needed a new sealed field.** No frozen historical source for
+the baseline's `OPPORTUNITY` set existed: `reco.recommendation` is
 `LIVE_USER_DATA_DELETE` live product state with a user-mutable `status`, and
 `ioe.optimization_candidate` hangs off an `ioe.optimization_run` that a scenario
-never pins. So the baseline reports `MISSING_AUTHORITY` — never a zero — and
+never pins. So **scenario-result v3** seals one — the same rules evaluation,
+over the same pinned rule versions, against the frozen baseline's facts:
+
+| family | baseline before | baseline after | counterfactual |
+|---|---|---|---|
+| `OPPORTUNITY` | 0 — `MISSING_AUTHORITY` | **N** — `AUTHORITATIVE` | N |
+
+The facts were already computed: resolving a frozen input runs the engine once
+to pin `baseline_result_hash`, and that run's fact map was previously discarded.
+v3 retains it, so the baseline set costs **one extra rules evaluation and zero
+extra engine runs** — measured at 2 engine runs and 1 → 2 evaluations.
+
+**v2 artifacts stay honest.** Every scenario sealed before v3 carries no
+baseline set and still reports `MISSING_AUTHORITY` — never a zero — and
 `assert_comparison_ready` refuses such a side outright, through the existing
-`SEALED_EVIDENCE_INCOMPLETE` taxonomy rather than as a mismatch.
+`SEALED_EVIDENCE_INCOMPLETE` taxonomy rather than as a mismatch. The two version
+lines are dispatched separately: the outer result hash by
+`canonical_scenario_result`, the payload it binds by `canonical_payload`, so a
+v2 row is rebuilt under the v1 derived shape it was sealed from and still
+verifies.
+
+Reachability is **per side**: deadlines and required documents travel through a
+side's own opportunities, so neither side carries what only the other can reach.
 
 `SourceAuthority` is what keeps the two cases apart:
 

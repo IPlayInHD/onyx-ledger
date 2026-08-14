@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -206,6 +207,19 @@ class FrozenAnalysisInput:
     tax_input: TaxInput
     baseline_result_hash: str
     baseline_tax: Decimal
+    #: The fact map of the BASELINE engine run — the one this object's
+    #: `baseline_result_hash` already pins. Retained rather than recomputed:
+    #: resolving a frozen input runs the engine over it exactly once, and that
+    #: run's facts were previously discarded, so a caller needing them had no
+    #: option but a second run that could disagree with the number the scenario
+    #: was sealed from. Entry 12B keeps them so the baseline opportunity set can
+    #: be evaluated from the same authority the counterfactual's is.
+    #:
+    #: Excluded from every hash: `baseline_result_hash` pins the baseline TOTAL
+    #: and is computed before this field exists, so carrying it changes no
+    #: sealed identity.
+    baseline_facts: Mapping[str, Any] = dataclasses.field(
+        default_factory=dict)
     rule_snapshot_id: uuid.UUID | None = None
     pinned_rule_version_ids: tuple[uuid.UUID, ...] = ()
     version_manifest: dict[str, Any] | None = None
@@ -393,6 +407,12 @@ class FrozenScenarioExecutionInput:
     @property
     def baseline_result_hash(self) -> str:
         return self.frozen_analysis_input.baseline_result_hash
+
+    @property
+    def baseline_facts(self) -> Mapping[str, Any]:
+        """The fact map of the pinned baseline run, for evaluating the BASELINE
+        opportunity set against the scenario's own pinned rule versions."""
+        return self.frozen_analysis_input.baseline_facts
 
     @property
     def snapshot_hash(self) -> str:

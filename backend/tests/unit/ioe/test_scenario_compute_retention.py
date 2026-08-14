@@ -205,10 +205,21 @@ class _SessionThatMustNotBeUsed:
 _EMPTY_EVIDENCE = build_snapshot(())
 
 
+class _FrozenBaseline:
+    """The pinned baseline, carrying the facts its own engine run produced.
+
+    Empty here: these tests are about the pin set travelling through, and an
+    empty fact map exercises the same path a populated one does.
+    """
+
+    baseline_facts: dict = {}
+
+
 class _Pinned:
     def __init__(self, ids):
         self.tax_year = 2025
         self.pinned_rule_version_ids = ids
+        self.frozen = _FrozenBaseline()
 
 
 @pytest.mark.asyncio
@@ -271,12 +282,12 @@ def test_a_v1_seal_never_builds_or_writes_counterfactual_state():
     mentioned nothing counterfactual at all. Phase A2 wires the builder in, so
     that assertion is obsolete — but the property it protected is not, and is
     asserted more precisely here: every counterfactual write in `_persist` must
-    sit behind a v2 guard.
+    sit behind a guard on the versions that BIND a derived state.
 
-    A v1 seal binds nothing to the derived state, so building one would cost a
-    rules evaluation per scenario to produce something no hash covers and no
-    column stores — and writing one would put evidence beside a hash that does
-    not commit to it.
+    A v1 seal binds nothing to the derived state, so building one would cost
+    two rules evaluations per scenario to produce something no hash covers and
+    no column stores — and writing one would put evidence beside a hash that
+    does not commit to it.
     """
     source = pathlib.Path(inspect.getfile(ScenarioService)).read_text()
     persist = next(
@@ -286,7 +297,7 @@ def test_a_v1_seal_never_builds_or_writes_counterfactual_state():
 
     guarded: list[ast.AST] = []
     for node in ast.walk(persist):
-        if isinstance(node, ast.If) and "SCENARIO_RESULT_SCHEMA_V2" in (
+        if isinstance(node, ast.If) and "DERIVED_STATE_BEARING_VERSIONS" in (
                 ast.unparse(node.test)):
             guarded.extend(ast.walk(node))
     guarded_ids = {id(n) for n in guarded}
@@ -302,6 +313,10 @@ def test_a_v1_seal_never_builds_or_writes_counterfactual_state():
         "these counterfactual derivations run for every scenario, including "
         "v1 seals that bind nothing to them:\n  " + "\n  ".join(unguarded))
 
-    # the column values must likewise be conditional, never a bare build
-    assert "SCENARIO_RESULT_SCHEMA_V2" in ast.unparse(persist), (
-        "_persist writes counterfactual columns without distinguishing v2")
+    # the column values must likewise be conditional, never a bare build.
+    # Asserted on the NAMED SET rather than on one version literal: the moment a
+    # third derived-state-bearing version existed, a `== V2` guard here would
+    # have gone quietly false for it.
+    assert "DERIVED_STATE_BEARING_VERSIONS" in ast.unparse(persist), (
+        "_persist writes counterfactual columns without distinguishing the "
+        "versions that bind a derived state")
