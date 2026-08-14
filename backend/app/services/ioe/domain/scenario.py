@@ -41,9 +41,16 @@ SCENARIO_SPEC_VERSION = "1.0.0"
 SCENARIO_RESULT_SCHEMA_V1 = "1.0.0"
 SCENARIO_RESULT_SCHEMA_V2 = "2.0.0"
 
-#: What NEW seals are written as. Still v1: Entry 12B1 defines v2 but does not
-#: activate it, and nothing writes counterfactual derived state yet.
-CURRENT_SCENARIO_RESULT_SCHEMA_VERSION = SCENARIO_RESULT_SCHEMA_V1
+#: What NEW seals are written as. v2 since Entry 12B1 Phase B: every new
+#: scenario seals its counterfactual derived state, the baseline held-evidence
+#: snapshot it was resolved against, and a result hash that binds both.
+#:
+#: MOVING THIS CONSTANT IS A PRIVACY EVENT, not only a format change. A v2
+#: verification reads `ioe.scenario_result`, which a v1 verification never
+#: touches, so the table becomes a replay dependency the moment this line
+#: changes. `tests/privacy/test_verification_consumers.py` holds the
+#: classification to whatever this says — reclassify first, move this second.
+CURRENT_SCENARIO_RESULT_SCHEMA_VERSION = SCENARIO_RESULT_SCHEMA_V2
 
 #: What REPLAY can interpret. Strictly a superset of the write version.
 SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS = frozenset({

@@ -289,14 +289,28 @@ async def test_terminal_removal_completes_the_lifecycle_and_keeps_the_evidence()
         c.close()
 
     # And the sealed evidence still verifies with the person gone.
+    # ENTRY 12B1 PHASE B. Optimization and portfolio still verify — their
+    # verification-required tables survive. A v2 SCENARIO does not, and that is
+    # the deliberate cost of Decision B: `ioe.scenario_result` carries the
+    # counterfactual derived state a v2 seal binds, and it is purged rather than
+    # retained, because keeping derived tax results so a deleted account stays
+    # replayable would put replay above the deletion the user asked for.
+    #
+    # The requirement is therefore UNAVAILABLE, never MISMATCH — an authorized
+    # purge must not be reportable as tampering.
     service = IntegrityVerificationService(uid)
     for kind, entity_id in ((EntityType.OPTIMIZATION, run_id),
-                            (EntityType.PORTFOLIO, portfolio_id),
-                            (EntityType.SCENARIO, scenario_id)):
+                      (EntityType.PORTFOLIO, portfolio_id)):
         result = await service.verify(kind, entity_id)
         assert str(result.status) == "verified", (
-            f"{kind} stopped verifying after terminal removal: "
-            f"{result.status}/{result.reason_code}")
+            f"{kind} stopped verifying: {result.status}/{result.reason_code}")
+
+    scenario_result = await service.verify(EntityType.SCENARIO, scenario_id)
+    assert str(scenario_result.status) == "unavailable", (
+        f"a purged v2 scenario reported {scenario_result.status}/"
+        f"{scenario_result.reason_code}; it must fail closed as unavailable")
+    assert str(scenario_result.reason_code) == "SEALED_EVIDENCE_INCOMPLETE"
+    assert str(scenario_result.status) != "mismatch"
 
 
 async def test_removing_one_account_leaves_another_untouched():

@@ -48,7 +48,13 @@ from tests.privacy.account_delete_registry import (
 
 # The 11B6H authority for what integrity verification reads. Imported, never
 # duplicated: a second copy is a second thing to forget to update.
-from tests.privacy.test_verification_consumers import VERIFICATION_READS, _sealed_chain
+from tests.privacy.test_verification_consumers import (
+    VERIFICATION_READS,
+    _sealed_chain,
+)
+from tests.privacy.test_verification_consumers import (
+    _verification_reads_for_production as VERIFICATION_READS_FOR_PRODUCTION,
+)
 
 PHASE = "HISTORICAL_DETAIL_CLEANUP"
 EARLIER_PHASES = ("SOURCE_DATA", "DOCUMENTS", "SCENARIO_RETENTION")
@@ -265,14 +271,35 @@ def test_expected_and_implemented_purge_sets_agree():
 
 
 def test_the_purge_set_and_the_verification_set_are_disjoint():
-    """The invariant the whole phase is built around.
+    """The invariant the whole phase is built around, NARROWED — not relaxed.
 
-    `VERIFICATION_READS` is the 11B6H measurement. If the keyhole ever reaches
-    one of those tables, a verified artifact becomes a mismatch — the outcome
-    indistinguishable from tampering.
+    `VERIFICATION_READS` is the 11B6H measurement. If the keyhole reaches one of
+    those tables, a verified artifact becomes a mismatch — indistinguishable
+    from tampering. Keeping the sets disjoint was how that was guaranteed.
+
+    Entry 12B1 Phase B produced one table where disjointness is impossible:
+    `ioe.scenario_result` is read by v2 verification AND must keep being purged,
+    because retaining derived tax results so a DELETED account's scenarios stay
+    verifiable would put replay convenience above the deletion the user asked
+    for.
+
+    So the rule is now about the OUTCOME rather than the sets. An overlap is
+    permitted only where the table has explicitly declared
+    `post_account_deletion_replay`, and
+    `test_an_authorized_purge_yields_unavailable_not_mismatch` proves the
+    declaration true by executing the real workflow. Everything undeclared is
+    refused exactly as before.
     """
-    overlap = sorted(implemented_purge_set() & set(VERIFICATION_READS))
-    assert overlap == [], f"the cleanup would destroy verification evidence: {overlap}"
+    from app.privacy.classification import LIFECYCLE
+
+    overlap = implemented_purge_set() & set(VERIFICATION_READS_FOR_PRODUCTION())
+    undeclared = sorted(
+        t for t in overlap
+        if LIFECYCLE[t].post_account_deletion_replay is None
+    )
+    assert undeclared == [], (
+        f"the cleanup would destroy verification evidence with no declared "
+        f"lifecycle exception: {undeclared}")
 
 
 def test_every_purged_table_is_declared_deletable_in_the_classification_registry():
@@ -286,12 +313,54 @@ def test_every_purged_table_is_declared_deletable_in_the_classification_registry
     assert offenders == [], f"declared RETAIN but purged: {offenders}"
 
 
-def test_no_purged_table_claims_a_replay_dependency():
+def test_no_purged_table_claims_a_replay_dependency_without_declaring_why():
+    """Same narrowing, from the classification side.
+
+    A purged replay dependency must NAME itself as a governed lifecycle
+    exception. Silence is still refused — the failure mode this guards is a
+    table quietly acquiring a replay read and being purged anyway, which is how
+    an authorized cleanup starts reporting as tampering.
+    """
     from app.privacy.classification import LIFECYCLE
 
-    offenders = sorted(t for t in implemented_purge_set()
-                       if LIFECYCLE[t].replay_dependency)
-    assert offenders == [], f"replay depends on these and the phase deletes them: {offenders}"
+    offenders = sorted(
+        t for t in implemented_purge_set()
+        if LIFECYCLE[t].replay_dependency
+        and LIFECYCLE[t].post_account_deletion_replay is None
+    )
+    assert offenders == [], (
+        f"replay depends on these, the phase deletes them, and none declares "
+        f"post_account_deletion_replay: {offenders}")
+
+
+def test_the_lifecycle_exception_is_not_a_general_permission():
+    """GUARD ON THE GUARD (§8).
+
+    The exception must stay specific. Two things are asserted: exactly the
+    tables we intend carry it today, and a hypothetical second replay
+    dependency added to the purge set without declaring one is still refused by
+    the invariant above — proved by running that invariant's own predicate over
+    a mutated copy rather than by trusting the code path.
+    """
+    from app.privacy.classification import LIFECYCLE
+
+    declared = sorted(
+        t for t, e in LIFECYCLE.items()
+        if e.post_account_deletion_replay is not None)
+    assert declared == ["ioe.scenario_result"], (
+        f"the lifecycle exception spread beyond the case it was approved for: "
+        f"{declared}")
+
+    # a replay dependency that is purged but undeclared must still be caught
+    hypothetical_purged = implemented_purge_set() | {"ioe.scenario_lever"}
+    offenders = sorted(
+        t for t in hypothetical_purged
+        if LIFECYCLE[t].replay_dependency
+        and LIFECYCLE[t].post_account_deletion_replay is None
+    )
+    assert offenders == ["ioe.scenario_lever"], (
+        "adding an undeclared replay dependency to the purge set was not "
+        f"refused; the exception is too broad: {offenders}")
 
 
 # ------------------------------------------------------------ the phase itself --
@@ -471,7 +540,28 @@ async def test_replay_and_integrity_still_verify_after_the_cleanup():
     finally:
         c.close()
 
-    assert await verify() == before, "the cleanup changed a verification outcome"
+    # ENTRY 12B1 PHASE B CHANGED THIS OUTCOME, DELIBERATELY.
+    #
+    # Optimization and portfolio are untouched: their verification-required
+    # tables survive the cleanup and they still verify, which is the guarantee
+    # this test was written for and it is intact.
+    #
+    # The scenario is different now. A v2 seal binds a counterfactual derived
+    # state living in `ioe.scenario_result`, and that table IS purged — Decision
+    # B chose to keep deleting derived tax results rather than retain them so a
+    # deleted account's scenarios stay replayable. So the honest post-cleanup
+    # answer for a scenario is `unavailable`: the evidence is gone because the
+    # user asked for it to be gone.
+    #
+    # What must NEVER happen is `mismatch`. That is the ambiguity the original
+    # 11B6 invariant existed to prevent — an authorized cleanup reading as
+    # tampering — and it is asserted explicitly below rather than implied.
+    after = await verify()
+    assert after["OPTIMIZATION"] == "verified/NONE", after
+    assert after["PORTFOLIO"] == "verified/NONE", after
+    assert after["SCENARIO"] == "unavailable/SEALED_EVIDENCE_INCOMPLETE", after
+    assert "mismatch" not in after["SCENARIO"], (
+        "an authorized lifecycle purge reported as tampering")
 
 
 async def test_recomputation_is_not_a_durable_property():
@@ -790,14 +880,28 @@ async def test_the_diagnostic_terminal_census_shows_detail_gone_evidence_kept():
     finally:
         c.close()
 
+    # ENTRY 12B1 PHASE B. Optimization and portfolio still verify — their
+    # verification-required tables survive. A v2 SCENARIO does not, and that is
+    # the deliberate cost of Decision B: `ioe.scenario_result` carries the
+    # counterfactual derived state a v2 seal binds, and it is purged rather than
+    # retained, because keeping derived tax results so a deleted account stays
+    # replayable would put replay above the deletion the user asked for.
+    #
+    # The requirement is therefore UNAVAILABLE, never MISMATCH — an authorized
+    # purge must not be reportable as tampering.
     svc = IntegrityVerificationService(uid)
     for kind, eid in ((EntityType.OPTIMIZATION, run_id),
-                      (EntityType.PORTFOLIO, portfolio_id),
-                      (EntityType.SCENARIO, scenario_id)):
+                      (EntityType.PORTFOLIO, portfolio_id)):
         result = await svc.verify(kind, eid)
         assert str(result.status) == "verified", (
-            f"{kind} stopped verifying after the account was removed: "
-            f"{result.status}/{result.reason_code}")
+            f"{kind} stopped verifying: {result.status}/{result.reason_code}")
+
+    scenario_result = await svc.verify(EntityType.SCENARIO, scenario_id)
+    assert str(scenario_result.status) == "unavailable", (
+        f"a purged v2 scenario reported {scenario_result.status}/"
+        f"{scenario_result.reason_code}; it must fail closed as unavailable")
+    assert str(scenario_result.reason_code) == "SEALED_EVIDENCE_INCOMPLETE"
+    assert str(scenario_result.status) != "mismatch"
 
 
 async def test_a_late_direct_writer_cannot_recreate_detail_after_complete():
@@ -1106,3 +1210,197 @@ async def test_the_lifecycle_still_converges_after_a_refused_in_flight_write():
         assert _phase_status(cur, uid) == "COMPLETE"
     finally:
         c.close()
+
+
+# ---------------------------------------------------------------------------
+# Entry 12B1 Phase B — the governed lifecycle exception, proved in three states
+# ---------------------------------------------------------------------------
+async def _sealed_v2_scenario():
+    """One genuinely sealed v2 scenario, through the service that seals them."""
+    from decimal import Decimal
+
+    from app.services.analysis.service import AnalysisService
+    from app.services.ioe.domain.scenario import (
+        SCENARIO_RESULT_SCHEMA_V2,
+        ScenarioSpec,
+    )
+    from app.services.ioe.scenario.service import ScenarioService
+    from tests.security.test_sealed_history_after_purge import (
+        _LEVERS,
+        _live_account,
+        _publish,
+    )
+
+    tag = uuid.uuid4().hex[:8].upper()
+    for i in range(2):
+        lever, resource = _LEVERS[i % len(_LEVERS)]
+        await _publish(f"LX{tag}_{i}", lever, str(2000 + i * 400), resource)
+
+    user_id = await _live_account()
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        analysis_id = (await AnalysisService(session).run(user_id, 2025)).id
+
+    outcome = await ScenarioService(user_id)._simulate(
+        analysis_id,
+        ScenarioSpec.parse([{"lever_code": "INCREASE_RRSP_DEDUCTION",
+                             "parameters": {"amount": Decimal("5000")}}]),
+        result_schema_version=SCENARIO_RESULT_SCHEMA_V2,
+    )
+    return user_id, outcome.scenario_id
+
+
+async def _verify_scenario(user_id, scenario_id):
+    from app.services.ioe.domain.integrity import EntityType
+    from app.services.ioe.replay.verification import IntegrityVerificationService
+
+    return await IntegrityVerificationService(user_id).verify(
+        EntityType.SCENARIO, scenario_id)
+
+
+async def test_a_healthy_v2_scenario_verifies():
+    """STATE 1 of the three-state proof. Without this the other two states
+    prove nothing — a scenario that never verified cannot demonstrate what
+    breaks it."""
+    user_id, scenario_id = await _sealed_v2_scenario()
+    result = await _verify_scenario(user_id, scenario_id)
+    assert str(result.status) == "verified", (result.status, result.reason_code)
+
+
+async def test_unexpected_damage_is_not_disguised_as_a_lifecycle_purge():
+    """STATE 2. Evidence mutated OUTSIDE the governed workflow, with the account
+    perfectly alive.
+
+    This is the case the whole exception must not swallow. A row that was
+    tampered with must keep reporting through the ordinary integrity taxonomy;
+    "something is missing" must never be read as "deletion did it".
+    """
+    import json
+
+    user_id, scenario_id = await _sealed_v2_scenario()
+    assert str((await _verify_scenario(user_id, scenario_id)).status) == "verified"
+
+    connection = _owner()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT counterfactual_derived_state FROM ioe.scenario_result "
+                "WHERE scenario_id = %s", (str(scenario_id),))
+            payload = cursor.fetchone()[0]
+            payload["line_items"] = [
+                {**payload["line_items"][0], "amount": "999999.99"},
+                *payload["line_items"][1:],
+            ]
+            cursor.execute("SET session_replication_role = replica")
+            cursor.execute(
+                "UPDATE ioe.scenario_result SET counterfactual_derived_state = "
+                "%s::jsonb WHERE scenario_id = %s",
+                (json.dumps(payload), str(scenario_id)))
+            cursor.execute("SET session_replication_role = origin")
+    finally:
+        connection.close()
+
+    result = await _verify_scenario(user_id, scenario_id)
+    assert str(result.status) != "verified"
+    # the account is alive and no purge ran, so this must NOT read as lifecycle
+    # deletion — the sealed row is present and simply does not reconcile
+    assert str(result.status) == "mismatch", (
+        f"tampering with a live account's sealed evidence reported "
+        f"{result.status}/{result.reason_code}; damage must stay "
+        "distinguishable from an authorized purge")
+
+
+async def test_an_authorized_purge_yields_unavailable_not_mismatch():
+    """STATE 3 — THE LOAD-BEARING TEST OF DECISION B.
+
+    The real governed workflow runs: lifecycle walked to PURGING, the phase
+    claimed and started, `identity.purge_historical_detail` executed through the
+    keyhole. `ioe.scenario_result` is genuinely destroyed — no copy, no archive,
+    no retention exception.
+
+    Verification must then say UNAVAILABLE. Not MISMATCH: the original 11B6
+    invariant existed to stop an authorized cleanup being reported as tampering,
+    and that purpose survives this narrowing intact.
+    """
+    from app.privacy.classification import (
+        LIFECYCLE,
+        POST_DELETION_STRUCTURED_UNAVAILABLE,
+    )
+
+    user_id, scenario_id = await _sealed_v2_scenario()
+    assert str((await _verify_scenario(user_id, scenario_id)).status) == "verified"
+
+    connection = _owner()
+    cursor = connection.cursor()
+    try:
+        _walk_to_purging(cursor, user_id)
+        _mark_earlier_complete(cursor, user_id)
+        token = _claim(cursor, user_id)
+        _start(cursor, user_id, token)
+        _purge(cursor, user_id, token)
+
+        cursor.execute(
+            "SELECT count(*) FROM ioe.scenario_result WHERE scenario_id = %s",
+            (str(scenario_id),))
+        surviving = cursor.fetchone()[0]
+    finally:
+        connection.close()
+
+    assert surviving == 0, (
+        "the authorized purge did not remove ioe.scenario_result; Decision B "
+        "preserves the deletion guarantee and this is that guarantee")
+
+    result = await _verify_scenario(user_id, scenario_id)
+    assert str(result.status) == "unavailable", (
+        f"an authorized lifecycle purge reported {result.status}/"
+        f"{result.reason_code}; it must fail closed as unavailable")
+    assert str(result.status) != "mismatch"
+    assert str(result.reason_code) == "SEALED_EVIDENCE_INCOMPLETE", (
+        result.reason_code)
+
+    # and the classification declared exactly this outcome in advance
+    assert LIFECYCLE["ioe.scenario_result"].post_account_deletion_replay == (
+        POST_DELETION_STRUCTURED_UNAVAILABLE)
+
+
+async def test_a_purged_scenario_is_not_reconstructed_from_live_state():
+    """§9. UNAVAILABLE is the answer; rebuilding is not.
+
+    After the purge the engine, the rules evaluator and the document library are
+    all still perfectly capable of producing *a* counterfactual state. Using any
+    of them would manufacture evidence for a deleted account and report it as
+    verified history.
+    """
+    from sqlalchemy import event
+
+    user_id, scenario_id = await _sealed_v2_scenario()
+
+    connection = _owner()
+    cursor = connection.cursor()
+    try:
+        _walk_to_purging(cursor, user_id)
+        _mark_earlier_complete(cursor, user_id)
+        token = _claim(cursor, user_id)
+        _start(cursor, user_id, token)
+        _purge(cursor, user_id, token)
+    finally:
+        connection.close()
+
+    statements: list[str] = []
+
+    def record(conn, cur, statement, parameters, context, executemany):
+        statements.append(statement.lower())
+
+    from app.database.session import engine
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        result = await _verify_scenario(user_id, scenario_id)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
+
+    assert str(result.status) == "unavailable"
+    repair_reads = [s for s in statements if "docs.document" in s]
+    assert repair_reads == [], (
+        f"verification tried to rebuild purged evidence from the live document "
+        f"library: {repair_reads[:1]}")
+    assert not [s for s in statements if "insert into ioe.scenario_result" in s], (
+        "verification attempted to re-create the purged artifact")

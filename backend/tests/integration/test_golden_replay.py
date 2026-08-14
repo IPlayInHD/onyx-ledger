@@ -22,7 +22,6 @@ from app.database.models import (
     IncomeType,
     OptimizationRun,
     Scenario,
-    ScenarioResult,
     StrategyPortfolio,
     TaxProfile,
     UserAccount,
@@ -87,20 +86,11 @@ async def test_scenario_spec_and_result_hashes_replay_from_stored_rows():
     )
     outcome = await service.simulate(analysis_id, spec)
 
-    async with unit_of_work(user_id=uid, actor_type="user") as s:
-        stored = await s.get(Scenario, outcome.scenario_id)
-        sealed_spec_hash = stored.scenario_spec_hash
-        sealed_result_hash = stored.scenario_result_hash
-        # rebuilt ENTIRELY from persisted rows
-        rebuilt = await ScenarioService._load_spec(s, stored)
-        pinned = await service._pin_specification(s, analysis_id, rebuilt, result_schema_version="1.0.0")
+    pinned, payload, sealed_spec_hash, sealed_result_hash, _ = (
+        await _replay_from_stored_rows(service, analysis_id, outcome.scenario_id))
 
     assert pinned.spec_hash == sealed_spec_hash, "scenario spec hash did not replay"
-
-    computed = service._compute(pinned)
-    replayed = c.scenario_result_hash(
-        spec_hash=pinned.spec_hash, result=service.canonical_result(computed, result_schema_version="1.0.0")
-    )
+    replayed = c.scenario_result_hash(spec_hash=pinned.spec_hash, result=payload)
     assert replayed == sealed_result_hash, "scenario result hash did not replay"
 
 
@@ -221,20 +211,41 @@ async def test_a_tampered_result_is_detectable_by_recomputing_the_hash():
         ScenarioSpec.parse([{"lever_code": RRSP, "parameters": {"amount": Decimal("4000")}}]),
     )
 
-    async with unit_of_work(user_id=uid, actor_type="user") as s:
-        stored = await s.get(Scenario, outcome.scenario_id)
-        result = await s.scalar(
-            select(ScenarioResult).where(
-                ScenarioResult.scenario_id == outcome.scenario_id)
-        )
-        rebuilt = await ScenarioService._load_spec(s, stored)
-        pinned = await service._pin_specification(s, analysis_id, rebuilt, result_schema_version="1.0.0")
-        sealed = stored.scenario_result_hash
-
-    computed = service._compute(pinned)
-    payload = service.canonical_result(computed, result_schema_version="1.0.0")
+    pinned, payload, _, sealed, result = (
+        await _replay_from_stored_rows(service, analysis_id, outcome.scenario_id))
     assert c.scenario_result_hash(spec_hash=pinned.spec_hash, result=payload) == sealed
 
     # a single cent of drift changes the hash
     payload["tax_delta"] = c.money(result.tax_delta + Decimal("0.01"))
     assert c.scenario_result_hash(spec_hash=pinned.spec_hash, result=payload) != sealed
+
+
+async def _replay_from_stored_rows(service, analysis_id, scenario_id):
+    """Re-derive a sealed scenario's hashes THE WAY REPLAY MUST: every version
+    and every bound digest read back from the row, never assumed.
+
+    These tests used to pass a v1 literal, which was correct only while
+    production wrote v1. Reading the stored version is what they were always
+    demonstrating, so activation makes them stronger rather than needing them
+    weakened.
+    """
+    from app.database.models import ScenarioResult as _Result
+    from app.services.ioe.scenario.service import ScenarioService as _Svc
+
+    async with unit_of_work(user_id=service.user_id, actor_type="user") as s:
+        stored = await s.get(Scenario, scenario_id)
+        sealed_version = stored.result_schema_version
+        sealed_spec_hash = stored.scenario_spec_hash
+        sealed_result_hash = stored.scenario_result_hash
+        result_row = await s.scalar(
+            select(_Result).where(_Result.scenario_id == scenario_id))
+        inner_hash = result_row.counterfactual_derived_state_hash
+        rebuilt = await _Svc._load_spec(s, stored)
+        pinned = await service._pin_specification(
+            s, analysis_id, rebuilt, result_schema_version=sealed_version)
+
+    computed = service._compute(pinned)
+    payload = service.canonical_result(
+        computed, result_schema_version=sealed_version,
+        counterfactual_derived_state_hash=inner_hash)
+    return pinned, payload, sealed_spec_hash, sealed_result_hash, result_row

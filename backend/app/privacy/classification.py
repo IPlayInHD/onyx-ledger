@@ -246,6 +246,14 @@ class LifecycleState(StrEnum):
     RETAINED_IN_BACKUP = "RETAINED_IN_BACKUP"
 
 
+#: The only permitted value of `TableLifecycle.post_account_deletion_replay`.
+#: Named rather than a bare bool so the declaration says what HAPPENS, not
+#: merely that something was allowed: after the governed account-deletion
+#: workflow removes this table's rows, verification of an affected sealed
+#: artifact returns a structured `unavailable`, never `mismatch`.
+POST_DELETION_STRUCTURED_UNAVAILABLE = "STRUCTURED_UNAVAILABLE"
+
+
 @dataclass(frozen=True)
 class TableLifecycle:
     """One user-derived table's complete privacy contract."""
@@ -274,6 +282,26 @@ class TableLifecycle:
     #: never values — the thing that verifies a privacy deletion must not become
     #: a place personal data is read out to.
     completion_predicate: str | None = None
+    #: THE NARROW LIFECYCLE EXCEPTION (Entry 12B1 Phase B).
+    #:
+    #: Normally a replay dependency may not be purged: destroying a row that
+    #: verification reads turns a verified artifact into a MISMATCH, which is
+    #: indistinguishable from tampering. That rule is why `replay_dependency`
+    #: and the account-deletion purge set are disjoint.
+    #:
+    #: One table needs both. `ioe.scenario_result` is read by v2 verification
+    #: AND is intentionally purged on account deletion — because the alternative
+    #: is retaining derived tax results past the deletion the user asked for.
+    #: Set this to `POST_DELETION_STRUCTURED_UNAVAILABLE` to declare that the
+    #: overlap is deliberate AND that verification after the authorized purge
+    #: fails CLOSED as `unavailable`, never as a mismatch.
+    #:
+    #: `None` means no exception: the ordinary disjointness rule applies. This
+    #: is a per-table declaration precisely so it cannot become a general
+    #: permission — `tests/privacy/test_historical_detail_cleanup.py` requires
+    #: every purge/replay overlap to name itself here and then PROVES the
+    #: unavailable-not-mismatch claim behaviourally.
+    post_account_deletion_replay: str | None = None
     notes: str = ""
 
     def __post_init__(self) -> None:
@@ -281,6 +309,14 @@ class TableLifecycle:
             raise ValueError(f"{self.table}: at least one PrivacyClass required")
         if "." not in self.table:
             raise ValueError(f"{self.table}: expected schema-qualified name")
+        if (self.post_account_deletion_replay is not None
+                and not self.replay_dependency):
+            # The exception describes what happens to a replay dependency after
+            # an authorized purge. Declaring it on a table nothing reads would
+            # be a claim about a situation that cannot arise.
+            raise ValueError(
+                f"{self.table}: post_account_deletion_replay is only meaningful "
+                "for a replay dependency")
 
 
 def _e(
@@ -633,7 +669,32 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
                 "ioe.portfolio_evaluation_step",
                 "ioe.recommendation_relationship",
                 "ioe.scenario_confidence_component", "ioe.scenario_input_change",
-                "ioe.scenario_result", "ioe.score_component")),
+                "ioe.score_component")),
+    # SEPARATED FROM THE GROUP ABOVE, whose defining claim — "no replay or
+    # integrity verification reads this" — stopped being true for this table
+    # when Entry 12B1 activated result schema v2.
+    _e("ioe.scenario_result", (P.DERIVED_TAX_RESULT, P.SEALED_EVIDENCE),
+       S.SEALED_DERIVED, R.TAX_YEAR_RETENTION, D.CUSTOM_WORKFLOW, rls=True,
+       immutable=True, replay_dependency=True,
+       post_account_deletion_replay=POST_DELETION_STRUCTURED_UNAVAILABLE,
+       notes="Sealed scenario result, and the one table that is BOTH a replay "
+             "dependency and intentionally purged. Production v2 verification "
+             "reads it — measured, not inferred (tests/privacy/"
+             "test_verification_consumers.py) — for the sealed counterfactual "
+             "derived state, the derived-state hash it reconciles, and "
+             "`affected_rule_versions`, the exact pinned rule set that state "
+             "was evaluated over. A v1 verification never reads it; the reads "
+             "are guarded on the SEALED schema version. HISTORICAL_DETAIL_"
+             "CLEANUP (11B6I) still deletes it on account deletion and that is "
+             "deliberate: retaining derived tax results to keep a deleted "
+             "account's scenarios verifiable would put replay convenience "
+             "above the deletion the user asked for. After that authorized "
+             "purge, verification of an affected scenario returns "
+             "`unavailable / SEALED_EVIDENCE_INCOMPLETE` and NEVER `mismatch` "
+             "— the distinction the original 11B6 disjointness invariant "
+             "existed to protect, now proved behaviourally rather than "
+             "obtained by keeping the sets apart. NOT permanently replayable "
+             "after account deletion, and no copy is retained anywhere."),
     _e("ioe.optimization_run_event", (P.OPERATIONAL_TELEMETRY,),
        S.AUDIT, R.BOUNDED_AUDIT, D.CUSTOM_WORKFLOW, rls=True,
        notes="Closed reason codes only. NOT the audit trail — that is "

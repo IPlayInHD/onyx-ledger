@@ -309,7 +309,16 @@ async def test_historical_replay_reproduces_both_hashes():
         stored_spec_hash = scenario.scenario_spec_hash
         stored_result_hash = scenario.scenario_result_hash
         rebuilt_spec = await ScenarioService._load_spec(s, scenario)
-        pinned = await service._pin_specification(s, analysis_id, rebuilt_spec, result_schema_version="1.0.0")
+        # THE VERSION AND THE BOUND DIGEST COME FROM THE ROW. A literal here was
+        # only ever right while production wrote v1; reading them back is what
+        # this test was always demonstrating.
+        sealed_version = scenario.result_schema_version
+        sealed_inner = (await s.scalar(
+            select(ScenarioResult).where(
+                ScenarioResult.scenario_id == outcome.scenario_id)
+        )).counterfactual_derived_state_hash
+        pinned = await service._pin_specification(
+            s, analysis_id, rebuilt_spec, result_schema_version=sealed_version)
 
     assert pinned.spec_hash == stored_spec_hash, "spec hash did not replay"
 
@@ -317,7 +326,10 @@ async def test_historical_replay_reproduces_both_hashes():
     replayed_result_hash = __import__(
         "app.services.ioe.domain.canonical", fromlist=["c"]
     ).scenario_result_hash(
-        spec_hash=pinned.spec_hash, result=service.canonical_result(computed, result_schema_version="1.0.0")
+        spec_hash=pinned.spec_hash,
+        result=service.canonical_result(
+            computed, result_schema_version=sealed_version,
+            counterfactual_derived_state_hash=sealed_inner),
     )
     assert replayed_result_hash == stored_result_hash, "result hash did not replay"
 

@@ -261,18 +261,30 @@ async def test_all_version_bearing_fields_agree(version):
 
 
 @pytest.mark.asyncio
-async def test_ordinary_production_creation_still_writes_v1():
-    """§21. The public entry point is untouched by any of this."""
+async def test_ordinary_production_creation_writes_v2_end_to_end():
+    """§7 OF PHASE B — THE ACTUAL ACTIVATION ACCEPTANCE PROOF.
+
+    The PUBLIC path, not the internal seam. Everything A2 proved through
+    `_simulate` must now be true of the call ordinary product code makes.
+    """
     uid, analysis_id = await _user_with_analysis()
     await _publish_rules(1)
     outcome = await ScenarioService(uid).simulate(analysis_id, _spec())
     scenario, result = await _rows(uid, outcome.scenario_id)
 
-    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V1
-    assert scenario.result_schema_version == SCENARIO_RESULT_SCHEMA_V1
-    assert result.result_schema_version == SCENARIO_RESULT_SCHEMA_V1
-    assert result.counterfactual_derived_state is None
-    assert result.counterfactual_derived_state_hash is None
+    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2
+    assert scenario.result_schema_version == SCENARIO_RESULT_SCHEMA_V2
+    assert result.result_schema_version == SCENARIO_RESULT_SCHEMA_V2
+    assert scenario.version_manifest["scenario_result_schema_version"] == (
+        SCENARIO_RESULT_SCHEMA_V2)
+
+    payload = result.counterfactual_derived_state
+    assert payload is not None
+    assert result.counterfactual_derived_state_hash
+    assert payload["baseline_held_evidence"] is not None, (
+        "an ordinary v2 seal carries no held-evidence snapshot")
+    assert counterfactual.payload_hash(payload) == (
+        result.counterfactual_derived_state_hash)
     assert (await _verify(uid, outcome.scenario_id)).status is IntegrityStatus.VERIFIED
 
 

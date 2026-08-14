@@ -74,21 +74,13 @@ BLOCKERS = (
 #: MEASURED, not asserted from lineage. Every member is read by
 #: `IntegrityVerificationService.verify` and every non-member is not.
 #:
-#: THIS SET IS VERSION-DEPENDENT, and the version it is measured under is v1.
-#: Entry 12B1 Phase A2 gave scenario replay a v2 path that reads
-#: `ioe.scenario_result` — for its sealed counterfactual derived state and for
-#: the rule-version set that state was evaluated over. Both reads are guarded on
-#: the SEALED schema version, so a v1 verification still reads exactly the eight
-#: tables below and this census remains accurate for every artifact production
-#: currently writes.
-#:
-#: It stops being accurate the moment production writes v2.
-#: `test_a_v2_verification_additionally_reads_the_result_row` measures the v2
-#: read set here, so the change is recorded rather than discovered, and
-#: `ioe.scenario_result` must be reclassified `replay_dependency=True` before
-#: `CURRENT_SCENARIO_RESULT_SCHEMA_VERSION` is moved to v2 — a purge built on
-#: today's census would destroy a row that a v2 verification needs.
-VERIFICATION_READS = frozenset({
+#: THIS SET IS VERSION-DEPENDENT. Below is what EVERY verification reads,
+#: whatever schema version the artifact was sealed under; `VERIFICATION_READS_V2`
+#: adds the one table a v2 scenario additionally needs. Both are traced, and
+#: `test_replay_dependency_declares_consumption_not_lineage` holds the privacy
+#: classification to whichever matches the version production actually writes —
+#: so the census and the purge model cannot drift apart when that version moves.
+VERIFICATION_READS_V1 = frozenset({
     "ioe.optimization_candidate",
     "ioe.portfolio_exclusion",
     "ioe.portfolio_member",
@@ -98,6 +90,31 @@ VERIFICATION_READS = frozenset({
     "ioe.scenario_lever",
     "ioe.strategy_portfolio",
 })
+
+#: What a v2 scenario verification reads on top of the v1 set. Measured by
+#: `test_a_v2_verification_additionally_reads_the_result_row`.
+VERIFICATION_READS_V2 = VERIFICATION_READS_V1 | {"ioe.scenario_result"}
+
+
+def _verification_reads_for_production() -> frozenset[str]:
+    """The census the privacy classification must match TODAY.
+
+    Keyed off the single current-write authority rather than a hand-maintained
+    constant, so moving the write version moves the expected consumer set with
+    it and the classification assertion fails until privacy is updated to match.
+    """
+    from app.services.ioe.domain.scenario import (
+        CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
+        SCENARIO_RESULT_SCHEMA_V2,
+    )
+
+    if CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2:
+        return frozenset(VERIFICATION_READS_V2)
+    return frozenset(VERIFICATION_READS_V1)
+
+
+#: The v1-shaped set, under the name the older assertions in this file use.
+VERIFICATION_READS = VERIFICATION_READS_V1
 
 #: How to reach one account's rows in each read table. Deletion is scoped to the
 #: account under test so a failure cannot damage another test's fixtures.
@@ -120,6 +137,8 @@ _SCOPE = {
     "ioe.scenario_lever":
         "scenario_id IN (SELECT id FROM ioe.scenario WHERE user_id = %(u)s)",
     "ioe.scenario_assumption":
+        "scenario_id IN (SELECT id FROM ioe.scenario WHERE user_id = %(u)s)",
+    "ioe.scenario_result":
         "scenario_id IN (SELECT id FROM ioe.scenario WHERE user_id = %(u)s)",
 }
 
@@ -246,10 +265,11 @@ async def test_verification_reads_exactly_the_measured_set():
         assert str(result.status) == "verified", (kind, result.status, result.reason_code)
         read |= watch.read_tables()
 
-    assert read == set(VERIFICATION_READS), (
+    expected = _verification_reads_for_production()
+    assert read == set(expected), (
         f"the set of blocker tables verification reads has changed: "
-        f"newly read {sorted(read - set(VERIFICATION_READS))}, "
-        f"no longer read {sorted(set(VERIFICATION_READS) - read)}"
+        f"newly read {sorted(read - set(expected))}, "
+        f"no longer read {sorted(set(expected) - read)}"
     )
 
 
@@ -300,26 +320,32 @@ async def test_a_v2_verification_additionally_reads_the_result_row():
         f"accounted for: {sorted(v2_read - set(VERIFICATION_READS))}")
 
 
-def test_the_result_row_is_not_yet_declared_a_replay_dependency():
-    """The other side of the same fact, stated so it cannot drift.
+def test_the_result_row_is_declared_exactly_when_production_needs_it():
+    """THE PERMANENT ACTIVATION INVARIANT.
 
-    `replay_dependency` describes what verification consumes for artifacts that
-    EXIST. Every scenario production has ever written is v1, and a v1
-    verification does not read this row — so declaring it True today would
-    overstate what is consumed. The guard is the test above plus this one:
-    together they say "not yet, and here is exactly when".
+    Replaces the temporary Phase A2 guard, which asserted "not yet" and was only
+    ever right while production wrote v1. The lasting property is the
+    biconditional: `ioe.scenario_result` is a declared replay dependency IF AND
+    ONLY IF the version production writes actually reads it. Both directions
+    matter — declaring it early overstates what is consumed; declaring it late
+    lets a purge built on a stale census destroy evidence a v2 verification
+    cannot do without.
     """
-    assert LIFECYCLE["ioe.scenario_result"].replay_dependency is False
     from app.services.ioe.domain.scenario import (
         CURRENT_SCENARIO_RESULT_SCHEMA_VERSION,
-        SCENARIO_RESULT_SCHEMA_V1,
+        SCENARIO_RESULT_SCHEMA_V2,
     )
 
-    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V1, (
-        "production now writes a version whose verification reads "
-        "ioe.scenario_result; reclassify it replay_dependency=True and move it "
-        "into VERIFICATION_READS before shipping this"
+    production_reads_it = (
+        CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2)
+    assert LIFECYCLE["ioe.scenario_result"].replay_dependency is (
+        production_reads_it), (
+        "ioe.scenario_result.replay_dependency does not match the version "
+        f"production writes ({CURRENT_SCENARIO_RESULT_SCHEMA_VERSION}); "
+        "reclassify the table BEFORE moving the write version, never after"
     )
+    assert ("ioe.scenario_result" in _verification_reads_for_production()) is (
+        production_reads_it)
 
 
 def test_replay_dependency_declares_consumption_not_lineage():
@@ -328,10 +354,11 @@ def test_replay_dependency_declares_consumption_not_lineage():
     This is the assertion 11B6G was missing. It fails if someone re-adds a
     sealed child to the "True" group because of where it hangs in the schema.
     """
+    expected = _verification_reads_for_production()
     declared = {t for t in BLOCKERS if LIFECYCLE[t].replay_dependency}
-    assert declared == set(VERIFICATION_READS), (
-        f"declared-but-unread {sorted(declared - set(VERIFICATION_READS))}, "
-        f"read-but-undeclared {sorted(set(VERIFICATION_READS) - declared)}"
+    assert declared == set(expected), (
+        f"declared-but-unread {sorted(declared - set(expected))}, "
+        f"read-but-undeclared {sorted(set(expected) - declared)}"
     )
 
 
@@ -371,7 +398,11 @@ def _purge_scoped(table: str, user_id: uuid.UUID) -> int:
 
 #: `ioe.strategy_portfolio` is excluded here and gets its own case: it cannot be
 #: deleted at all, so "delete it and watch verification degrade" is unrunnable.
-_DELETABLE_READ_TABLES = sorted(VERIFICATION_READS - {"ioe.strategy_portfolio"})
+#: `ioe.scenario_result` is excluded and gets its own v2 case: this fixture
+#: seals a v1 scenario, whose verification does not read it, so deleting it here
+#: would correctly break nothing and would prove the opposite of the claim.
+_DELETABLE_READ_TABLES = sorted(
+    VERIFICATION_READS_V1 - {"ioe.strategy_portfolio"})
 
 
 @pytest.mark.parametrize("table", _DELETABLE_READ_TABLES)

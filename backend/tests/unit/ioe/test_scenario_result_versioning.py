@@ -67,8 +67,14 @@ def test_the_schema_version_has_no_default_and_cannot_be_omitted():
 
 
 def test_write_version_and_supported_versions_are_separate_concepts():
-    """Replay must not infer what it can interpret from what it writes."""
-    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V1
+    """Replay must not infer what it can interpret from what it writes.
+
+    The point survives activation: the write version moved to v2 and the
+    SUPPORTED set did not shrink, because every v1 artifact ever sealed must
+    still be interpretable.
+    """
+    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == SCENARIO_RESULT_SCHEMA_V2
+    assert SCENARIO_RESULT_SCHEMA_V1 in SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS
     assert SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS == {
         SCENARIO_RESULT_SCHEMA_V1, SCENARIO_RESULT_SCHEMA_V2}
     assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION in (
@@ -180,19 +186,20 @@ def test_an_unsupported_version_fails_closed(version):
             _computed(), result_schema_version=version)
 
 
-def test_production_still_writes_v1():
-    """§21. v2 is now reachable end to end, and still not activated.
+def test_production_writes_v2_through_the_single_authority():
+    """§13. ACTIVATED.
 
-    Rewritten for Phase A2. It used to assert that `_persist` named the write
-    authority literally, which stopped being the right question once one chosen
-    version began travelling from the seam to every field. The property that
-    actually matters is unchanged and is asserted directly: the PUBLIC entry
-    point chooses the write authority, and the write authority is still v1.
+    The public entry point still chooses the one write authority — that never
+    changed and is what made activation a single-line move. What changed is
+    what the authority says.
     """
-    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == "1.0.0"
+    assert CURRENT_SCENARIO_RESULT_SCHEMA_VERSION == "2.0.0"
     source = inspect.getsource(ScenarioService.simulate)
     assert "result_schema_version=CURRENT_SCENARIO_RESULT_SCHEMA_VERSION" in source
+    # still no second authority: the public path names the constant, never a
+    # version literal of its own
     assert "SCENARIO_RESULT_SCHEMA_V2" not in source
+    assert "2.0.0" not in source
 
 
 def test_the_public_entry_point_has_no_schema_version_parameter():
