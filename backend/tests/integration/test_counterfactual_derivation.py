@@ -458,14 +458,22 @@ async def test_the_derived_state_hash_is_stable_across_hash_seeds(tmp_path):
 # §11 — A1 persists nothing
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_deriving_writes_no_counterfactual_column():
-    """The scope boundary, measured against the database rather than the diff."""
+async def test_a_v1_seal_still_writes_no_counterfactual_column():
+    """Deriving is not persisting, and a v1 seal binds nothing.
+
+    Written in Phase A1 against the public path, which wrote v1 then and writes
+    v2 now. The claim it was making has not changed and is restated against the
+    version rather than the entry point: whatever else is true, a scenario
+    sealed as v1 carries NULL in both counterfactual columns, and calling the
+    builder writes nothing at all.
+    """
     from app.database.models import ScenarioResult
 
     uid, analysis_id = await _user_with_analysis()
     service = ScenarioService(uid)
     spec = ScenarioSpec.parse([_lever()])
-    outcome = await service.simulate(analysis_id, spec)
+    outcome = await service._simulate(
+        analysis_id, spec, result_schema_version="1.0.0")
 
     pinned = await _pin(service, analysis_id, spec)
     await _derive(service, pinned, service._compute(pinned))
@@ -474,6 +482,7 @@ async def test_deriving_writes_no_counterfactual_column():
         result = await s.scalar(
             select(ScenarioResult).where(
                 ScenarioResult.scenario_id == outcome.scenario_id))
-        assert result.counterfactual_derived_state is None
-        assert result.counterfactual_derived_state_hash is None
         assert result.result_schema_version == "1.0.0"
+        assert result.counterfactual_derived_state is None, (
+            "a v1 seal carries derived state its hash does not bind")
+        assert result.counterfactual_derived_state_hash is None

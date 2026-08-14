@@ -172,14 +172,18 @@ async def test_the_current_graph_held_set_moves_when_the_library_moves():
 
 @pytest.mark.asyncio
 async def test_a_v1_scenario_records_nothing_about_what_was_held():
-    """The other half of the gap: today's sealed artifact has no answer at all.
+    """The other half of the gap, and why legacy rows can never answer it.
 
     A v1 scenario carries no derived state, so "what evidence was held when this
-    was sealed" has no source but the live library — which is the drift above.
+    was sealed" has no source but the live library — the drift above. Production
+    now writes v2, so this is reached through the internal seam: the point is
+    about the v1 CONTRACT, which every historical row is still sealed under and
+    which is never backfilled.
     """
     uid, analysis_id = await _user_with_analysis()
     await _hold(uid, "T4")
-    outcome = await ScenarioService(uid).simulate(analysis_id, _spec())
+    outcome = await ScenarioService(uid)._simulate(
+        analysis_id, _spec(), result_schema_version=SCENARIO_RESULT_SCHEMA_V1)
 
     async with unit_of_work(user_id=uid, actor_type="user") as s:
         scenario_result = await s.scalar(select(ScenarioResult).where(
