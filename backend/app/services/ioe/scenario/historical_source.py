@@ -18,6 +18,40 @@ what the user has. Held evidence is therefore the SAME object on both sides:
 that is what makes a `READY → MISSING` transition mean "this scenario needs a
 document you do not have" instead of "your library changed".
 
+WHERE EACH SIDE'S TAX STATE COMES FROM, AND WHY THEY DIFFER
+-----------------------------------------------------------
+The counterfactual tax state is SEALED into the scenario artifact, because
+nothing else persists it. The baseline tax state is LOADED from
+`analysis.analysis_run` + `analysis.analysis_line_item`, because something
+already does: `scenario.base_analysis_id` pins exactly one run, its results are
+immutable once completed, and the run is the parent of the frozen baseline every
+replay resolves. Two different authoritative sources, neither recomputed.
+
+BASELINE OPPORTUNITY HAS NO SUCH SOURCE — A RECORDED BLOCKER
+-------------------------------------------------------------
+There is no frozen historical source for the baseline's OPPORTUNITY set, and
+this module does not invent one. Measured, not assumed:
+
+  `reco.recommendation` is written per analysis by `AnalysisService.run`, but it
+  is classified LIVE_USER_DATA_DELETE / LIVE_PRODUCT_STATE — live user-facing
+  product state with a mutable `status`, deleted as the SUBJECT of a deletion
+  request rather than retained as evidence about one. Reading it would make a
+  sealed comparison depend on state the user can change by pressing a button,
+  and would carry none of the eligibility, support, required-document or
+  deadline semantics the counterfactual candidate carries.
+
+  `ioe.optimization_candidate` has those semantics, but it hangs off an
+  `ioe.optimization_run` that a scenario never records. Reaching it through
+  `analysis_id` would mean picking a run — a latest-or-non-superseded
+  resolution that can answer differently after the scenario was sealed, which
+  is the exact drift this module exists to prevent. A run may also not exist
+  for the analysis at all.
+
+So the baseline reports `OPPORTUNITY = MISSING_AUTHORITY` and says so in a
+value. It does NOT report zero opportunities: a comparator handed a zero would
+read every counterfactual opportunity as one the scenario created.
+`assert_comparison_ready` refuses such a side outright.
+
 SEPARATE FROM REPLAY. Integrity verification MAY execute pinned authorities —
 that is how it proves a hash still reconciles. This path may not. The two have
 different jobs and different permissions, and conflating them is how a read path
@@ -26,7 +60,9 @@ acquires an engine.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import select
@@ -34,12 +70,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
     AnalysisInputSnapshot,
+    AnalysisLineItem,
+    AnalysisRun,
     RuleDeadline,
     Scenario,
     ScenarioAssumption,
     ScenarioInputChange,
     ScenarioResult,
 )
+from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain.integrity import (
     DependencyUnavailable,
     IntegrityReason,
@@ -63,6 +102,52 @@ NOT_APPLICABLE_IN_SINGLE_SCENARIO_COMPARISON = (
 #: Which side of the comparison a bundle describes.
 SIDE_BASELINE = "FROZEN_BASELINE"
 SIDE_COUNTERFACTUAL = "SEALED_COUNTERFACTUAL"
+
+#: Per-family ceiling on the baseline detail one read may load. Generous enough
+#: that a real analysis is never truncated, low enough that no single request
+#: reads an unbounded history — the same bound the State Graph loader applies.
+MAX_BASELINE_LINE_ITEMS = 2000
+
+
+class SourceAuthority(StrEnum):
+    """Where a comparable family's content came from — and whether it came from
+    anywhere at all.
+
+    THE DISTINCTION THIS TYPE EXISTS FOR. A family that is authoritatively
+    EMPTY and a family that was never LOADED look identical downstream: both are
+    zero nodes. A comparator handed the second would report every counterpart on
+    the other side as an addition the scenario caused, which is a statement
+    about the user's tax position that nothing in the seal supports.
+
+    So emptiness is only ever reported by a source that was actually consulted.
+    """
+
+    #: Loaded from a pinned, frozen source, and it holds content.
+    AUTHORITATIVE = "AUTHORITATIVE"
+    #: Loaded from a pinned, frozen source that genuinely holds nothing. A real
+    #: answer, and safe to compare.
+    AUTHORITATIVE_EMPTY = "AUTHORITATIVE_EMPTY"
+    #: NO frozen source exists to load this family from on this side. Never a
+    #: zero: nothing was asked, so nothing was answered.
+    MISSING_AUTHORITY = "MISSING_AUTHORITY"
+    #: The family does not apply to a single-scenario comparison at all.
+    NOT_APPLICABLE = NOT_APPLICABLE_IN_SINGLE_SCENARIO_COMPARISON
+
+
+#: The families a comparison reads. `RESOURCE` is deliberately absent: it is not
+#: a family whose authority can be missing, it is one that does not apply.
+COMPARISON_REQUIRED_FAMILIES: tuple[str, ...] = (
+    "FACT", "TAX_STATE", "OPPORTUNITY", "DEADLINE", "EVIDENCE_REQUIRED",
+    "EVIDENCE_HELD", "ASSUMPTION", "SCENARIO",
+)
+
+
+def _authority(loaded: bool, *, present: bool) -> SourceAuthority:
+    """`loaded` says a source was consulted; `present` says it had content."""
+    if not loaded:
+        return SourceAuthority.MISSING_AUTHORITY
+    return (SourceAuthority.AUTHORITATIVE if present
+            else SourceAuthority.AUTHORITATIVE_EMPTY)
 
 
 @dataclass(frozen=True)
@@ -101,6 +186,35 @@ class HistoricalSourceBundle:
 
     resource: str = NOT_APPLICABLE_IN_SINGLE_SCENARIO_COMPARISON
     bundle_version: str = HISTORICAL_SOURCE_BUNDLE_VERSION
+
+    #: Per-family provenance. A count alone cannot say whether a family is
+    #: empty or absent, so the answer is carried rather than inferred.
+    authority: Mapping[str, SourceAuthority] = field(default_factory=dict)
+
+    def missing_authority(self) -> tuple[str, ...]:
+        """The families this side could not load from any frozen source."""
+        return tuple(
+            family for family in COMPARISON_REQUIRED_FAMILIES
+            if self.authority.get(family) is SourceAuthority.MISSING_AUTHORITY
+        )
+
+
+def assert_comparison_ready(bundle: HistoricalSourceBundle) -> None:
+    """THE GATE A COMPARATOR MUST PASS BEFORE CONSUMING A SIDE.
+
+    Deliberately NOT called by the rendering path. Assembling and projecting a
+    side is a read of what was sealed and stays legal with a family missing;
+    COMPARING two sides is not, because a comparator cannot tell an absent
+    family from an empty one and would manufacture differences out of the gap.
+
+    Fails closed through the existing taxonomy: a family with no frozen source
+    is incomplete sealed evidence, which is what `SEALED_EVIDENCE_INCOMPLETE`
+    already means. It is emphatically NOT a MISMATCH — absence here is a known
+    gap in what was sealed, not evidence that anything was tampered with, and
+    reporting tampering for it would be an accusation the data does not support.
+    """
+    if bundle.missing_authority():
+        raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
 
 
 async def load_sealed_sides(
@@ -169,6 +283,12 @@ async def load_sealed_sides(
     deadlines = await _pinned_deadlines(session, candidates)
     required = _required_evidence(candidates)
 
+    # The BASELINE tax state, from the analysis the scenario pinned. Loaded
+    # rather than sealed a second time because it is already both: pinned by
+    # `scenario.base_analysis_id`, and immutable once the run completed.
+    baseline_line_items, baseline_tax_state_loaded = await _baseline_line_items(
+        session, user_id, scenario.base_analysis_id)
+
     metadata = {
         "scenario_id": str(scenario_id),
         "tax_year": scenario.tax_year,
@@ -185,12 +305,19 @@ async def load_sealed_sides(
         applied_changes: tuple[dict[str, Any], ...],
         line_items: tuple[dict[str, Any], ...],
         side_candidates: tuple[dict[str, Any], ...],
+        *,
+        tax_state_loaded: bool,
+        opportunity_loaded: bool,
     ) -> HistoricalSourceBundle:
         """Both sides share every sealed field except the three that differ.
 
         Written as one constructor rather than two literals so a future field
         cannot be added to one side and forgotten on the other — which would
         surface later as a phantom difference in a comparison.
+
+        `*_loaded` records whether a SOURCE was consulted, which is a different
+        question from whether it returned anything. Only a source that was
+        actually read may report emptiness.
         """
         return HistoricalSourceBundle(
             side=side,
@@ -205,15 +332,99 @@ async def load_sealed_sides(
             held_evidence=snapshot,
             assumptions=assumptions,
             scenario_metadata=metadata,
+            authority={
+                "FACT": _authority(True, present=bool(snapshot_row.snapshot)),
+                "TAX_STATE": _authority(
+                    tax_state_loaded, present=bool(line_items)),
+                "OPPORTUNITY": _authority(
+                    opportunity_loaded, present=bool(side_candidates)),
+                # DEADLINE and required EVIDENCE are reached THROUGH a side's
+                # opportunities, so their authority cannot outrank the
+                # opportunity authority they hang off. A side whose
+                # opportunities were never loaded has no authoritative
+                # reachability either, whatever rows happen to be in hand.
+                "DEADLINE": _authority(
+                    opportunity_loaded, present=bool(deadlines)),
+                "EVIDENCE_REQUIRED": _authority(
+                    opportunity_loaded, present=bool(required)),
+                # Held evidence is the SAME sealed T1 snapshot on both sides —
+                # a scenario changes what evidence is required, never what the
+                # user possesses.
+                "EVIDENCE_HELD": _authority(
+                    True, present=bool(snapshot.document_type_codes)),
+                "ASSUMPTION": _authority(True, present=bool(assumptions)),
+                "SCENARIO": _authority(True, present=bool(metadata)),
+                "RESOURCE": SourceAuthority.NOT_APPLICABLE,
+            },
         )
 
-    # The baseline is the frozen snapshot with NO lever applied; its tax state
-    # and opportunities are not re-derived here.
-    baseline = _side(SIDE_BASELINE, (), (), ())
+    # THE BASELINE. Its tax state is LOADED from the analysis the scenario
+    # pinned; its opportunities are not, because no frozen source for them
+    # exists — see this module's docstring. `opportunity_loaded=False` is the
+    # whole point: it makes the absence a recorded fact rather than a zero.
+    baseline = _side(
+        SIDE_BASELINE, (), baseline_line_items, (),
+        tax_state_loaded=baseline_tax_state_loaded,
+        opportunity_loaded=False,
+    )
     counterfactual = _side(
         SIDE_COUNTERFACTUAL, changes,
-        tuple(derived.get("line_items") or ()), candidates)
+        tuple(derived.get("line_items") or ()), candidates,
+        tax_state_loaded=True,
+        opportunity_loaded=True,
+    )
     return baseline, counterfactual
+
+
+async def _baseline_line_items(
+    session: AsyncSession, user_id: uuid.UUID, analysis_id: uuid.UUID
+) -> tuple[tuple[dict[str, Any], ...], bool]:
+    """The baseline tax state, from the analysis run the scenario pinned.
+
+    WHY THIS IS A READ AND NOT A SECOND SEAL. `analysis.analysis_run` is the
+    parent of the frozen baseline every replay resolves, its results are
+    immutable once the run completes, and `scenario.base_analysis_id` pins
+    exactly one of them. Sealing a copy into the scenario artifact would store a
+    value that is already stored, immutably, one join away — and two copies of
+    one truth is one more thing that can disagree.
+
+    NOTHING IS COMPUTED. `TaxEngineService` is not called and cannot be: the
+    rows were written when the analysis ran, and money passes through
+    `canonical.money` exactly as the sealed counterfactual line items do, so the
+    two sides render the same value the same way.
+
+    Returns `(rows, loaded)`. `loaded` is False when the pinned analysis is gone
+    or never completed — the account-deletion workflow removes this detail while
+    Decision B retains the sealed scenario, so "the run had no line items" and
+    "the run is no longer there" must not collapse into one answer.
+    """
+    analysis = await session.get(AnalysisRun, analysis_id)
+    if (analysis is None or analysis.user_id != user_id
+            or analysis.status != "completed"):
+        return (), False
+
+    rows = await session.scalars(
+        select(AnalysisLineItem)
+        .where(AnalysisLineItem.analysis_id == analysis_id)
+        # Ordered by SEMANTIC identity, not by `sort_order`: presentation order
+        # is a property of the run, and a historical node keyed by (kind, label)
+        # must not change identity because a later run reordered its display.
+        .order_by(AnalysisLineItem.kind, AnalysisLineItem.label)
+        .limit(MAX_BASELINE_LINE_ITEMS)
+    )
+    return tuple(
+        {
+            "kind": row.kind,
+            "label": row.label,
+            "amount": c.money(row.amount),
+            "fact_key": row.fact_key,
+            "tax_rule_version_id": (
+                str(row.tax_rule_version_id)
+                if row.tax_rule_version_id is not None else None
+            ),
+        }
+        for row in rows
+    ), True
 
 
 async def _pinned_deadlines(

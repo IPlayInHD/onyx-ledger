@@ -155,37 +155,50 @@ A projected historical graph is a deterministic function of artifacts that
 cannot change, so storing it would store a derivable value. Privacy universe
 stays at **70** and the Alembic head stays at **0067_counterfactual_state**.
 
-## 9. Known limitation, carried forward to Entry 12B
+## 9. Baseline source completeness (Entry 12B)
 
-`load_sealed_sides` builds the baseline side with **no** sealed line items and
-**no** sealed candidates:
+§17 originally measured a baseline that carried **no** line items and **no**
+candidates, because `load_sealed_sides` built it as a placeholder:
 
 ```python
-baseline = _side(SIDE_BASELINE, (), (), ())
+baseline = _side(SIDE_BASELINE, (), (), ())      # before
 ```
 
-Measured on a real sealed v2 scenario, the two projected sides come out as:
+The projection was right — both families are `COMPARABLE` and reported
+`retained == 0`, exactly as §1's invariant requires — but the *source* was
+empty, so a comparator would have read every counterfactual line item as an
+addition the scenario caused.
 
-| family | baseline | counterfactual |
-|---|---|---|
-| `FACT` | 27 | 27 |
-| `TAX_STATE` | 1 (header only) | 7 (header + 6 sealed line items) |
-| `OPPORTUNITY` | 0 | 1 |
-| `DEADLINE` | 1 | 1 |
-| `EVIDENCE` | 2 | 2 |
-| `RESOURCE` | inapplicable | inapplicable |
-| edges | 1 | 9 |
+**Half of that is now fixed.** Baseline `TAX_STATE` loads from the analysis run
+the scenario pinned (`scenario.base_analysis_id` → `analysis.analysis_run` +
+`analysis.analysis_line_item`): already immutable once completed, already the
+parent of the frozen baseline every replay resolves, and read rather than
+recomputed. Measured on a real sealed v2 scenario:
 
-Both baseline families project as **`COMPARABLE` with `retained == 0`**, which is
-exactly the state §1's invariant exists to keep distinct from inapplicability —
-so §17 reports it correctly. But a comparator run against these two sides today
-would read all six counterfactual line items and the one counterfactual
-opportunity as **additions**, because the baseline bundle carries nothing to
-match them against.
+| family | baseline before | baseline after | counterfactual |
+|---|---|---|---|
+| `FACT` | 27 | 27 | 27 |
+| `TAX_STATE` | 1 (header only) | **7** (header + 6 line items) | 7 |
+| `OPPORTUNITY` | 0 | 0 — `MISSING_AUTHORITY` | 1 |
+| `RESOURCE` | inapplicable | inapplicable | inapplicable |
 
-That is a **§16 bundle-content gap, not a projection defect**: the baseline's tax
-state lives in `analysis.analysis_run` / `analysis.analysis_line_item`, which the
-sealed-source loader does not read. Resolving it means teaching
-`load_sealed_sides` to load the baseline's sealed analysis detail — sealed rows,
-no recomputation, no live fallback — and it must be done before the Before-You-Act
-comparison presents differences to a user.
+**The other half is a recorded blocker.** No frozen historical source for the
+baseline's `OPPORTUNITY` set exists: `reco.recommendation` is
+`LIVE_USER_DATA_DELETE` live product state with a user-mutable `status`, and
+`ioe.optimization_candidate` hangs off an `ioe.optimization_run` that a scenario
+never pins. So the baseline reports `MISSING_AUTHORITY` — never a zero — and
+`assert_comparison_ready` refuses such a side outright, through the existing
+`SEALED_EVIDENCE_INCOMPLETE` taxonomy rather than as a mismatch.
+
+`SourceAuthority` is what keeps the two cases apart:
+
+| case | verdict |
+|---|---|
+| source read, holds content | `AUTHORITATIVE` |
+| source read, genuinely holds nothing | `AUTHORITATIVE_EMPTY` |
+| no frozen source exists on this side | `MISSING_AUTHORITY` |
+| family does not apply to one scenario | `NOT_APPLICABLE…` |
+
+Rendering a side stays legal with a family missing; **comparing** two sides does
+not. Collapsing those would have made the §17 historical read fail for every
+scenario in the system.
