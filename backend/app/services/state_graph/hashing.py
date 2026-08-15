@@ -33,7 +33,14 @@ from .contracts import (
 )
 
 
-def _node_payload(node: GraphNode) -> Mapping[str, Any]:
+def node_payload(node: GraphNode) -> Mapping[str, Any]:
+    """THE canonical semantic form of one node.
+
+    Public because the comparison engine must decide "did this node change"
+    from exactly the bytes the hash commits to. A comparator with its own
+    notion of node equality would be a second semantic contract, free to
+    disagree with the first about whether a user's tax state moved.
+    """
     return {
         "key": node.key,
         "node_type": node.node_type.value,
@@ -48,7 +55,9 @@ def _node_payload(node: GraphNode) -> Mapping[str, Any]:
     }
 
 
-def _edge_payload(edge: GraphEdge) -> Mapping[str, Any]:
+def edge_payload(edge: GraphEdge) -> Mapping[str, Any]:
+    """THE canonical semantic form of one edge. Public for the same reason
+    `node_payload` is."""
     return {
         "edge_type": edge.edge_type.value,
         "source_key": edge.source_key,
@@ -95,8 +104,8 @@ def graph_hash_payload(
             }
             for a in sorted(anchors, key=lambda a: (a.artifact, a.artifact_id))
         ],
-        "nodes": [_node_payload(n) for n in sorted(nodes, key=lambda n: n.key)],
-        "edges": [_edge_payload(e) for e in sorted(edges, key=lambda e: e.sort_key)],
+        "nodes": [node_payload(n) for n in sorted(nodes, key=lambda n: n.key)],
+        "edges": [edge_payload(e) for e in sorted(edges, key=lambda e: e.sort_key)],
         "summary": _summary_payload(summary),
     }
 

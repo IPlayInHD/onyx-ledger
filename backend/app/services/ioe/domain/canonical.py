@@ -297,6 +297,12 @@ DOMAIN_TAX_STATE_GRAPH = "tax_state_graph"
 # DOMAIN_SCENARIO_RESULT because it is bound INTO that result rather than being
 # it: the same bytes must not be able to stand in for both.
 DOMAIN_COUNTERFACTUAL_DERIVED_STATE = "counterfactual_derived_state"
+# Entry 12B. The Before-You-Act comparison of one sealed scenario's two
+# authoritative historical sides. Nothing persists it — it is a deterministic
+# function of two already-hashed projected graphs — but it is domain-separated
+# for the same reason every other digest here is: the bytes of a comparison
+# must not be able to stand in for the bytes of the artifacts it compares.
+DOMAIN_SCENARIO_COMPARISON = "scenario_comparison"
 
 ALL_HASH_DOMAINS = (
     DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
@@ -304,6 +310,7 @@ ALL_HASH_DOMAINS = (
     DOMAIN_RULE_SNAPSHOT, DOMAIN_ASSUMPTION_SET,
     DOMAIN_PORTFOLIO_RESULT, DOMAIN_VERSION_MANIFEST, DOMAIN_WEIGHT_CONFIG,
     DOMAIN_TAX_STATE_GRAPH, DOMAIN_COUNTERFACTUAL_DERIVED_STATE,
+    DOMAIN_SCENARIO_COMPARISON,
 )
 
 

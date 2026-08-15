@@ -201,10 +201,35 @@ class HistoricalSourceBundle:
 
     def missing_authority(self) -> tuple[str, ...]:
         """The families this side could not load from any frozen source."""
-        return tuple(
-            family for family in COMPARISON_REQUIRED_FAMILIES
-            if self.authority.get(family) is SourceAuthority.MISSING_AUTHORITY
-        )
+        return missing_authority_in(self.authority)
+
+
+def missing_authority_in(
+    authority: Mapping[str, SourceAuthority],
+) -> tuple[str, ...]:
+    """The comparison-required families this authority map cannot answer for.
+
+    Split out from `assert_comparison_ready` so the comparison engine asks the
+    SAME question of the same table. A comparator with its own idea of "is this
+    side complete" would be a second authority contract, free to accept a side
+    this one refuses.
+    """
+    return tuple(
+        family for family in COMPARISON_REQUIRED_FAMILIES
+        if authority.get(family) is SourceAuthority.MISSING_AUTHORITY
+    )
+
+
+def assert_authority_complete(authority: Mapping[str, SourceAuthority]) -> None:
+    """Refuse an authority map with any comparison-required family missing.
+
+    Fails closed through the existing taxonomy: a family with no frozen source
+    is incomplete sealed evidence. Emphatically NOT a MISMATCH — absence here
+    is a known gap in what was sealed, not evidence of tampering, and reporting
+    tampering for it would be an accusation the data does not support.
+    """
+    if missing_authority_in(authority):
+        raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
 
 
 def assert_comparison_ready(bundle: HistoricalSourceBundle) -> None:
@@ -221,8 +246,7 @@ def assert_comparison_ready(bundle: HistoricalSourceBundle) -> None:
     gap in what was sealed, not evidence that anything was tampered with, and
     reporting tampering for it would be an accusation the data does not support.
     """
-    if bundle.missing_authority():
-        raise DependencyUnavailable(IntegrityReason.SEALED_EVIDENCE_INCOMPLETE)
+    assert_authority_complete(bundle.authority)
 
 
 async def load_sealed_sides(

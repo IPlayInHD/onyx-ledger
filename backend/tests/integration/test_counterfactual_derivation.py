@@ -13,6 +13,7 @@ the ones that matter most:
 Nothing here writes counterfactual state. Phase A1 builds the derivation; where
 it is persisted is Phase A2's decision.
 """
+import errno
 import json
 import os
 import subprocess
@@ -434,17 +435,23 @@ async def test_the_derived_state_hash_is_stable_across_hash_seeds(tmp_path):
 
     script = tmp_path / "seeded.py"
     script.write_text(
-        "import json, sys\n"
+        "import json, pathlib, sys\n"
         "from app.services.ioe.domain import canonical as c\n"
-        "payload = json.loads(sys.argv[1])\n"
+        "payload = json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
         "print(c.domain_hash(c.DOMAIN_COUNTERFACTUAL_DERIVED_STATE, payload))\n"
     )
-    encoded = json.dumps(payload)
+    # The payload travels by file, not by argv. A v3 derived state carries every
+    # baseline candidate, so it grows with the governing rule set, while a single
+    # argv element is capped at MAX_ARG_STRLEN (128 KiB) no matter how large
+    # ARG_MAX is. Passed as an argument, this failed with E2BIG once enough rules
+    # had been published — a property of the transport, not of the hash.
+    source = tmp_path / "payload.json"
+    source.write_text(json.dumps(payload))
     digests = set()
     for seed in ("0", "1", "42"):
         env = {**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": "."}
         out = subprocess.run(                      # noqa: S603
-            [sys.executable, str(script), encoded],
+            [sys.executable, str(script), str(source)],
             capture_output=True, text=True, check=True, env=env,
         )
         digests.add(out.stdout.strip())
@@ -452,6 +459,42 @@ async def test_the_derived_state_hash_is_stable_across_hash_seeds(tmp_path):
     assert len(digests) == 1, (
         f"the derived-state hash moved with PYTHONHASHSEED: {digests}")
     assert digests == {counterfactual.derived_state_hash(state)}
+
+
+def test_a_derived_state_larger_than_the_argv_cap_still_reaches_a_subprocess(
+        tmp_path):
+    """Regression for the transport above, with no database and no residue.
+
+    A v3 derived state has no fixed size: it carries one entry per baseline
+    candidate, so a user governed by enough rules produces a payload past the
+    128 KiB ceiling on a single argv element. The seed test measures the hash,
+    not the transport, so it must not be able to fail for this reason again.
+    """
+    oversized = json.dumps(
+        {"baseline_candidates": [{"code": f"C{i:05d}"} for i in range(20_000)]})
+    assert len(oversized) > 32 * 4096, "payload must exceed MAX_ARG_STRLEN"
+
+    script = tmp_path / "echo_len.py"
+    script.write_text(
+        "import pathlib, sys\n"
+        "print(len(pathlib.Path(sys.argv[1]).read_text()))\n"
+    )
+    source = tmp_path / "payload.json"
+    source.write_text(oversized)
+
+    out = subprocess.run(                          # noqa: S603
+        [sys.executable, str(script), str(source)],
+        capture_output=True, text=True, check=True,
+    )
+    assert int(out.stdout.strip()) == len(oversized)
+
+    # The control: the same bytes as an argument are refused by the kernel.
+    with pytest.raises(OSError) as caught:
+        subprocess.run(                            # noqa: S603
+            [sys.executable, "-c", "pass", oversized],
+            capture_output=True, check=False,
+        )
+    assert caught.value.errno == errno.E2BIG
 
 
 # ---------------------------------------------------------------------------
