@@ -79,17 +79,53 @@ async def _claim(worker: str, batch: int = 10) -> list[dict]:
         return [dict(r._mapping) for r in rows]
 
 
+async def _expire_live_leases() -> int:
+    """Backdate every live claim so the next claim RECOVERS it.
+
+    THE HOLE THIS CLOSES, and it is a real one this suite has now failed on
+    three separate times under the security gate proof. A row under a LIVE
+    lease is not claimable, so draining cannot reach it — but its lease expires
+    ten minutes later, and `claim_freshness_events` returns it to `pending` the
+    moment it does. Under the gate proof, which reruns this suite against one
+    database for an hour and a half, that expiry lands in the middle of a later
+    run: after a test has drained its backlog and before the drain it is
+    actually testing. The recovered event is then applied by that drain, and a
+    year-scoped one stales every scenario for the year — including a tenant the
+    test just asserted was untouched.
+
+    So "quiescent" is made to mean it: expire the leases first, then drain, and
+    nothing can re-enter the queue while the test runs.
+
+    Ordinary application privilege, deliberately — `onyx_app_rw` already holds
+    UPDATE on this table, and reaching for a superuser inside the suite whose
+    entire point is that the runtime identity is not one would prove the
+    opposite of what this file exists to prove.
+    """
+    async with unit_of_work(actor_type="system") as s:
+        result = await s.execute(text(
+            "UPDATE ioe.freshness_outbox "
+            "   SET claimed_at = now() - ioe.freshness_claim_timeout() "
+            "                  - interval '1 minute' "
+            " WHERE claim_state = 'claimed' "
+            "   AND claimed_at >= now() - ioe.freshness_claim_timeout()"
+        ))
+        return result.rowcount
+
+
 async def _drain_all_claimable(limit: int = 200) -> None:
     """Relay until no CLAIMABLE work is left. That is not an empty queue.
 
     WHAT IT DRAINS: pending events with `attempts < 5` that are unclaimed, or
     whose lease has passed `ioe.freshness_claim_timeout()` — exactly the set
-    `claim_freshness_events` selects.
+    `claim_freshness_events` selects. Live leases are EXPIRED FIRST, so they
+    are part of that set rather than a delayed arrival mid-test; see
+    `_expire_live_leases`.
 
     WHAT IT DELIBERATELY LEAVES:
       * events at the retry ceiling (`attempts >= 5`). The claim predicate
-        excludes them permanently, so no amount of draining will move them.
-      * events under a live lease held by another worker.
+        excludes them permanently, so no amount of draining will move them —
+        and for the same reason no later drain can apply them either, so they
+        cannot reach a scenario once this returns.
       * anything queued after the final pass.
 
     Measured on a database the suite had run against repeatedly: 267 pending
@@ -107,10 +143,16 @@ async def _drain_all_claimable(limit: int = 200) -> None:
     or advances `attempts` toward the ceiling. `limit` is a runaway guard only,
     and says so if it is ever reached.
     """
+    await _expire_live_leases()
     for _ in range(limit):
         report = await FreshnessRelay("tenant-context-drain").drain()
         if report.claimed == 0:
-            return
+            # A lease taken by THIS drain's own passes would otherwise be left
+            # live behind us, to expire mid-test exactly as an inherited one
+            # would. Expire and re-check; only a pass that both starts and ends
+            # with nothing claimable is quiescent.
+            if await _expire_live_leases() == 0:
+                return
     raise AssertionError(
         "the relay never stopped finding claimable work; the queue is not "
         "making progress")
