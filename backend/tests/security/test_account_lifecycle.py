@@ -112,6 +112,17 @@ def _age_claim(user_id: uuid.UUID, interval: str = "2 hours") -> None:
 _DRAIN_LIMIT = 2000
 
 
+#: The states `claim_account_lifecycle` will hand out, restated here so a
+#: diagnostic can report how much work was competing with the row a test was
+#: looking for. Independent of the function under test on purpose.
+_CLAIMABLE_LIFECYCLE_COUNT_SQL = (
+    "SELECT count(*) FROM identity.account_lifecycle "
+    "WHERE claimed_by IS NULL AND state IN "
+    "('DELETION_REQUESTED','ACCESS_DISABLED','PURGE_PENDING','PURGING',"
+    "'FAILED_RETRYABLE')"
+)
+
+
 async def _claim_until_found(service, user_id, worker_id: str,
                              rounds: int = _DRAIN_LIMIT):
     """Claim repeatedly until this account appears, or give up.
@@ -724,18 +735,33 @@ async def test_deletion_is_never_reported_complete_in_11b1(client):
     token, user_id, _ = await _register(client)
     await client.post("/api/v1/account/deletion", headers=_headers(token))
 
+    # THROUGH `_claim_until_found`, not a fixed number of rounds.
+    #
+    # This test used to claim three batches of 50 and assume its own row must
+    # be among them. `claim_account_lifecycle` caps the batch at 50 and orders
+    # by `requested_at` OLDEST FIRST, and this account's row is the NEWEST, so
+    # that assumption is really "fewer than 150 claimable lifecycles exist" —
+    # true on a fresh database, false on the one the security-gate proof
+    # accumulates. Entry 12B's authoritative gate run failed here with
+    # `assert 'DELETION_REQUESTED' in ('ACCESS_DISABLED', 'PURGE_PENDING')`
+    # against 213 competing non-COMPLETE rows: the loop claimed 150 other
+    # accounts and never reached this one.
+    #
+    # The invariant under test is that the worker can claim THIS account and
+    # advance it. Batch position is not part of it, and the helper every other
+    # claiming test in this file already uses says so.
     async with privacy_unit_of_work() as session:
         service = AccountLifecycleService(session)
-        for _ in range(3):
-            for claimed in await service.claim(worker_id="w", batch_size=50):
-                if claimed.user_id != user_id:
-                    continue
-                nxt = {
-                    LifecycleState.DELETION_REQUESTED: LifecycleState.ACCESS_DISABLED,
-                    LifecycleState.ACCESS_DISABLED: LifecycleState.PURGE_PENDING,
-                }.get(claimed.state)
-                if nxt:
-                    await service.advance(claimed, nxt, worker_id="w")
+        for nxt in (LifecycleState.ACCESS_DISABLED,
+                    LifecycleState.PURGE_PENDING):
+            mine = await _claim_until_found(service, user_id, "w")
+            assert mine is not None, (
+                f"the worker never reached this account while advancing to "
+                f"{nxt.value}: the queue drained without the row appearing. "
+                f"claimable lifecycles now: "
+                f"{_count(_CLAIMABLE_LIFECYCLE_COUNT_SQL)}"
+            )
+            await service.advance(mine, nxt, worker_id="w")
 
     state = await _state_of(user_id)
     assert state in (LifecycleState.ACCESS_DISABLED.value,
@@ -746,6 +772,63 @@ async def test_deletion_is_never_reported_complete_in_11b1(client):
     assert body["status"] == "deletion_requested", (
         "the API reported completion before any purge phase ran"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_worker_reaches_its_account_behind_a_backlog_of_older_rows(
+    client,
+):
+    """THE REGRESSION FOR THE STRATEGY ABOVE, made deterministic.
+
+    The old loop claimed three batches of 50. `claim_account_lifecycle` caps a
+    batch at 50 and orders OLDEST FIRST, so 150 older claimable rows are enough
+    to hide a newly-created account behind the window — permanently, not
+    intermittently. This seeds more than that many older rows and proves the
+    corrected strategy still reaches its own.
+
+    Deterministic by construction: the backlog is counted, not waited for. The
+    old strategy's ceiling is asserted against the measured backlog so this
+    test fails if someone reintroduces a fixed number of rounds.
+    """
+    _OLD_STRATEGY_CEILING = 3 * 50
+
+    # Older than the subject by construction: seeded first, and
+    # `requested_at` defaults to insertion time.
+    with owner_cursor() as cur:
+        for _ in range(_OLD_STRATEGY_CEILING + 10):
+            _seed_lifecycle_at(cur, "DELETION_REQUESTED")
+
+    token, user_id, _ = await _register(client)
+    await client.post("/api/v1/account/deletion", headers=_headers(token))
+
+    backlog = _count(_CLAIMABLE_LIFECYCLE_COUNT_SQL)
+    assert backlog > _OLD_STRATEGY_CEILING, (
+        f"the backlog ({backlog}) does not exceed the old strategy's ceiling "
+        f"({_OLD_STRATEGY_CEILING}), so this proves nothing"
+    )
+
+    rounds_used = 0
+    async with privacy_unit_of_work() as session:
+        service = AccountLifecycleService(session)
+        while True:
+            rounds_used += 1
+            claimed = await service.claim(worker_id="backlog", batch_size=50)
+            assert claimed, (
+                "the queue drained without this account appearing; the worker "
+                "cannot reach a row it is supposed to be able to claim")
+            mine = next(
+                (c for c in claimed if c.user_id == user_id), None)
+            if mine is not None:
+                break
+        # The old strategy would have stopped before here, which is the point.
+        assert rounds_used > 3, (
+            f"the subject surfaced in round {rounds_used}; the backlog was not "
+            "deep enough to exercise the defect")
+        await service.advance(
+            mine, LifecycleState.ACCESS_DISABLED, worker_id="backlog")
+
+    assert await _state_of(user_id) == LifecycleState.ACCESS_DISABLED.value
+    print(f"\nbacklog={backlog} claim rounds to reach own row={rounds_used}")  # noqa: T201
 
 
 # ---------------------------------------------------------------------------
