@@ -4,9 +4,14 @@ The exact set of tables reachable from `identity.user_account` through
 all-CASCADE paths, computed with the corrected walker (recurse only when the
 edge being traversed is `confdeltype='c'`) and independently reconfirmed.
 
-    cascade-reachable tables   70
+    cascade-reachable tables   72
     maximum depth               3 (shortest-path representation)
-    direct inbound FKs         38  (34 CASCADE, 4 SET NULL)
+    direct inbound FKs         39  (35 CASCADE, 4 SET NULL)
+
+Widened from 70 by the Tax Decision Journal entry (migration 0068), which adds
+`ioe.decision_journal` (depth 1) and `ioe.decision_journal_event` (depth 2) —
+classified LIVE_USER_DATA_DELETE before the migration shipped, per the registry
+workflow.
 
 Superseded figures: **73 tables**, **31 protected**, **6-edge cut-set**. Those
 came from the walker that gated on the inbound edge's action and are not to be
@@ -16,7 +21,7 @@ reused.
 
 | schema | tables |
 |---|---|
-| `ioe` | 25 |
+| `ioe` | 27 |
 | `finance` | 8 |
 | `profile` | 6 |
 | `identity` | 5 |
@@ -56,6 +61,7 @@ An unclassified row is an open item, not a default.
 | 1 | `identity.mfa_method` | — |
 | 1 | `identity.password_reset_token` | — |
 | 1 | `identity.user_credential` | — |
+| 1 | `ioe.decision_journal` | — |
 | 1 | `ioe.freshness_outbox` | — |
 | 1 | `ioe.integrity_check` | — |
 | 1 | `ioe.optimization_run` | — |
@@ -78,6 +84,7 @@ An unclassified row is an open item, not a default.
 | 2 | `billing.invoice` | — |
 | 2 | `docs.document_extraction` | — |
 | 2 | `docs.document_link` | — |
+| 2 | `ioe.decision_journal_event` | — |
 | 2 | `ioe.multi_year_projection` | — |
 | 2 | `ioe.optimization_candidate` | — |
 | 2 | `ioe.optimization_run_event` | — |

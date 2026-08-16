@@ -561,6 +561,43 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/surface_census.py",
         ),
     ),
+    "ioe.decision_journal": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="USER_DECISION_RECORD_DIES_WITH_ACCOUNT",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "One user decision thread about one sealed scenario: the user's "
+            "declared intent and self-reported actions, plus pinned artifact "
+            "identities. Behavioral product state, not sealed evidence and not "
+            "a replay dependency — nothing verifies against it. Dies with the "
+            "account through the user_account CASCADE fired by terminal "
+            "removal; the application role holds no UPDATE or DELETE, so the "
+            "cascade is the only deletion path."
+        ),
+        evidence_references=(
+            "db/sql/62_decision_journal.sql",
+            "app/privacy/classification.py",
+        ),
+    ),
+    "ioe.decision_journal_event": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="USER_DECISION_RECORD_DIES_WITH_ACCOUNT",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "Append-only history of one decision thread: declarations and "
+            "self-reports, never system verification. Same lifecycle as its "
+            "thread — removed by the decision_journal CASCADE, which the "
+            "user_account cascade reaches at depth 2."
+        ),
+        evidence_references=(
+            "db/sql/62_decision_journal.sql",
+            "app/privacy/classification.py",
+        ),
+    ),
     "ioe.freshness_outbox": Entry(
         state=CLASSIFIED,
         depth=1,

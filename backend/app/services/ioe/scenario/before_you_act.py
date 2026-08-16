@@ -86,8 +86,15 @@ class LoadedComparison:
     comparison: TaxStateComparison
 
 
-def _side(bundle: HistoricalSourceBundle, *, user_id: uuid.UUID) -> ComparisonSide:
-    """Assemble and project one loaded side. Pure — no session, no I/O."""
+def comparison_side(
+    bundle: HistoricalSourceBundle, *, user_id: uuid.UUID
+) -> ComparisonSide:
+    """Assemble and project one loaded side. Pure — no session, no I/O.
+
+    Public because the Decision Journal pins the comparison identity at
+    creation through the same certified pipeline — a second implementation of
+    "bundle to comparable side" would be a second answer to what the user saw.
+    """
     return ComparisonSide(
         graph=project_scenario_comparable_graph(
             assemble_historical_graph(bundle, user_id=user_id)
@@ -129,8 +136,8 @@ class BeforeYouActService:
             )
             # Pure from here on: no statement is issued below this line.
             comparison = compare_scenario_graphs(
-                _side(baseline, user_id=self.user_id),
-                _side(counterfactual, user_id=self.user_id),
+                comparison_side(baseline, user_id=self.user_id),
+                comparison_side(counterfactual, user_id=self.user_id),
             )
         except DependencyUnavailable as exc:
             raise ComparisonUnavailable(exc.reason) from exc

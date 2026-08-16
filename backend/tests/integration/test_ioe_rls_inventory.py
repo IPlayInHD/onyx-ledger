@@ -54,6 +54,8 @@ OWNERSHIP_CHAIN = {
     "portfolio_exclusion": "portfolio_id -> strategy_portfolio -> run",
     "resource_ledger_entry": "portfolio_id -> strategy_portfolio -> run",
     "scenario_event": "scenario_id -> scenario.user_id",
+    "decision_journal": "user_id (direct)",
+    "decision_journal_event": "journal_id -> decision_journal.user_id",
     "scenario_input_change": "scenario_id -> scenario.user_id",
     "scenario_result": "scenario_id -> scenario.user_id",
     "scenario_lever": "scenario_id -> scenario.user_id",

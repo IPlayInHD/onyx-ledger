@@ -16,19 +16,22 @@ model them).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     ARRAY,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
     Numeric,
     SmallInteger,
     Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -1020,3 +1023,85 @@ class ActiveCalculationVersion(Base):
     activated_at: Mapped[datetime] = created_at_col()
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
+
+
+# ---------------------------------------------------------------------------
+# Tax Decision Journal — the user-authority record of intent and self-report
+# ---------------------------------------------------------------------------
+class DecisionJournal(Base):
+    """One decision thread about one sealed scenario. Immutable after insert:
+    everything that happens next is a `DecisionJournalEvent`, and the
+    application role holds no UPDATE or DELETE on this table at all.
+
+    The columns pin ARTIFACT IDENTITIES, never artifact content. The sealed
+    scenario row remains the authority for what the user was shown; these
+    references make "which sealed artifact" unrewritable by later versions.
+    """
+
+    __tablename__ = "decision_journal"
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_id"),
+        {"schema": "ioe"},
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("identity.user_account.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    scenario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ioe.scenario.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    subject_opportunity_code: Mapped[str | None] = mapped_column(Text)
+    scenario_result_hash: Mapped[str | None] = mapped_column(Text)
+    scenario_result_schema_version: Mapped[str | None] = mapped_column(Text)
+    comparison_hash: Mapped[str | None] = mapped_column(Text)
+    comparison_schema_version: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class DecisionJournalEvent(Base):
+    """Append-only decision history. A change of mind appends a new event under
+    the thread's row lock; `(journal_id, sequence)` is the ordering authority
+    and `(journal_id, request_id)` makes client retries land on the event they
+    already created.
+
+    `decision` records what the user DECLARED; `user_reported_action_date`
+    records when the user SAYS they acted. Neither is system verification, and
+    no column here claims otherwise.
+    """
+
+    __tablename__ = "decision_journal_event"
+    __table_args__ = (
+        UniqueConstraint("journal_id", "sequence"),
+        UniqueConstraint("journal_id", "request_id"),
+        CheckConstraint(
+            "(decision IS NOT NULL) = "
+            "(event_type IN ('CREATED', 'DECISION_RECORDED'))",
+            name="ck_decision_on_decision_events",
+        ),
+        CheckConstraint(
+            "user_reported_action_date IS NULL "
+            "OR event_type = 'ACTION_REPORTED'",
+            name="ck_action_date_on_action_reports",
+        ),
+        {"schema": "ioe"},
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    journal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ioe.decision_journal.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    decision: Mapped[str | None] = mapped_column(Text)
+    user_reported_action_date: Mapped[date | None] = mapped_column(Date)
+    event_schema_version: Mapped[str] = mapped_column(
+        Text, nullable=False, default="1.0.0", server_default=text("'1.0.0'"))
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    recorded_at: Mapped[datetime] = created_at_col()

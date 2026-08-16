@@ -724,6 +724,21 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        notes="Replay-verification history. Survives de-identified so the "
              "platform can still show that verification ran; see §20 and §40 "
              "for what its status must become once evidence is erased."),
+    _e("ioe.decision_journal", (P.RECOMMENDATION_DATA,),
+       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
+       exportable=True,
+       notes="One user decision thread about one sealed scenario: declared "
+             "intent, self-reported actions, pinned artifact identities. The "
+             "user is the authority for every value; nothing is computed. "
+             "Append-only by grants (no UPDATE/DELETE for the app role); dies "
+             "with the account via the user_account CASCADE."),
+    _e("ioe.decision_journal_event", (P.RECOMMENDATION_DATA,),
+       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
+       exportable=True,
+       notes="Append-only history of one decision thread. A change of mind "
+             "appends; correction is supersession, never mutation. PROCEED is "
+             "a declaration and ACTION_REPORTED a self-report — neither is "
+             "system verification and no column claims otherwise."),
     _e("ioe.freshness_outbox", (P.OPERATIONAL_TELEMETRY, P.PSEUDONYMOUS_IDENTIFIER),
        S.OPERATIONAL, R.SHORT_OPERATIONAL, D.CASCADE_DELETE, rls=True,
        notes="Carries user_id and closed reason codes, never values."),

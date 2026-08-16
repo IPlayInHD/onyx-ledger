@@ -19,6 +19,13 @@ from app.api.deps import assert_account_active, current_user_id, db_authed
 from app.core.exceptions import NotFound
 from app.schemas.assurance import TaxAssuranceOut
 from app.schemas.before_you_act import BeforeYouActComparisonOut
+from app.schemas.decision_journal import (
+    CreateDecisionJournalRequest,
+    DecisionJournalDetailOut,
+    DecisionJournalSummaryOut,
+    RecordDecisionRequest,
+    ReportActionRequest,
+)
 from app.schemas.ioe import (
     IntegrityCheckOut,
     IntegrityOut,
@@ -34,9 +41,12 @@ from app.services.admission.guard import user_scope
 from app.services.ioe import (
     assurance_presentation,
     before_you_act_presentation,
+    journal_presentation,
     presentation,
 )
 from app.services.ioe.domain.integrity import EntityType
+from app.services.ioe.journal import DecisionJournalService
+from app.services.ioe.journal.domain import Decision
 from app.services.ioe.projection_query import ProjectionQueryService
 from app.services.ioe.read_repository import IoeReadRepository
 from app.services.ioe.replay import IntegrityVerificationService
@@ -232,6 +242,116 @@ async def get_tax_assurance(
     return assurance_presentation.assurance_detail(
         derive_assurance_map(graph, as_of=evaluation_date)
     )
+
+
+# ---------------------------------------------------------- decision journal --
+@router.post(
+    "/decision-journal",
+    response_model=DecisionJournalDetailOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Open a decision thread from a sealed scenario",
+    description=(
+        "Records that the user is CONSIDERING a decision about a scenario "
+        "they own, pinning the sealed artifact identities that informed it. "
+        "Append-only from here: every later change is a new event. Retrying "
+        "with the same request_id returns the thread already created."
+    ),
+)
+async def create_decision_journal(
+    body: CreateDecisionJournalRequest,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> DecisionJournalDetailOut:
+    service = DecisionJournalService(session, user_id)
+    journal = await service.create(
+        scenario_id=body.scenario_id,
+        request_id=body.request_id,
+        subject_opportunity_code=body.subject_opportunity_code,
+    )
+    return journal_presentation.journal_detail(await service.detail(journal.id))
+
+
+@router.get(
+    "/decision-journal",
+    response_model=list[DecisionJournalSummaryOut],
+    summary="List decision threads, newest first",
+)
+async def list_decision_journals(
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> list[DecisionJournalSummaryOut]:
+    loaded = await DecisionJournalService(session, user_id).list_journals()
+    return [journal_presentation.journal_summary(entry) for entry in loaded]
+
+
+@router.get(
+    "/decision-journal/{journal_id}",
+    response_model=DecisionJournalDetailOut,
+    summary="Read one decision thread with its full history",
+    description=(
+        "The append-only history, the projection derived from it, the pinned "
+        "scenario reference, and governed evidence context — sealed readiness "
+        "as recorded, current observed readiness as it stands now. A user "
+        "report of an action is presented as a report, never as verification."
+    ),
+)
+async def get_decision_journal(
+    journal_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> DecisionJournalDetailOut:
+    return journal_presentation.journal_detail(
+        await DecisionJournalService(session, user_id).detail(journal_id)
+    )
+
+
+@router.post(
+    "/decision-journal/{journal_id}/decision",
+    response_model=DecisionJournalDetailOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a decision",
+    description=(
+        "Appends the user's declaration — PROCEED, DEFER, DECLINE, or back to "
+        "CONSIDERING. A change of mind appends; nothing is rewritten. PROCEED "
+        "records intent and is never treated as proof an action occurred."
+    ),
+)
+async def record_decision(
+    journal_id: uuid.UUID,
+    body: RecordDecisionRequest,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> DecisionJournalDetailOut:
+    service = DecisionJournalService(session, user_id)
+    await service.record_decision(
+        journal_id, decision=Decision(body.decision), request_id=body.request_id
+    )
+    return journal_presentation.journal_detail(await service.detail(journal_id))
+
+
+@router.post(
+    "/decision-journal/{journal_id}/action-report",
+    response_model=DecisionJournalDetailOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Report that the action was taken",
+    description=(
+        "Records the user's report that they acted, optionally with the date "
+        "they say it happened. A self-report: the response continues to label "
+        "execution USER_REPORTED, and evidence context remains a separate, "
+        "governed observation."
+    ),
+)
+async def report_decision_action(
+    journal_id: uuid.UUID,
+    body: ReportActionRequest,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> DecisionJournalDetailOut:
+    service = DecisionJournalService(session, user_id)
+    await service.report_action(
+        journal_id, request_id=body.request_id, action_date=body.action_date
+    )
+    return journal_presentation.journal_detail(await service.detail(journal_id))
 
 
 # ---------------------------------------------------------------- portfolio --
