@@ -10,6 +10,7 @@ from app.core.exceptions import DomainError
 from app.core.logging import configure_logging, correlation_id, get_logger
 from app.core.middleware import CorrelationIdMiddleware
 from app.services.admission import AdmissionRejected
+from app.services.ioe.scenario.before_you_act import ComparisonUnavailable
 
 settings = get_settings()
 configure_logging(settings.debug)
@@ -49,6 +50,14 @@ def create_app() -> FastAPI:
             body["error_code"] = exc.reason.value
             body["retry_after_seconds"] = exc.retry_after_seconds
             headers["Retry-After"] = str(exc.retry_after_seconds)
+
+        if isinstance(exc, ComparisonUnavailable):
+            # Same reasoning, different question. The caller already proved they
+            # own this scenario, so naming the governed condition tells them
+            # nothing about anyone else — and without it, "cannot compare" and
+            # "comparison is empty" would be indistinguishable to a client.
+            # A closed enum value only: never a message, a row, or a path.
+            body["error_code"] = exc.reason.value
 
         return JSONResponse(
             status_code=exc.status_code,

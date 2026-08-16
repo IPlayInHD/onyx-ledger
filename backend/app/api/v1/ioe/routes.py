@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import assert_account_active, current_user_id, db_authed
 from app.core.exceptions import NotFound
+from app.schemas.before_you_act import BeforeYouActComparisonOut
 from app.schemas.ioe import (
     IntegrityCheckOut,
     IntegrityOut,
@@ -28,11 +29,12 @@ from app.schemas.ioe import (
 )
 from app.services.admission import OperationClass, admission_guard
 from app.services.admission.guard import user_scope
-from app.services.ioe import presentation
+from app.services.ioe import before_you_act_presentation, presentation
 from app.services.ioe.domain.integrity import EntityType
 from app.services.ioe.projection_query import ProjectionQueryService
 from app.services.ioe.read_repository import IoeReadRepository
 from app.services.ioe.replay import IntegrityVerificationService
+from app.services.ioe.scenario.before_you_act import BeforeYouActService
 from app.services.ioe.scenario.comparison_service import ScenarioComparisonService
 from app.services.ioe.scenario.query_service import ScenarioQueryService
 from app.services.ioe.scenario.service import ScenarioService
@@ -156,6 +158,37 @@ async def compare_scenarios(
 ) -> ScenarioComparisonOut:
     loaded = await ScenarioComparisonService(session, user_id).compare(left_id, right_id)
     return presentation.comparison_detail(loaded)
+
+
+@router.get(
+    "/scenarios/{scenario_id}/comparison",
+    response_model=BeforeYouActComparisonOut,
+    summary="What would change if you did this",
+    description=(
+        "The Before-You-Act comparison: the difference between this scenario's "
+        "frozen baseline and its sealed counterfactual. Read entirely from "
+        "sealed rows — no tax is computed, no rule is evaluated, no current "
+        "document is read. A scenario whose seal cannot answer for a comparison "
+        "family is refused rather than partially compared. Reports what "
+        "changed; it does not recommend a course of action."
+    ),
+)
+async def get_before_you_act_comparison(
+    scenario_id: uuid.UUID,
+    include_unchanged: bool = Query(
+        False,
+        description=(
+            "Render records that did not change. Presentation only: the "
+            "summary counts and the comparison hash are identical either way."
+        ),
+    ),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> BeforeYouActComparisonOut:
+    loaded = await BeforeYouActService(session, user_id).comparison_for(scenario_id)
+    return before_you_act_presentation.comparison_detail(
+        loaded, include_unchanged=include_unchanged
+    )
 
 
 # ---------------------------------------------------------------- portfolio --
