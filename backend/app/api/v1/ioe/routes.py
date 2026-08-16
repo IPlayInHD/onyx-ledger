@@ -10,12 +10,14 @@ the figure that was verified and sealed.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import assert_account_active, current_user_id, db_authed
 from app.core.exceptions import NotFound
+from app.schemas.assurance import TaxAssuranceOut
 from app.schemas.before_you_act import BeforeYouActComparisonOut
 from app.schemas.ioe import (
     IntegrityCheckOut,
@@ -29,7 +31,11 @@ from app.schemas.ioe import (
 )
 from app.services.admission import OperationClass, admission_guard
 from app.services.admission.guard import user_scope
-from app.services.ioe import before_you_act_presentation, presentation
+from app.services.ioe import (
+    assurance_presentation,
+    before_you_act_presentation,
+    presentation,
+)
 from app.services.ioe.domain.integrity import EntityType
 from app.services.ioe.projection_query import ProjectionQueryService
 from app.services.ioe.read_repository import IoeReadRepository
@@ -38,6 +44,8 @@ from app.services.ioe.scenario.before_you_act import BeforeYouActService
 from app.services.ioe.scenario.comparison_service import ScenarioComparisonService
 from app.services.ioe.scenario.query_service import ScenarioQueryService
 from app.services.ioe.scenario.service import ScenarioService
+from app.services.state_graph.assurance import derive_assurance_map
+from app.services.state_graph.service import TaxStateGraphService
 
 router = APIRouter(prefix="/ioe", tags=["ioe"])
 
@@ -188,6 +196,41 @@ async def get_before_you_act_comparison(
     loaded = await BeforeYouActService(session, user_id).comparison_for(scenario_id)
     return before_you_act_presentation.comparison_detail(
         loaded, include_unchanged=include_unchanged
+    )
+
+
+@router.get(
+    "/assurance",
+    response_model=TaxAssuranceOut,
+    summary="The Tax Assurance Map for one tax year",
+    description=(
+        "The current standing of the caller's tax position, derived "
+        "deterministically from governed state: opportunities, evidence "
+        "readiness, deadlines, assumptions, and a documented review-next "
+        "order. Reports standing only — it computes no tax, decides no "
+        "eligibility, and makes no recommendation beyond its documented "
+        "presentation order. A family with no governing run reads UNAVAILABLE, "
+        "never as an empty READY."
+    ),
+)
+async def get_tax_assurance(
+    tax_year: int = Query(..., ge=2000, le=2100),
+    as_of: date | None = Query(
+        None,
+        description=(
+            "Evaluation date for deadline urgency, echoed in the response. "
+            "Defaults to today (UTC). The only field the clock touches."
+        ),
+    ),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> TaxAssuranceOut:
+    # The clock is read HERE, at the boundary, and injected. The derivation
+    # itself never consults it, which is what keeps the map reproducible.
+    evaluation_date = as_of or datetime.now(tz=UTC).date()
+    graph = await TaxStateGraphService(session, user_id).build(tax_year=tax_year)
+    return assurance_presentation.assurance_detail(
+        derive_assurance_map(graph, as_of=evaluation_date)
     )
 
 
