@@ -768,8 +768,21 @@ async def test_archiving_another_users_scenario_is_refused():
 @pytest.mark.asyncio
 async def test_the_scenario_trace_does_not_duplicate_raw_financial_inputs():
     """The trace records the FIELDS the levers touched. The user's other income,
-    expenses and profile stay in the frozen analysis snapshot."""
-    distinctive = "87654"
+    expenses and profile stay in the frozen analysis snapshot.
+
+    THE NEEDLE MUST NOT BE VALID HEX. The whole-row scan below sweeps JSON that
+    legitimately carries dozens of third-party identifiers — rule-version UUIDs
+    in `affected_rule_versions`, candidate ids in the sealed baseline — and a
+    purely numeric needle can occur INSIDE one of them by chance: a release
+    gate run failed exactly this way when a shared rule's UUIDv7 happened to
+    contain `…1287654c…`, and every scenario that evaluated that rule carried
+    the "leak" in its own row. A decimal point cannot appear in a UUID or a
+    hex digest, while a genuinely leaked money value still renders with its
+    cents — so the needle keeps its detection power and loses the collisions.
+    """
+    distinctive = "87654.21"
+    assert any(ch not in "0123456789abcdef-" for ch in distinctive), (
+        "the needle degenerated back into valid hex; see the docstring")
     uid, analysis_id = await _user_with_analysis(employment=distinctive)
     outcome = await ScenarioService(uid).simulate(
         analysis_id, ScenarioSpec.parse([_lever(RRSP, "5000")])
