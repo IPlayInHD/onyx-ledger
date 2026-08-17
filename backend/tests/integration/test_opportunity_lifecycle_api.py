@@ -22,6 +22,8 @@ from app.database.models import (
     AnalysisInputSnapshot,
     AnalysisLineItem,
     AnalysisRun,
+    CalcFormula,
+    CalcFormulaInput,
     Document,
     DocumentType,
     IncomeSource,
@@ -44,7 +46,9 @@ from app.services.ioe.lifecycle.domain import LifecycleActionability
 from app.services.ioe.orchestrator import OptimizationOrchestrator
 from app.services.ioe.scenario.service import ScenarioService
 from app.services.privacy.lifecycle import AccountLifecycleService
+from app.services.state_graph.assurance import derive_assurance_map
 from app.services.state_graph.contracts import NodeFreshness
+from app.services.state_graph.service import TaxStateGraphService
 from tests.conftest import frozen_snapshot
 
 API = "/api/v1/ioe/opportunity-lifecycle"
@@ -55,6 +59,9 @@ RRSP = "INCREASE_RRSP_DEDUCTION"
 #: Every fixture rule carries this governed deadline, so the three evaluation
 #: dates below land in known bands without any test restating a threshold.
 DEADLINE = date(2026, 4, 30)
+
+#: The fixture rule's governed impact. Large on purpose — see `_published_rule`.
+IMPACT = Decimal("250000")
 AS_OF = "2025-10-01"          # 211 days out — NORMAL
 URGENT_AS_OF = "2026-04-20"   #  10 days out — URGENT
 EXPIRED_AS_OF = "2026-05-01"  #  -1 days out — EXPIRED
@@ -130,6 +137,17 @@ async def _published_rule(
     NOT_PORTFOLIO_EVALUABLE and Assurance reports as BLOCKED — a governed
     state worth testing deliberately (see the BLOCKED case below), but a
     useless default, because BLOCKED outranks every axis this entry joins.
+
+    IT ALSO CARRIES A DOMINANT IMPACT, and that is isolation, not decoration.
+    Rules are published GLOBALLY while the optimizer's search budget is 200
+    engine runs, so against a shared database this user accumulates hundreds
+    of candidates — measured at 296 in a whole-directory run. Candidates are
+    ranked by score, and a rule with no `impact_formula_id` carries zero
+    economic value, sorts near the back, and is excluded as
+    SEARCH_BUDGET_EXHAUSTED before the engine ever reaches it. That is a real
+    governed exclusion, and it made every axis of this suite read BLOCKED in
+    company while passing alone. A literal-valued formula puts this rule at
+    the front of the ranking, where the budget cannot strand it.
     """
     async with unit_of_work(actor_type="admin") as s:
         jurisdiction = await s.scalar(
@@ -146,8 +164,18 @@ async def _published_rule(
             eligibility_basis_codes=["BASIS_LIFECYCLE"])
         s.add(version)
         await s.flush()
+        formula = CalcFormula(
+            code=f"LIFECYCLEIMPACT_{uuid.uuid4().hex[:8]}",
+            expression="amount", expression_lang="rpn", output_unit="CAD",
+            description="fixed governed impact, large enough to rank first")
+        s.add(formula)
+        await s.flush()
+        s.add(CalcFormulaInput(
+            formula_id=formula.id, param_name="amount",
+            literal_value=IMPACT))
         s.add(RuleOutcome(
             rule_version_id=version.id, outcome_type="recommend", priority=1,
+            impact_formula_id=formula.id,
             title_template=f"{code} opportunity",
             economic_effect_type="current_year_tax_reduction",
             reversibility="reversible",
@@ -184,11 +212,32 @@ async def _hold(uid: uuid.UUID, code: str = "T4") -> tuple[str, str, str]:
 
 async def _ready() -> tuple[uuid.UUID, uuid.UUID, str]:
     """Held evidence, a governed rule, and a completed optimization run — the
-    ordinary production shape. Returns (uid, analysis_id, opportunity_code)."""
+    ordinary production shape. Returns (uid, analysis_id, opportunity_code).
+
+    The post-condition is the isolation guard. If a shared database ever grows
+    enough evaluable candidates to strand this fixture behind the optimizer's
+    search budget again, it would otherwise surface as an unexplained BLOCKED
+    on every axis at once, in six tests, none of which mention the optimizer.
+    Asserting it here fails once, early, and says why.
+    """
     uid, analysis_id = await _user_with_analysis()
     await _hold(uid)
     code = await _published_rule()
     await OptimizationOrchestrator(uid).generate(analysis_id)
+
+    async with unit_of_work(user_id=uid, actor_type="user") as s:
+        graph = await TaxStateGraphService(s, uid).build(tax_year=TAX_YEAR)
+    (item,) = [
+        i for i in derive_assurance_map(
+            graph, as_of=date.fromisoformat(AS_OF)).opportunities
+        if i.opportunity_code == code
+    ]
+    assert item.blocked_reason_code is None, (
+        f"the fixture opportunity is governed-BLOCKED as "
+        f"{item.blocked_reason_code!r} before any assertion runs. "
+        "SEARCH_BUDGET_EXHAUSTED means other suites' globally published rules "
+        "pushed it past the optimizer's 200-run budget — raise the fixture's "
+        "IMPACT so it ranks earlier, do not weaken the assertions below.")
     return uid, analysis_id, code
 
 
