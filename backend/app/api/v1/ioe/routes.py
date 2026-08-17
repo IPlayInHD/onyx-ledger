@@ -36,17 +36,20 @@ from app.schemas.ioe import (
     ScenarioSummaryOut,
     StrategyPortfolioOut,
 )
+from app.schemas.opportunity_lifecycle import OpportunityLifecycleOut
 from app.services.admission import OperationClass, admission_guard
 from app.services.admission.guard import user_scope
 from app.services.ioe import (
     assurance_presentation,
     before_you_act_presentation,
     journal_presentation,
+    lifecycle_presentation,
     presentation,
 )
 from app.services.ioe.domain.integrity import EntityType
 from app.services.ioe.journal import DecisionJournalService
 from app.services.ioe.journal.domain import Decision
+from app.services.ioe.lifecycle import OpportunityLifecycleService
 from app.services.ioe.projection_query import ProjectionQueryService
 from app.services.ioe.read_repository import IoeReadRepository
 from app.services.ioe.replay import IntegrityVerificationService
@@ -480,3 +483,38 @@ def _entity_type(value: str) -> EntityType:
 
 
 __all__ = ["router"]
+
+
+@router.get(
+    "/opportunity-lifecycle",
+    response_model=OpportunityLifecycleOut,
+    summary="The current lifecycle of every governed opportunity",
+    description=(
+        "Joins the Tax Assurance Map with the Decision Journal: availability, "
+        "the user's decision, whether they reported acting, evidence "
+        "readiness, the governed deadline and its timing band, freshness and "
+        "integrity — seven axes that never collapse into one another. "
+        "Expired opportunities stay visible with timing EXPIRED rather than "
+        "disappearing. Reports state; it computes no tax, evaluates no rule, "
+        "and ranks nothing the optimizer has not already ranked."
+    ),
+)
+async def get_opportunity_lifecycle(
+    tax_year: int = Query(..., ge=2000, le=2100),
+    as_of: date | None = Query(
+        None,
+        description=(
+            "Evaluation date for deadline timing, echoed in the response. "
+            "Defaults to today (UTC). The only field the clock touches."
+        ),
+    ),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> OpportunityLifecycleOut:
+    # The clock is read HERE, at the boundary, and injected into both the
+    # Assurance derivation and the lifecycle join.
+    evaluation_date = as_of or datetime.now(tz=UTC).date()
+    lifecycle = await OpportunityLifecycleService(session, user_id).build(
+        tax_year=tax_year, as_of=evaluation_date
+    )
+    return lifecycle_presentation.lifecycle_detail(lifecycle)
