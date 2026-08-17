@@ -206,17 +206,40 @@ async def test_a_rejection_still_names_no_scope(client):
     is tracking that address, which is one bit more than it should learn from a
     login form.
     """
-    email = f"quiet_{uuid.uuid4().hex[:10]}@test.ca"
-    async with unit_of_work(actor_type="system") as session:
-        service = AdmissionService(session)
-        for _ in range(40):
-            await service.charge_auth_attempt(
-                source_scope_id=f"throwaway-{uuid.uuid4().hex}",
-                subject_scope_id=auth_subject_scope(email),
-            )
+    # THE CHARGES AND THE LOGIN MUST SHARE A RATE WINDOW. The counter lives in
+    # a fixed wall-clock minute bucket (`window_start = now.replace(second=0,
+    # microsecond=0)`), so a login that lands in the NEXT bucket reads an empty
+    # counter, is not rejected, and returns a body with no `error_code` at all.
+    # Measured directly: charging and then deliberately stepping into the next
+    # bucket yields error_code=<ABSENT>, while the same sequence inside one
+    # bucket yields AUTH_RATE_LIMIT.
+    #
+    # Retrying on a roll fixes the PRECONDITION rather than weakening the
+    # assertion — what this test is about is what a rejection body may say, and
+    # a run where no rejection happened cannot answer that question. Each
+    # attempt takes well under a second, so needing three straddles in a row is
+    # not a race worth budgeting for.
+    body: dict = {}
+    for _ in range(3):
+        email = f"quiet_{uuid.uuid4().hex[:10]}@test.ca"
+        opened_in = datetime.now(tz=UTC).replace(second=0, microsecond=0)
+        async with unit_of_work(actor_type="system") as session:
+            service = AdmissionService(session)
+            for _ in range(40):
+                await service.charge_auth_attempt(
+                    source_scope_id=f"throwaway-{uuid.uuid4().hex}",
+                    subject_scope_id=auth_subject_scope(email),
+                )
 
-    body = (await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": PASSWORD})).json()
+        body = (await client.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": PASSWORD})).json()
+        if datetime.now(tz=UTC).replace(second=0, microsecond=0) == opened_in:
+            break
+    else:
+        pytest.fail(
+            "the rate window rolled between the charges and the login on every "
+            "attempt, so no rejection was ever produced to inspect")
 
     assert body["error_code"] == "AUTH_RATE_LIMIT"
     serialized = str(body).lower()
