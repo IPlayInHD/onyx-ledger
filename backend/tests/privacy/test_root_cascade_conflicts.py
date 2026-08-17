@@ -163,8 +163,8 @@ def test_the_registry_did_not_shrink_when_the_graph_did(cur):
     `DROP CONSTRAINT`.
     """
     live = set(cascade_reachable(cur, ROOT))
-    assert len(REGISTRY) == 72, (
-        f"the certified privacy universe is {len(REGISTRY)} tables, not 72"
+    assert len(REGISTRY) == 73, (
+        f"the certified privacy universe is {len(REGISTRY)} tables, not 73"
     )
     assert len(live) < len(REGISTRY), (
         "the live closure is no smaller than the certified universe; 0060's "

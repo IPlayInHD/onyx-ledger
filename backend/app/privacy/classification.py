@@ -739,6 +739,19 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "appends; correction is supersession, never mutation. PROCEED is "
              "a declaration and ACTION_REPORTED a self-report — neither is "
              "system verification and no column claims otherwise."),
+    _e("ioe.retention_checkpoint", (P.RECOMMENDATION_DATA,),
+       S.DERIVED, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
+       exportable=True,
+       notes="The product state a user explicitly acknowledged, and the "
+             "baseline every 'what changed?' answer is measured from. DERIVED "
+             "rather than SOURCE: the user supplies the act of acknowledging, "
+             "but every value inside the snapshot was produced by a governed "
+             "authority. Holds no document identity, no storage key and no "
+             "content hash — evidence appears only as governed readiness. Not "
+             "a replay dependency: nothing verifies against it, and a lost "
+             "baseline costs a user one re-acknowledgement rather than any "
+             "sealed guarantee. Append-only by grants; dies with the account "
+             "via the user_account CASCADE."),
     _e("ioe.freshness_outbox", (P.OPERATIONAL_TELEMETRY, P.PSEUDONYMOUS_IDENTIFIER),
        S.OPERATIONAL, R.SHORT_OPERATIONAL, D.CASCADE_DELETE, rls=True,
        notes="Carries user_id and closed reason codes, never values."),

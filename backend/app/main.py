@@ -10,6 +10,7 @@ from app.core.exceptions import DomainError
 from app.core.logging import configure_logging, correlation_id, get_logger
 from app.core.middleware import CorrelationIdMiddleware
 from app.services.admission import AdmissionRejected
+from app.services.ioe.retention.service import StaleAcknowledgement
 from app.services.ioe.scenario.before_you_act import ComparisonUnavailable
 
 settings = get_settings()
@@ -50,6 +51,13 @@ def create_app() -> FastAPI:
             body["error_code"] = exc.reason.value
             body["retry_after_seconds"] = exc.retry_after_seconds
             headers["Retry-After"] = str(exc.retry_after_seconds)
+
+        if isinstance(exc, StaleAcknowledgement):
+            # Which guard refused: the state moved, or the baseline was already
+            # superseded. A client that cannot tell them apart cannot recover
+            # correctly — one calls for a re-read, the other for showing the
+            # user what someone else acknowledged first. A closed code only.
+            body["error_code"] = exc.reason
 
         if isinstance(exc, ComparisonUnavailable):
             # Same reasoning, different question. The caller already proved they

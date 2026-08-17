@@ -37,6 +37,11 @@ from app.schemas.ioe import (
     StrategyPortfolioOut,
 )
 from app.schemas.opportunity_lifecycle import OpportunityLifecycleOut
+from app.schemas.retention import (
+    AcknowledgeChangesRequest,
+    RetentionChangesOut,
+    RetentionCheckpointOut,
+)
 from app.services.admission import OperationClass, admission_guard
 from app.services.admission.guard import user_scope
 from app.services.ioe import (
@@ -45,6 +50,7 @@ from app.services.ioe import (
     journal_presentation,
     lifecycle_presentation,
     presentation,
+    retention_presentation,
 )
 from app.services.ioe.domain.integrity import EntityType
 from app.services.ioe.journal import DecisionJournalService
@@ -53,6 +59,7 @@ from app.services.ioe.lifecycle import OpportunityLifecycleService
 from app.services.ioe.projection_query import ProjectionQueryService
 from app.services.ioe.read_repository import IoeReadRepository
 from app.services.ioe.replay import IntegrityVerificationService
+from app.services.ioe.retention.service import RetentionService
 from app.services.ioe.scenario.before_you_act import BeforeYouActService
 from app.services.ioe.scenario.comparison_service import ScenarioComparisonService
 from app.services.ioe.scenario.query_service import ScenarioQueryService
@@ -518,3 +525,68 @@ async def get_opportunity_lifecycle(
         tax_year=tax_year, as_of=evaluation_date
     )
     return lifecycle_presentation.lifecycle_detail(lifecycle)
+
+
+@router.get(
+    "/changes",
+    response_model=RetentionChangesOut,
+    summary="What materially changed since the last acknowledged state",
+    description=(
+        "Compares current governed state against the state the user last "
+        "explicitly acknowledged. SIDE-EFFECT FREE: reading never advances the "
+        "baseline, so refreshing shows the same unacknowledged changes until "
+        "they are acknowledged. Reports band transitions, not countdowns — a "
+        "deadline moving from 38 to 37 days is not a change; NORMAL becoming "
+        "APPROACHING is. On first use `baseline_status` is NO_BASELINE and the "
+        "change list is empty rather than restating current state as arrivals."
+    ),
+)
+async def get_retention_changes(
+    tax_year: int = Query(..., ge=2000, le=2100),
+    as_of: date | None = Query(
+        None,
+        description=(
+            "Evaluation date for the timing bands, echoed in the response. "
+            "Defaults to today (UTC)."
+        ),
+    ),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> RetentionChangesOut:
+    evaluation_date = as_of or datetime.now(tz=UTC).date()
+    changes, baseline = await RetentionService(session, user_id).changes_for(
+        tax_year=tax_year, as_of=evaluation_date
+    )
+    return retention_presentation.changes_detail(changes, baseline)
+
+
+@router.post(
+    "/changes/acknowledge",
+    response_model=RetentionCheckpointOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Acknowledge the reviewed state, establishing a new baseline",
+    description=(
+        "The ONLY operation that advances the retention baseline. The client "
+        "echoes the `current_snapshot_hash` it reviewed and the baseline it "
+        "compared against; if either has moved the request is refused with 409 "
+        "rather than silently recording that the user reviewed changes they "
+        "never saw. Retrying with the same `request_id` returns the checkpoint "
+        "the first attempt created."
+    ),
+)
+async def acknowledge_retention_changes(
+    body: AcknowledgeChangesRequest,
+    tax_year: int = Query(..., ge=2000, le=2100),
+    as_of: date | None = Query(None),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> RetentionCheckpointOut:
+    evaluation_date = as_of or datetime.now(tz=UTC).date()
+    checkpoint = await RetentionService(session, user_id).acknowledge(
+        tax_year=tax_year,
+        as_of=evaluation_date,
+        acknowledged_snapshot_hash=body.snapshot_hash,
+        expected_baseline_checkpoint_id=body.baseline_checkpoint_id,
+        request_id=body.request_id,
+    )
+    return retention_presentation.checkpoint_detail(checkpoint)

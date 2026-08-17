@@ -26,7 +26,7 @@ from app.services.ioe.lifecycle.domain import (
     OpportunityLifecycleMap,
     derive_opportunity_lifecycle,
 )
-from app.services.state_graph.assurance import derive_assurance_map
+from app.services.state_graph.assurance import TaxAssuranceMap, derive_assurance_map
 from app.services.state_graph.service import TaxStateGraphService
 
 
@@ -36,6 +36,22 @@ class OpportunityLifecycleService:
         self.user_id = user_id
 
     async def build(self, *, tax_year: int, as_of: date) -> OpportunityLifecycleMap:
+        """The lifecycle map alone — the shape the API serves."""
+        return (await self.build_with_assurance(
+            tax_year=tax_year, as_of=as_of))[1]
+
+    async def build_with_assurance(
+        self, *, tax_year: int, as_of: date
+    ) -> tuple[TaxAssuranceMap, OpportunityLifecycleMap]:
+        """Both certified maps from ONE graph build.
+
+        Retention needs the Assurance families as well as the lifecycle, and
+        the family standing is Assurance's authority rather than the
+        lifecycle's. Exposing the map this path already derives is what keeps
+        retention from either building the graph twice or re-implementing this
+        orchestration — a second copy of these five steps would be a second
+        answer to what "current product state" means.
+        """
         graph = await TaxStateGraphService(self.s, self.user_id).build(
             tax_year=tax_year)
         assurance = derive_assurance_map(graph, as_of=as_of)
@@ -69,4 +85,5 @@ class OpportunityLifecycleService:
         )
 
         # Pure from here: no statement is issued below this line.
-        return derive_opportunity_lifecycle(assurance, threads, as_of=as_of)
+        return assurance, derive_opportunity_lifecycle(
+            assurance, threads, as_of=as_of)

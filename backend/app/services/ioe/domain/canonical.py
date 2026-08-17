@@ -303,6 +303,16 @@ DOMAIN_COUNTERFACTUAL_DERIVED_STATE = "counterfactual_derived_state"
 # for the same reason every other digest here is: the bytes of a comparison
 # must not be able to stand in for the bytes of the artifacts it compares.
 DOMAIN_SCENARIO_COMPARISON = "scenario_comparison"
+# Retention. The snapshot is the durable record of what a user acknowledged, so
+# its hash is the optimistic-concurrency token: a client acknowledging state it
+# never saw is caught by a hash it cannot produce. Separated from the graph and
+# lifecycle domains because a retention snapshot is a lossy, deliberately
+# noise-free projection of them — the same product state yields different bytes
+# here, and neither digest may stand in for the other.
+DOMAIN_RETENTION_SNAPSHOT = "retention_snapshot"
+# One material change, identified independently of any row id so a future
+# notification path can deduplicate deliveries without inventing its own key.
+DOMAIN_RETENTION_CHANGE = "retention_change"
 
 ALL_HASH_DOMAINS = (
     DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
@@ -311,6 +321,7 @@ ALL_HASH_DOMAINS = (
     DOMAIN_PORTFOLIO_RESULT, DOMAIN_VERSION_MANIFEST, DOMAIN_WEIGHT_CONFIG,
     DOMAIN_TAX_STATE_GRAPH, DOMAIN_COUNTERFACTUAL_DERIVED_STATE,
     DOMAIN_SCENARIO_COMPARISON,
+    DOMAIN_RETENTION_SNAPSHOT, DOMAIN_RETENTION_CHANGE,
 )
 
 

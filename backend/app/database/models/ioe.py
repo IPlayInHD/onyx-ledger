@@ -1105,3 +1105,54 @@ class DecisionJournalEvent(Base):
         Text, nullable=False, default="1.0.0", server_default=text("'1.0.0'"))
     request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     recorded_at: Mapped[datetime] = created_at_col()
+
+
+class RetentionCheckpoint(Base):
+    """The product state a user explicitly acknowledged.
+
+    THE RETENTION BASELINE AUTHORITY. "What changed?" is measured from the
+    latest of these and from nothing else — not from a last-seen marker, not
+    from a last login, and never from a GET. Only an explicit acknowledgement
+    writes a row here, which is what stops a background refresh from erasing
+    changes the user never saw.
+
+    Append-only and history-preserving: a new acknowledgement SUPERSEDES its
+    predecessor rather than rewriting it, and the application role holds no
+    UPDATE or DELETE. `(user_id, tax_year, supersedes_checkpoint_id)` is unique
+    with NULLS NOT DISTINCT, so two clients that both read the same baseline
+    cannot both acknowledge from it — the second is refused by the database,
+    not merely by the service.
+
+    `snapshot_schema_version` belongs to the STORED BYTES, independent of every
+    product contract version, because these bytes have to stay interpretable
+    long after those contracts move.
+    """
+
+    __tablename__ = "retention_checkpoint"
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_id"),
+        UniqueConstraint(
+            "user_id", "tax_year", "supersedes_checkpoint_id",
+            name="uq_retention_checkpoint_chain",
+            postgresql_nulls_not_distinct=True,
+        ),
+        {"schema": "ioe"},
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("identity.user_account.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tax_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_schema_version: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    evaluated_as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    supersedes_checkpoint_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ioe.retention_checkpoint.id", ondelete="CASCADE"),
+    )
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    acknowledged_at: Mapped[datetime] = created_at_col()

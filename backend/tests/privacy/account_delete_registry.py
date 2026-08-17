@@ -598,6 +598,31 @@ REGISTRY: dict[str, Entry] = {
             "app/privacy/classification.py",
         ),
     ),
+    "ioe.retention_checkpoint": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="ACKNOWLEDGED_PRODUCT_BASELINE_DIES_WITH_ACCOUNT",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "The product state a user acknowledged, stored so 'what changed "
+            "since you last looked?' has a baseline. Behavioural product "
+            "state, not sealed evidence and not a replay dependency — nothing "
+            "verifies against it, and losing it costs one re-acknowledgement "
+            "rather than any sealed guarantee, so there is no conflict between "
+            "purging it and any certified replay contract. The snapshot holds "
+            "governed semantic state only: no document id, object key, bucket, "
+            "content hash or filename. Dies with the account through the "
+            "user_account CASCADE fired by terminal removal; the application "
+            "role holds no UPDATE or DELETE, so the cascade is the only "
+            "deletion path. The self-referencing supersedes FK also cascades, "
+            "so no successor row can outlive its predecessor."
+        ),
+        evidence_references=(
+            "db/sql/63_retention_checkpoint.sql",
+            "app/privacy/classification.py",
+        ),
+    ),
     "ioe.freshness_outbox": Entry(
         state=CLASSIFIED,
         depth=1,

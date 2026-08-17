@@ -4,7 +4,7 @@ The exact set of tables reachable from `identity.user_account` through
 all-CASCADE paths, computed with the corrected walker (recurse only when the
 edge being traversed is `confdeltype='c'`) and independently reconfirmed.
 
-    cascade-reachable tables   72
+    cascade-reachable tables   73
     maximum depth               3 (shortest-path representation)
     direct inbound FKs         39  (35 CASCADE, 4 SET NULL)
 
@@ -12,6 +12,13 @@ Widened from 70 by the Tax Decision Journal entry (migration 0068), which adds
 `ioe.decision_journal` (depth 1) and `ioe.decision_journal_event` (depth 2) —
 classified LIVE_USER_DATA_DELETE before the migration shipped, per the registry
 workflow.
+
+Widened again to 73 by the Retention / "What Changed?" entry (migration 0069),
+which adds `ioe.retention_checkpoint` (depth 1) — the acknowledged product
+baseline, classified LIVE_USER_DATA_DELETE before the migration shipped. Its
+self-referencing `supersedes_checkpoint_id` FK is also CASCADE, so a successor
+checkpoint cannot outlive the predecessor it supersedes; the table's shortest
+path from `identity.user_account` remains depth 1 through its own `user_id`.
 
 Superseded figures: **73 tables**, **31 protected**, **6-edge cut-set**. Those
 came from the walker that gated on the inbound edge's action and are not to be
@@ -65,6 +72,7 @@ An unclassified row is an open item, not a default.
 | 1 | `ioe.freshness_outbox` | — |
 | 1 | `ioe.integrity_check` | — |
 | 1 | `ioe.optimization_run` | — |
+| 1 | `ioe.retention_checkpoint` | — |
 | 1 | `ioe.scenario` | — |
 | 1 | `profile.dependent` | — |
 | 1 | `profile.spouse_profile` | — |

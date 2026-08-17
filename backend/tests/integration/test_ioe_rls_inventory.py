@@ -56,6 +56,7 @@ OWNERSHIP_CHAIN = {
     "scenario_event": "scenario_id -> scenario.user_id",
     "decision_journal": "user_id (direct)",
     "decision_journal_event": "journal_id -> decision_journal.user_id",
+    "retention_checkpoint": "user_id (direct)",
     "scenario_input_change": "scenario_id -> scenario.user_id",
     "scenario_result": "scenario_id -> scenario.user_id",
     "scenario_lever": "scenario_id -> scenario.user_id",

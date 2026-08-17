@@ -86,6 +86,7 @@ from app.database.models.ioe import (  # noqa: F401
     PortfolioMember,
     RecommendationRelationship,
     ResourceLedgerEntry,
+    RetentionCheckpoint,
     RuleSnapshot,
     RuleSnapshotArtifact,
     RunRuleSnapshot,

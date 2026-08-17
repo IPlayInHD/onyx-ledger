@@ -5179,6 +5179,36 @@
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
     },
     {
+      "key": "remove_constraint|ioe|decision_journal_event|decision_journal_event_decision_check",
+      "kind": "remove_constraint",
+      "schema": "ioe",
+      "table": "decision_journal_event",
+      "object": "decision_journal_event_decision_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|ioe|decision_journal_event|decision_journal_event_event_type_check",
+      "kind": "remove_constraint",
+      "schema": "ioe",
+      "table": "decision_journal_event",
+      "object": "decision_journal_event_event_type_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|ioe|decision_journal_event|decision_journal_event_sequence_check",
+      "kind": "remove_constraint",
+      "schema": "ioe",
+      "table": "decision_journal_event",
+      "object": "decision_journal_event_sequence_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
       "key": "remove_constraint|ioe|freshness_outbox_audit|freshness_outbox_audit_transition_check",
       "kind": "remove_constraint",
       "schema": "ioe",
@@ -8479,6 +8509,36 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|ioe|decision_journal_event|ix_ioe_decision_journal_event_thread",
+      "kind": "remove_index",
+      "schema": "ioe",
+      "table": "decision_journal_event",
+      "object": "ix_ioe_decision_journal_event_thread",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|ioe|decision_journal|ix_ioe_decision_journal_scenario",
+      "kind": "remove_index",
+      "schema": "ioe",
+      "table": "decision_journal",
+      "object": "ix_ioe_decision_journal_scenario",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|ioe|decision_journal|ix_ioe_decision_journal_user",
+      "kind": "remove_index",
+      "schema": "ioe",
+      "table": "decision_journal",
+      "object": "ix_ioe_decision_journal_user",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|ioe|freshness_outbox_audit|ix_ioe_outbox_audit_event",
       "kind": "remove_index",
       "schema": "ioe",
@@ -8764,6 +8824,16 @@
       "schema": "ioe",
       "table": "recommendation_relationship",
       "object": "ix_ioe_relationship_run",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|ioe|retention_checkpoint|ix_ioe_retention_checkpoint_latest",
+      "kind": "remove_index",
+      "schema": "ioe",
+      "table": "retention_checkpoint",
+      "object": "ix_ioe_retention_checkpoint_latest",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -9459,6 +9529,36 @@
       "reason": "Governed table-comment divergence."
     },
     {
+      "key": "remove_table_comment|ioe|decision_journal_event|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "ioe",
+      "table": "decision_journal_event",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|ioe|decision_journal|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "ioe",
+      "table": "decision_journal",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|ioe|retention_checkpoint|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "ioe",
+      "table": "retention_checkpoint",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
       "key": "remove_table|audit|audit_log_2025m01|<table>",
       "kind": "remove_table",
       "schema": "audit",
@@ -9547,86 +9647,6 @@
       "detail": "",
       "class": "DB_ONLY_PARTITION_CHILD",
       "reason": "Declarative-partition child table. It has no model by design \u2014 the parent is mapped and the children are managed by the partition DDL."
-    },
-    {
-      "key": "remove_index|ioe|decision_journal|ix_ioe_decision_journal_scenario",
-      "kind": "remove_index",
-      "schema": "ioe",
-      "table": "decision_journal",
-      "object": "ix_ioe_decision_journal_scenario",
-      "detail": "",
-      "class": "RAW_SQL_MANAGED_INDEX",
-      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
-    },
-    {
-      "key": "remove_index|ioe|decision_journal|ix_ioe_decision_journal_user",
-      "kind": "remove_index",
-      "schema": "ioe",
-      "table": "decision_journal",
-      "object": "ix_ioe_decision_journal_user",
-      "detail": "",
-      "class": "RAW_SQL_MANAGED_INDEX",
-      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
-    },
-    {
-      "key": "remove_table_comment|ioe|decision_journal|<table_comment>",
-      "kind": "remove_table_comment",
-      "schema": "ioe",
-      "table": "decision_journal",
-      "object": "<table_comment>",
-      "detail": "",
-      "class": "TABLE_COMMENT_METADATA",
-      "reason": "Governed table-comment divergence."
-    },
-    {
-      "key": "remove_table_comment|ioe|decision_journal_event|<table_comment>",
-      "kind": "remove_table_comment",
-      "schema": "ioe",
-      "table": "decision_journal_event",
-      "object": "<table_comment>",
-      "detail": "",
-      "class": "TABLE_COMMENT_METADATA",
-      "reason": "Governed table-comment divergence."
-    },
-    {
-      "key": "remove_index|ioe|decision_journal_event|ix_ioe_decision_journal_event_thread",
-      "kind": "remove_index",
-      "schema": "ioe",
-      "table": "decision_journal_event",
-      "object": "ix_ioe_decision_journal_event_thread",
-      "detail": "",
-      "class": "RAW_SQL_MANAGED_INDEX",
-      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
-    },
-    {
-      "key": "remove_constraint|ioe|decision_journal_event|decision_journal_event_decision_check",
-      "kind": "remove_constraint",
-      "schema": "ioe",
-      "table": "decision_journal_event",
-      "object": "decision_journal_event_decision_check",
-      "detail": "",
-      "class": "RAW_SQL_MANAGED_CHECK",
-      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
-    },
-    {
-      "key": "remove_constraint|ioe|decision_journal_event|decision_journal_event_event_type_check",
-      "kind": "remove_constraint",
-      "schema": "ioe",
-      "table": "decision_journal_event",
-      "object": "decision_journal_event_event_type_check",
-      "detail": "",
-      "class": "RAW_SQL_MANAGED_CHECK",
-      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
-    },
-    {
-      "key": "remove_constraint|ioe|decision_journal_event|decision_journal_event_sequence_check",
-      "kind": "remove_constraint",
-      "schema": "ioe",
-      "table": "decision_journal_event",
-      "object": "decision_journal_event_sequence_check",
-      "detail": "",
-      "class": "RAW_SQL_MANAGED_CHECK",
-      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
     }
   ]
 }
