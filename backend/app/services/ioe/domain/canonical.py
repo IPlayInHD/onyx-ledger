@@ -313,6 +313,13 @@ DOMAIN_RETENTION_SNAPSHOT = "retention_snapshot"
 # One material change, identified independently of any row id so a future
 # notification path can deduplicate deliveries without inventing its own key.
 DOMAIN_RETENTION_CHANGE = "retention_change"
+# The Tax Knowledge Source Registry. A citation's identity is its source version
+# plus a STRUCTURED locator, so the locator needs a digest that does not depend
+# on JSON key order — that digest is what makes one location in one edition a
+# single reusable row rather than a duplicate per citing rule. Domain-separated
+# from every artifact digest because a locator is provenance metadata, never
+# sealed evidence, and the two must not be able to stand in for each other.
+DOMAIN_SOURCE_LOCATOR = "source_locator"
 
 ALL_HASH_DOMAINS = (
     DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
@@ -322,6 +329,7 @@ ALL_HASH_DOMAINS = (
     DOMAIN_TAX_STATE_GRAPH, DOMAIN_COUNTERFACTUAL_DERIVED_STATE,
     DOMAIN_SCENARIO_COMPARISON,
     DOMAIN_RETENTION_SNAPSHOT, DOMAIN_RETENTION_CHANGE,
+    DOMAIN_SOURCE_LOCATOR,
 )
 
 

@@ -150,6 +150,7 @@ from app.database.models.tax_kb import (  # noqa: F401
     ContributionLimit,
     FactDefinition,
     GovSource,
+    KnowledgeCitation,
     LegislationReference,
     RuleAction,
     RuleCondition,
@@ -159,10 +160,13 @@ from app.database.models.tax_kb import (  # noqa: F401
     RuleOutcome,
     RuleRequiredDocument,
     RuleSharedResource,
+    SourceCitation,
     TaxBracket,
     TaxBracketSet,
     TaxRule,
     TaxRuleVersion,
+    TaxSource,
+    TaxSourceVersion,
 )
 from app.database.models.tkms import (  # noqa: F401
     ChangeItem,

@@ -4399,6 +4399,16 @@
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },
     {
+      "key": "modify_type|tax_kb|tax_source_version|tax_year",
+      "kind": "modify_type",
+      "schema": "tax_kb",
+      "table": "tax_source_version",
+      "object": "tax_year",
+      "detail": "DOMAIN->Integer",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
       "key": "modify_type|tkms|extracted_rule|confidence",
       "kind": "modify_type",
       "schema": "tkms",
@@ -6449,6 +6459,16 @@
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
     },
     {
+      "key": "remove_constraint|tax_kb|source_citation|ck_source_citation_locator_object",
+      "kind": "remove_constraint",
+      "schema": "tax_kb",
+      "table": "source_citation",
+      "object": "ck_source_citation_locator_object",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
       "key": "remove_constraint|tax_kb|tax_bracket_set|tax_bracket_set_jurisdiction_id_tax_year_kind_key",
       "kind": "remove_constraint",
       "schema": "tax_kb",
@@ -6494,6 +6514,66 @@
       "schema": "tax_kb",
       "table": "tax_rule_version",
       "object": "tax_rule_version_status_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|tax_kb|tax_source_version|ck_tax_source_version_effective_order",
+      "kind": "remove_constraint",
+      "schema": "tax_kb",
+      "table": "tax_source_version",
+      "object": "ck_tax_source_version_effective_order",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|tax_kb|tax_source_version|ck_tax_source_version_not_self_superseding",
+      "kind": "remove_constraint",
+      "schema": "tax_kb",
+      "table": "tax_source_version",
+      "object": "ck_tax_source_version_not_self_superseding",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|tax_kb|tax_source_version|tax_source_version_fingerprint_method_check",
+      "kind": "remove_constraint",
+      "schema": "tax_kb",
+      "table": "tax_source_version",
+      "object": "tax_source_version_fingerprint_method_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|tax_kb|tax_source_version|tax_source_version_status_check",
+      "kind": "remove_constraint",
+      "schema": "tax_kb",
+      "table": "tax_source_version",
+      "object": "tax_source_version_status_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|tax_kb|tax_source|tax_source_issuer_code_check",
+      "kind": "remove_constraint",
+      "schema": "tax_kb",
+      "table": "tax_source",
+      "object": "tax_source_issuer_code_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|tax_kb|tax_source|tax_source_source_type_check",
+      "kind": "remove_constraint",
+      "schema": "tax_kb",
+      "table": "tax_source",
+      "object": "tax_source_source_type_check",
       "detail": "",
       "class": "RAW_SQL_MANAGED_CHECK",
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
@@ -9209,6 +9289,36 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|tax_kb|knowledge_citation|ix_knowledge_citation_citation",
+      "kind": "remove_index",
+      "schema": "tax_kb",
+      "table": "knowledge_citation",
+      "object": "ix_knowledge_citation_citation",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|tax_kb|knowledge_citation|ix_knowledge_citation_formula",
+      "kind": "remove_index",
+      "schema": "tax_kb",
+      "table": "knowledge_citation",
+      "object": "ix_knowledge_citation_formula",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|tax_kb|knowledge_citation|ix_knowledge_citation_rule_version",
+      "kind": "remove_index",
+      "schema": "tax_kb",
+      "table": "knowledge_citation",
+      "object": "ix_knowledge_citation_rule_version",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|tax_kb|tax_bracket|ix_tax_bracket_set",
       "kind": "remove_index",
       "schema": "tax_kb",
@@ -9294,6 +9404,16 @@
       "schema": "tax_kb",
       "table": "tax_rule",
       "object": "trgm_tax_rule_name",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|tax_kb|tax_source_version|ix_tax_source_version_source",
+      "kind": "remove_index",
+      "schema": "tax_kb",
+      "table": "tax_source_version",
+      "object": "ix_tax_source_version_source",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -9553,6 +9673,46 @@
       "kind": "remove_table_comment",
       "schema": "ioe",
       "table": "retention_checkpoint",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|tax_kb|knowledge_citation|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "tax_kb",
+      "table": "knowledge_citation",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|tax_kb|source_citation|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "tax_kb",
+      "table": "source_citation",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|tax_kb|tax_source_version|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "tax_kb",
+      "table": "tax_source_version",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|tax_kb|tax_source|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "tax_kb",
+      "table": "tax_source",
       "object": "<table_comment>",
       "detail": "",
       "class": "TABLE_COMMENT_METADATA",

@@ -5,7 +5,19 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, SmallInteger, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -381,3 +393,125 @@ class ConditionValueSetItem(Base):
         UUID(as_uuid=True), ForeignKey("rules.condition_value_set.id", ondelete="CASCADE")
     )
     value_text: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class TaxSource(Base):
+    """A continuing authoritative tax publication — the Income Tax Act, CRA
+    Guide T4044 — identified independently of any single edition.
+
+    NOT `GovSource`, which is a (name, url) stub with no version, issuer,
+    jurisdiction, fingerprint or supersession. That stub is left alone rather
+    than grown into something it was never shaped to be.
+    """
+
+    __tablename__ = "tax_source"
+    __table_args__ = (
+        UniqueConstraint("jurisdiction_id", "issuer_code", "official_identifier",
+                         name="uq_tax_source_identity"),
+        {"schema": "tax_kb"},
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    issuer_code: Mapped[str] = mapped_column(Text, nullable=False)
+    jurisdiction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ref.jurisdiction.id"), nullable=False)
+    official_identifier: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class TaxSourceVersion(Base):
+    """One retrieved edition, immutable once written.
+
+    Supersession points BACKWARD from the successor, so registering a newer
+    edition never rewrites the row a historical rule was authored against.
+    """
+
+    __tablename__ = "tax_source_version"
+    __table_args__ = (
+        UniqueConstraint("source_id", "content_fingerprint",
+                         name="uq_tax_source_version_content"),
+        UniqueConstraint("supersedes_version_id",
+                         name="uq_tax_source_version_supersedes"),
+        {"schema": "tax_kb"},
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_source.id"), nullable=False)
+    edition: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Declared generically so it matches every other tax_year in the schema:
+    #: the stored type is the ref.tax_year_num domain, a governed TYPE_AFFINITY
+    #: divergence the drift policy already accounts for.
+    tax_year: Mapped[int | None] = mapped_column()
+    publication_date: Mapped[date | None] = mapped_column(Date)
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
+    retrieved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    official_locator: Mapped[str] = mapped_column(Text, nullable=False)
+    content_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint_method: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="ACTIVE", server_default=text("'ACTIVE'"))
+    supersedes_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_source_version.id"))
+    manifest_schema_version: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class SourceCitation(Base):
+    """A source version plus a structured locator. Reusable: the same location
+    in the same edition is one row, cited by many knowledge objects."""
+
+    __tablename__ = "source_citation"
+    __table_args__ = (
+        UniqueConstraint("source_version_id", "locator_hash",
+                         name="uq_source_citation_identity"),
+        {"schema": "tax_kb"},
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    source_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_source_version.id"),
+        nullable=False)
+    locator: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    locator_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class KnowledgeCitation(Base):
+    """Which governed knowledge object a citation supports.
+
+    An exclusive arc — one nullable FK per referent kind, exactly one required —
+    so every provenance link keeps real referential integrity. A
+    (kind, object_id) pair would have been shorter and would have allowed a
+    citation to point at a formula that no longer exists.
+    """
+
+    __tablename__ = "knowledge_citation"
+    __table_args__ = (
+        CheckConstraint(
+            "num_nonnulls(rule_version_id, formula_id, tax_bracket_set_id, "
+            "contribution_limit_id, benefit_parameter_id) = 1",
+            name="ck_knowledge_citation_exactly_one_subject"),
+        {"schema": "tax_kb"},
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    citation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.source_citation.id"),
+        nullable=False)
+    rule_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id"))
+    formula_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rules.calc_formula.id"))
+    tax_bracket_set_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_bracket_set.id"))
+    contribution_limit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.contribution_limit.id"))
+    benefit_parameter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.benefit_parameter.id"))
+    created_at: Mapped[datetime] = created_at_col()
