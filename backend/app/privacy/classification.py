@@ -1004,6 +1004,22 @@ _NON_RLS: tuple[NonRlsTable, ...] = (
       for t in ("benefit_parameter", "benefit_program", "contribution_limit",
                 "gov_source", "legislation_reference", "tax_bracket",
                 "tax_bracket_set", "tax_rule", "tax_rule_version")),
+    # The source registry: which authoritative publication, edition and precise
+    # location supports a governed rule, formula or reference-data value. Public
+    # law and citations to it — no tenant data, so tenancy would be the wrong
+    # model, and forcing a user_id on a statute would put public law in the
+    # account-deletion universe where it does not belong.
+    #
+    # Read-only to the application is enforced rather than assumed: tax_kb's
+    # DEFAULT PRIVILEGES grant onyx_app_rw arwd, and 64_tax_source_registry.sql
+    # revokes INSERT/UPDATE/DELETE so customers can read provenance and nothing
+    # else. The authoring role holds INSERT and SELECT only, never UPDATE or
+    # DELETE — corrections supersede rather than rewrite history.
+    *(_n(f"tax_kb.{t}", N.GLOBAL_REFERENCE_OR_REGISTRY, _GRANTS_RO,
+         "Authoritative tax-source provenance. Public law and citations to it; "
+         "no customer data, and never mixed with user-uploaded documents.")
+      for t in ("knowledge_citation", "source_citation", "tax_source",
+                "tax_source_version")),
     *(_n(f"tkms.{t}", N.GLOBAL_REFERENCE_OR_REGISTRY, _ADMIN_ONLY,
          "Legislation ingestion pipeline. Government documents and operator "
          "workflow; no customer data reaches it.")
