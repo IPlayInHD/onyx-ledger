@@ -210,19 +210,45 @@ async def _hold(uid: uuid.UUID, code: str = "T4") -> tuple[str, str, str]:
         return str(document.id), document.bucket, document.object_key
 
 
+#: The ONE governed rule every ordinary test in this module shares.
+_SHARED_RULE: list[str] = []
+
+
+async def _shared_rule() -> str:
+    """Published once for the whole module, and that is the isolation.
+
+    A fresh rule per test would compete WITH ITSELF: rules are global, so by
+    the fifteenth test this user has fifteen identical top-ranked candidates
+    all drawing on the same RRSP room. Exactly one is admitted and the rest are
+    deferred as NO_STANDALONE_IMPROVEMENT_AT_THIS_POINT — and because ties
+    break on a random opportunity code, the admitted one usually belongs to a
+    different test. Measured: the fixture reached candidate_rank 19 and was
+    deferred, which Assurance reports as BLOCKED.
+
+    One shared rule means one candidate, deterministically admitted. Nothing
+    else is shared: every test still builds its own user, evidence, run and
+    journal threads. The rule is immutable published metadata, identical for
+    every caller, so sharing it removes accumulation rather than creating
+    coupling.
+    """
+    if not _SHARED_RULE:
+        _SHARED_RULE.append(await _published_rule())
+    return _SHARED_RULE[0]
+
+
 async def _ready() -> tuple[uuid.UUID, uuid.UUID, str]:
     """Held evidence, a governed rule, and a completed optimization run — the
     ordinary production shape. Returns (uid, analysis_id, opportunity_code).
 
-    The post-condition is the isolation guard. If a shared database ever grows
-    enough evaluable candidates to strand this fixture behind the optimizer's
-    search budget again, it would otherwise surface as an unexplained BLOCKED
-    on every axis at once, in six tests, none of which mention the optimizer.
-    Asserting it here fails once, early, and says why.
+    The post-condition is the isolation guard. If a shared database ever
+    strands this fixture behind the optimizer again, it would otherwise
+    surface as an unexplained BLOCKED on every axis at once, in six tests,
+    none of which mention the optimizer. Asserting it here fails once, early,
+    and says why.
     """
     uid, analysis_id = await _user_with_analysis()
     await _hold(uid)
-    code = await _published_rule()
+    code = await _shared_rule()
     await OptimizationOrchestrator(uid).generate(analysis_id)
 
     async with unit_of_work(user_id=uid, actor_type="user") as s:
@@ -234,10 +260,13 @@ async def _ready() -> tuple[uuid.UUID, uuid.UUID, str]:
     ]
     assert item.blocked_reason_code is None, (
         f"the fixture opportunity is governed-BLOCKED as "
-        f"{item.blocked_reason_code!r} before any assertion runs. "
-        "SEARCH_BUDGET_EXHAUSTED means other suites' globally published rules "
-        "pushed it past the optimizer's 200-run budget — raise the fixture's "
-        "IMPACT so it ranks earlier, do not weaken the assertions below.")
+        f"{item.blocked_reason_code!r} (rank {item.candidate_rank}) before any "
+        "assertion runs, so every axis below would read BLOCKED for a reason "
+        "that has nothing to do with the lifecycle. SEARCH_BUDGET_EXHAUSTED "
+        "means globally published rules pushed it past the optimizer's 200-run "
+        "budget — raise IMPACT. NO_STANDALONE_IMPROVEMENT_AT_THIS_POINT means "
+        "it is competing with another candidate for the same lever resource — "
+        "keep one shared rule per module. Do not weaken the assertions below.")
     return uid, analysis_id, code
 
 
@@ -364,7 +393,9 @@ async def test_a_reported_action_with_missing_evidence_is_not_complete(client):
     """The state §8 requires to stay expressible: the user says they acted and
     the evidence is still not there. Neither fact may erase the other."""
     uid, analysis_id = await _user_with_analysis()
-    code = await _published_rule()          # requires a T4 that is never held
+    # The SHARED rule, whose required T4 this user simply never holds — a
+    # second evaluable rule would compete with it for the same lever room.
+    code = await _shared_rule()
     await OptimizationOrchestrator(uid).generate(analysis_id)
     reported = date(2025, 9, 15)
     await _thread(client, uid, analysis_id, subject=code,
@@ -694,7 +725,7 @@ async def test_the_read_does_not_scale_with_thread_count(client):
             event.remove(engine.sync_engine, "before_cursor_execute", record)
         return len(seen)
 
-    code = await _published_rule()
+    code = await _shared_rule()
     one_uid, one_analysis = await _user_with_analysis()
     many_uid, many_analysis = await _user_with_analysis()
     await _hold(one_uid)
@@ -751,7 +782,7 @@ async def test_one_tenants_lifecycle_never_contains_anothers_state(client):
 async def test_a_foreign_thread_never_decides_another_users_opportunity(client):
     """Both users hold the SAME opportunity code — the join key. Only the
     caller's own thread may reach their lifecycle."""
-    code = await _published_rule()
+    code = await _shared_rule()
     decider, decider_analysis = await _user_with_analysis()
     bystander, bystander_analysis = await _user_with_analysis()
     await _hold(decider)
@@ -818,7 +849,11 @@ async def test_a_rule_published_after_the_run_changes_nothing(client):
     uid, _, _ = await _ready()
     before = (await client.get(_url(), headers=_auth(uid))).json()
 
-    await _published_rule(document_type_code="RRSP")
+    # Published with an UNREGISTERED lever, so it cannot become an evaluable
+    # competitor for later tests. The point stands either way: a rule that
+    # appears after the run must not change a sealed answer.
+    await _published_rule(document_type_code="RRSP",
+                          lever_code="NOT_A_REGISTERED_LEVER")
 
     assert (await client.get(_url(), headers=_auth(uid))).json() == before
 
@@ -830,7 +865,7 @@ async def test_a_rule_published_after_the_run_changes_nothing(client):
 async def test_no_storage_identity_reaches_the_lifecycle(client):
     uid, analysis_id = await _user_with_analysis()
     document_id, bucket, object_key = await _hold(uid)
-    code = await _published_rule()
+    code = await _shared_rule()
     await OptimizationOrchestrator(uid).generate(analysis_id)
 
     response = await client.get(_url(), headers=_auth(uid))
