@@ -33,6 +33,10 @@ from tests.conftest import owner_dsn
 
 PHASE = "SOURCE_DATA"
 
+#: The fixture's financial value, and the needle every leak assertion searches
+#: for. It carries a decimal point deliberately — see the assertion guard.
+NEEDLE = "4321.99"
+
 
 @pytest.fixture(autouse=True)
 async def _dispose_engines():
@@ -79,7 +83,7 @@ def _account(cur) -> tuple[uuid.UUID, uuid.UUID]:
     cur.execute("""
         INSERT INTO finance.income_source
             (user_id, tax_year, income_type_id, amount, province_code)
-        SELECT %s, 2025, id, 4321, 'ON' FROM ref.income_type
+        SELECT %s, 2025, id, 4321.99, 'ON' FROM ref.income_type
          WHERE code = 'employment'
     """, (str(user),))
     cur.execute("""
@@ -282,7 +286,7 @@ async def test_the_failure_branch_after_a_purge_records_a_code_not_a_message():
                 _purge(cur, user, token)
             raised.append(True)
             # A message shaped like the ones that must never be persisted.
-            raise RuntimeError(f"apply failed for amount 4321 user {user}")
+            raise RuntimeError(f"apply failed for amount {NEEDLE} user {user}")
 
         relay._apply_for_tenant = purge_then_fail  # type: ignore[method-assign]
         # ONE pass, not a drain: `drain` re-claims a pending event on every
@@ -304,12 +308,21 @@ async def test_the_failure_branch_after_a_purge_records_a_code_not_a_message():
         cur.execute("SELECT to_jsonb(o)::text FROM ioe.freshness_outbox o "
                     " WHERE id = %s", (str(event),))
         row = cur.fetchone()[0]
-        assert "4321" not in row and "apply failed" not in row, (
+        # THE DECIMAL POINT IS LOAD-BEARING. Both haystacks below are jsonb
+        # rows full of UUIDs, and a bare `4321` is four valid hex digits —
+        # measured at 7 hits in 19,869 real audit rows. Worse, the audit query
+        # filters by `event_id`, so an unlucky event id poisons EVERY row it
+        # aggregates and the failure is certain rather than rare. A needle
+        # containing `.` cannot occur inside a UUID at all.
+        assert "." in NEEDLE, (
+            f"{NEEDLE!r} is pure hex and can appear inside a UUID by chance; "
+            "the assertions below would be probabilistic")
+        assert NEEDLE not in row and "apply failed" not in row, (
             "the exception text reached the queue row")
         cur.execute("SELECT coalesce(string_agg(to_jsonb(a)::text, ' '), '') "
                     "  FROM ioe.freshness_outbox_audit a WHERE event_id = %s",
                     (str(event),))
-        assert "4321" not in cur.fetchone()[0], (
+        assert NEEDLE not in cur.fetchone()[0], (
             "the exception text reached the outbox audit trail")
 
         assert _remaining(cur, user) == 0, "the failure path resurrected data"

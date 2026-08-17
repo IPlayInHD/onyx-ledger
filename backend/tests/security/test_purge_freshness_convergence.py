@@ -30,6 +30,11 @@ def _owner():
     return conn
 
 
+#: The fixture's financial value, and the needle every leak assertion searches
+#: for. It carries a decimal point deliberately — see the assertion guard.
+NEEDLE = "4321.99"
+
+
 def _account_with_income(cur) -> uuid.UUID:
     user = uuid.uuid4()
     cur.execute("INSERT INTO identity.user_account (id, email, status) "
@@ -38,7 +43,7 @@ def _account_with_income(cur) -> uuid.UUID:
     cur.execute("""
         INSERT INTO finance.income_source
             (user_id, tax_year, income_type_id, amount, province_code)
-        SELECT %s, 2025, id, 4321, 'ON' FROM ref.income_type
+        SELECT %s, 2025, id, 4321.99, 'ON' FROM ref.income_type
          WHERE code = 'employment'
     """, (str(user),))
     return user
@@ -162,7 +167,13 @@ def test_processing_an_obsolete_event_resurrects_nothing():
 
 def test_the_queued_event_carries_no_financial_value():
     """The row outlives the data it describes, so what it carries matters. The
-    amount used by the fixture is 4321 and must appear nowhere in it."""
+    amount used by the fixture is 4321.99 and must appear nowhere in it.
+
+    THE DECIMAL POINT IS LEAD, NOT DECORATION. The haystack is a jsonb row full
+    of UUIDs, and a bare `4321` is four valid hex digits — measured at 7 hits in
+    19,869 real audit rows, which is a gate that fails a few times a year for no
+    reason. A needle containing `.` cannot occur inside a UUID at all.
+    """
     admin = _owner()
     try:
         cur = admin.cursor()
@@ -174,6 +185,9 @@ def test_the_queued_event_carries_no_financial_value():
                     " WHERE id = %s", (str(event),))
         row = cur.fetchone()
         assert row is not None, "no event exists, so this proves nothing"
-        assert "4321" not in row[0], "a financial value survived in the queue row"
+        assert "." in NEEDLE, (
+            f"{NEEDLE!r} is pure hex and can appear inside a UUID by chance; "
+            "the assertion below would be probabilistic")
+        assert NEEDLE not in row[0], "a financial value survived in the queue row"
     finally:
         admin.close()
