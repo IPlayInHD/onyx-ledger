@@ -1,5 +1,21 @@
 # Source policy — identity, dedup, classification, authority
 
+## 0. Three different identities. Do not conflate them.
+
+| Concept | What it is | Used for |
+|---|---|---|
+| **Drive object identity** | the **Drive file ID** | addressing, retrieval, operational bookkeeping |
+| **Content identity** | **`RAW_BYTES_SHA256`** | duplicate detection, change detection |
+| **Governed semantic identity** | the certified **Source Registry** contract (source + version) | provenance, citation, publication |
+
+A filename is **display and discovery metadata only** — never identity. Drive
+timestamps are **auxiliary metadata only** — never identity.
+
+Two Drive file IDs may carry identical bytes (one content identity, two Drive
+objects). One Drive object's bytes may change (one Drive identity, two content
+identities). Neither situation is confusing once the three are kept apart, and
+every mistake in this area comes from collapsing them.
+
 ## 1. Identity is content, never a filename
 
 Fingerprint every candidate file with SHA-256 **over its exact bytes**, before
@@ -102,12 +118,95 @@ storing only the hex string would let the weaker claim read as the stronger.
 
 A newer edition does not automatically supersede an older one. Supersession is
 recorded by the **successor naming its predecessor's fingerprint**, so no
-historical row is ever rewritten. Never infer it from dates, titles, or the
-order files appear in a folder.
+historical row is ever rewritten.
 
-When a library contains several editions of the same document with different
-bytes, **which one is authoritative is an operator decision.** Escalate it; do
-not pick the largest, the newest, or the one with the tidiest filename.
+**Never establish supersession from any of these:**
+
+filename · file size · Drive upload date · Drive modified date · alphabetical
+order · presumed recency · which file looks cleaner · which file seems more
+likely to be newer
+
+Every one of those is a guess wearing the costume of a fact. Supersession is
+established **only** when evidence from the authoritative source supports it —
+an explicit replacement notice, a stated edition sequence, a publication date
+printed *inside* the document, or an official identifier that encodes the
+succession.
+
+## 4b. Contested source families — investigate before escalating
+
+When several files look like editions of one document, **do not ask an operator
+to choose based on filenames.** Filenames are the least reliable evidence
+available, and the question is answerable from the documents themselves.
+
+Work the evidence in this order:
+
+1. retrieve exact raw bytes for each candidate
+2. compute `RAW_BYTES_SHA256`
+3. compare the digests
+4. inspect the **internal document title**
+5. inspect the **official document identifier** where present
+6. inspect the **publication or revision date inside the source**
+7. determine the **stated tax year or effective period**
+8. inspect the **official source URL/locator** printed in the document
+9. where digests differ, compare the **substantive content** that matters for
+   the semantic being ingested
+
+Only then classify.
+
+### CASE A — identical SHA-256
+
+```
+EXACT_DUPLICATE
+```
+
+One content identity behind several Drive objects. **Process the content once.**
+Retain the fact that multiple Drive file IDs point at it if that is useful for
+bookkeeping — but never generate duplicate semantic knowledge, and never
+register it twice (registration is idempotent on the fingerprint anyway).
+
+### CASE B — different SHA-256
+
+```
+DISTINCT_SOURCE_SNAPSHOT
+```
+
+Different bytes mean genuinely different documents. **Do not automatically call
+either one a successor.** Investigate metadata and content per the list above,
+then either establish supersession on evidence or leave them as independent
+snapshots.
+
+### Unresolved authority conflict
+
+If two genuinely distinct authoritative versions appear to govern **the same
+semantic** over **the same effective scope**, and the evidence still does not
+establish the relationship:
+
+```
+AUTHORITY_REVIEW_REQUIRED
+```
+
+Report both sides symmetrically:
+
+```
+SOURCE A =
+DRIVE FILE ID =
+SHA-256 =
+LOCATOR =
+PUBLICATION/EFFECTIVE INFO =
+
+SOURCE B =
+DRIVE FILE ID =
+SHA-256 =
+LOCATOR =
+PUBLICATION/EFFECTIVE INFO =
+
+MATERIAL DIFFERENCE =
+WHY AUTOMATIC RESOLUTION IS UNSAFE =
+```
+
+Then: **do not guess, do not publish the affected semantic, and continue
+processing everything independent of it.** One contested family does not stall
+a batch.
 
 ## 5. Citations are structured, and reusable
 

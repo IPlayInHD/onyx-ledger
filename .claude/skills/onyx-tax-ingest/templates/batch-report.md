@@ -6,8 +6,11 @@ do not drop the counts — a missing count reads as zero.
 ## Scope
 
 BATCH =
-SOURCE_LIBRARY =
-ACCESS_MODE =            <!-- filesystem path | connector (no path) -->
+SOURCE_LIBRARY =         <!-- Drive folder name + folder ID -->
+ACCESS_MODE =            <!-- expected: GOOGLE_DRIVE_MCP -->
+DRIVE_WRITE_OPERATIONS = <!-- expected: 0 -->
+LOCAL_CACHE_USED =       <!-- path outside Git, or NONE -->
+CACHE_VERIFIED =         <!-- digest + byte size checked against Drive metadata -->
 REPO_HEAD =
 CONTRACT_VERSIONS =      <!-- as discovered this run, not from memory -->
 
@@ -24,8 +27,24 @@ JSON                 =
 YAML                 =
 ```
 
-State the basis for each skip: same fingerprint as an already-registered
-version. A skip justified by filename is not a skip, it is a gap.
+State the basis for each skip: **same `RAW_BYTES_SHA256`** as an
+already-registered version. A skip justified by filename is not a skip, it is a
+gap.
+
+### Identity and scope
+
+```
+EXACT_DUPLICATE            =   <!-- same SHA-256, several Drive file IDs -->
+DISTINCT_SOURCE_SNAPSHOT   =   <!-- different SHA-256, relationship not assumed -->
+AUTHORITY_REVIEW_REQUIRED  =   <!-- same semantic + scope, unresolved -->
+SUPERSESSION ESTABLISHED   =   <!-- only from in-source evidence; state the evidence -->
+
+DEFERRED_JURISDICTION (Quebec)        =   <!-- listed/fingerprinted, never authored -->
+UNVERIFIED_CANDIDATE_INTERPRETATION   =   <!-- 00-engine material used as hints only -->
+```
+
+For every supersession claimed, name the evidence inside the source that
+established it. "Newer filename" and "larger file" are not evidence.
 
 ## Produced
 
@@ -136,6 +155,9 @@ Answer plainly:
   citation and a precise locator? YES / NO
 - Did anything publish that a deterministic validator did not pass? YES / NO
 - Did AI approve or publish anything? Expected NO.
+- Were any Drive write operations performed? Expected NO.
+- Was supersession established anywhere without in-source evidence? Expected NO.
+- Was any Quebec knowledge authored or published? Expected NO.
 
 NEXT: <the next batch, or the escalation blocking it>
 

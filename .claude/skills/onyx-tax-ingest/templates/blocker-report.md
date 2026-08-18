@@ -10,6 +10,7 @@ decision for an engineering entry, not for an ingestion run.
 ## Source
 
 ```
+DRIVE_FILE_ID       =        <!-- the Drive object this was retrieved from -->
 OFFICIAL_IDENTIFIER =
 ISSUER              =
 JURISDICTION        =
@@ -112,6 +113,38 @@ PUBLISHED ANYWAY = must be NONE
 Nothing depending on the missing semantic may publish in a degraded form. A
 partially correct tax rule is worse than an absent one: absence is visible,
 and a wrong answer is not.
+
+## Variant — AUTHORITY_REVIEW_REQUIRED
+
+Use this form when the blocker is not a missing capability but two
+authoritative sources governing the same semantic over the same effective
+scope, with evidence that does not settle the relationship. Fill both sides
+symmetrically; an asymmetric report invites the reader to prefer the side you
+described more fully.
+
+```
+SOURCE A =
+DRIVE FILE ID =
+SHA-256 =
+LOCATOR =
+PUBLICATION/EFFECTIVE INFO =
+
+SOURCE B =
+DRIVE FILE ID =
+SHA-256 =
+LOCATOR =
+PUBLICATION/EFFECTIVE INFO =
+
+MATERIAL DIFFERENCE =
+EVIDENCE ALREADY INVESTIGATED =     <!-- internal titles, identifiers, in-source dates,
+                                         stated effective periods, official locators -->
+WHY AUTOMATIC RESOLUTION IS UNSAFE =
+AFFECTED SEMANTIC WITHHELD = YES    <!-- must be YES -->
+```
+
+This variant needs **no capability change**. Do not propose one; the pipeline
+can express the knowledge perfectly well once a human says which source
+governs.
 
 ## Decision requested
 

@@ -5,6 +5,24 @@ all three routes:
 
 > Structure may become knowledge. Prose may only become provenance.
 
+## 0. Establishing format — MIME type alone is not enough
+
+Drive frequently reports a generic `application/octet-stream` for text files it
+did not sniff, and a generic type is **not** evidence that a file is
+unsupported. Route on the balance of three signals:
+
+1. **filename extension** — weak on its own (this library has doubled and
+   space-padded extensions), but informative
+2. **declared MIME type** — informative when specific, meaningless when generic
+3. **content inspection** — the magic bytes or first line, which is decisive
+
+`%PDF-` is a PDF whatever Drive called it. A file whose first line is
+`openapi: 3.0.3` is YAML whatever Drive called it.
+
+**Never reject a supported file merely because Drive supplied a generic MIME
+type.** Conversely, never trust a specific MIME type over contradicting content
+— the bytes win.
+
 ## PDF — provenance first, structure second
 
 A PDF is registered as a **source** before anything is extracted from it. That
@@ -54,11 +72,30 @@ which is exactly why its validation is strictest.
   a rule. Brackets, limits and indexed parameters are read by the engine
   directly; a rule that merely restates them adds a second place to be wrong.
 
-**Read the real header.** Government exports are frequently multi-section, with
-banner rows, a metadata block and a second embedded header before the actual
-data. A naive `read_csv` will take a banner as the header and produce garbage
-that still parses. Locate the data block explicitly, and watch for a UTF-8 BOM
-turning the first column name into something that will never match.
+### Inspect structure before assuming a header
+
+**Never assume line 1 is the header.** Government and central-bank exports are
+frequently **multi-section**: banner rows, a licence block, a metadata block,
+and one or more embedded header rows before the real table — sometimes several
+unrelated tables in one file.
+
+The failure mode this prevents is the dangerous kind: a naive
+`csv.reader`/`read_csv` takes a banner line as the header and **succeeds**,
+producing a structurally valid table of nonsense. Nothing raises.
+
+So, generically:
+
+1. read the file's structure first — how many sections, where each begins
+2. locate the **data section** explicitly, by its banner or by shape
+3. take the header from that section, not from the file
+4. confirm the rows below it are rectangular and match the header width
+5. cross-check any in-file series/column listing against the header names
+
+Also handle a **UTF-8 BOM**: decode with `utf-8-sig`, or the first column name
+carries an invisible prefix and will never match anything.
+
+Do not hardcode any particular publisher's layout. Detect the structure of the
+file in front of you.
 
 **Published reference data is immutable.** The reference tables are unique on
 their semantic key and carry no version column, so publication INSERTs and

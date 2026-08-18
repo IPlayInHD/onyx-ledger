@@ -112,21 +112,95 @@ A dirty tree is not fatal for ingestion — no production code changes — but s
 so in the report, because a manifest committed alongside unrelated edits is
 hard to review.
 
-## PHASE 1 — Locate the source library
+## PHASE 1 — Reach the source library
 
-Take the path as an argument if given. Otherwise discover it. **Do not assume**,
-and do not create a stand-in directory if it is absent — an empty local folder
-that looks like the library is worse than no library.
+**The source library is reached through Claude's native Google Drive
+connector.** That is the configured, working, intended primary path, and it is
+addressed by **Drive folder/file ID**.
 
-The library may not be a filesystem path at all. If it is reachable only
-through a connector (Google Drive and similar), every access is an API call and
-`open()`/`glob` do not apply. Record which access mode is in force; it changes
-how hashing and extraction are written.
+The library is **not** a filesystem directory and is not expected to be one.
+Do **not** search the filesystem for it as your discovery mechanism, and do not
+treat the absence of a mount as a failure — there is nothing to find.
 
-**The library is READ ONLY.** You may list, read, hash, extract and inspect.
-You may never rename, edit, normalize in place, move, delete, or write
-generated artifacts into it. Everything you generate goes into the repository
-or an explicit working directory.
+```
+GOOGLE DRIVE MCP  →  download once  →  local bytes  →  RAW_BYTES_SHA256
+                                                    →  parse / extract
+                                                    →  Source Registry + authoring pipeline
+```
+
+Verify the connector, not the filesystem. Discovery is `search_files` scoped by
+`parentId`, paging until exhausted, recursing into child folders. Bytes come
+from `download_file_content`, which returns base64 that decodes to the exact
+file — so `RAW_BYTES_SHA256` is available and is what you use.
+
+If the connector is unauthorized, that is a **stop condition**: say so and ask
+for it to be reconnected. Do not route around it.
+
+**Never build a replacement path.** No rclone, no FUSE, no
+`google-drive-ocamlfuse`, no custom Drive API integration, no separately
+engineered sync service, and no manual bulk download standing in for the
+connector. If a filesystem copy of the library happens to exist, it is
+**optional** and never required; the connector remains authoritative.
+
+### Google Drive is operationally READ ONLY
+
+The authenticated account has write capability. **Ignore it.** For ingestion the
+library is an immutable evidence store.
+
+| Allowed | Forbidden |
+|---|---|
+| `search_files` / list | `create_file` |
+| `get_file_metadata` | `update_file` |
+| `download_file_content` (bytes) | `copy_file` writing back into source storage |
+| `read_file_content` / inspect | `trash_file` |
+| | rename, move, restructure folders |
+| | replacing a source file |
+| | editing CSV/JSON/YAML in place |
+
+A run that performs any Drive write has failed, whatever else it produced.
+
+### Optional local cache — an optimization, never a source
+
+You **may** materialize downloaded bytes into a temporary local cache so one
+ingestion run does not download the same large PDF repeatedly. Choose a safe
+temporary path outside the repository; do not commit to one location by habit.
+
+The cache must be:
+
+- **outside Git**, never committed, never staged
+- **disposable and rebuildable** from the connector at any time
+- **not authoritative** — it is a copy, and the Drive object is the source
+- carrying, per cached file: the **Drive file ID**, the **SHA-256**, and a
+  **byte-size check** against Drive's reported size where metadata permits
+
+Never treat a cached file as the original, and never let a cache hit substitute
+for provenance. If the cache and Drive disagree on size or digest, the cache is
+wrong — discard it and re-download.
+
+**Do not dump large base64 payloads into the main context.** Decode inside a
+subagent or stream to disk. A single mid-size PDF's base64 will otherwise
+consume tens of thousands of tokens for no benefit.
+
+## PHASE 1b — Scope: jurisdiction and material class
+
+Two scope decisions are settled. Apply them without re-litigating each run.
+
+**Current production jurisdictions: `FED` and `ON`.**
+
+**`05-quebec` is `DEFERRED_JURISDICTION`.** Quebec material is deferred for
+future product expansion, not discarded. During inventory you **may** list,
+fingerprint, classify, preserve metadata and identify exact duplicates. You
+must **not** author Quebec rules or formulas, publish Quebec reference data or
+knowledge, or change architecture to accommodate Quebec. A Quebec dependency
+must never block unrelated FED/ON work — treat it as out of scope and carry on.
+
+**The `00-engine` folder is `UNVERIFIED_CANDIDATE_INTERPRETATION`.** Its JSON
+carries its own uncertainty and deprecation markers. See `content-routing.md`;
+the short version is that it may accelerate mapping and suggest candidates, and
+may never become authoritative because it is machine-readable.
+
+Folder names are used **verbatim**. One currently carries a trailing space in
+Drive. Do not normalize or rename it — matching is by folder ID anyway.
 
 ## PHASE 2 — The run loop
 
@@ -233,13 +307,18 @@ A blocked provision is not a blocked batch.
 
 Stop and report instead of improvising when:
 
-- the source library cannot be located, or is writable-and-being-written
+- the Google Drive connector is unauthorized or unreachable
 - a source cannot be fingerprinted (bytes unavailable)
 - a provision needs a formula operation the engine does not implement
-- two authoritative sources conflict and neither is clearly superseded
+- two authoritative sources govern the same semantic and the same effective
+  scope and evidence does not settle the relationship
+  (`AUTHORITY_REVIEW_REQUIRED` — see `source-policy.md`)
 - provenance cannot be attached to a knowledge object that requires it
 - publication would need an override
 - the discovery step in PHASE 0 fails to import
+
+Note what is **not** a stop condition: the absence of a filesystem mount. There
+is no mount, none is required, and none should be built.
 
 Reporting a blocker with its exact locator is a successful outcome. Publishing
 a guess is not.
@@ -247,7 +326,11 @@ a guess is not.
 ## What this skill will not do
 
 - Open an engineering entry, change schema, or add a subsystem.
-- Modify, rename or delete anything in the source library.
+- Write to Google Drive, or modify, rename or delete anything in the library.
+- Build a filesystem mount, sync, or custom Drive integration to replace the
+  connector.
 - Treat AI-generated JSON as authoritative because it is machine-readable.
 - Use a PDF, a web lookup or a model call as runtime tax authority.
+- Infer supersession from a filename, a size, a timestamp or an ordering.
+- Author or publish Quebec knowledge while it is deferred.
 - Publish anything a deterministic validator did not pass.

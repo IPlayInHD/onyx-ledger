@@ -60,7 +60,16 @@ Required:
 Stop the item and put it in front of a human, regardless of tier:
 
 - **Conflicting authoritative sources** — two qualifying sources disagree and
-  neither clearly supersedes the other.
+  neither clearly supersedes the other. Where they govern the same semantic
+  over the same effective scope, this is the `AUTHORITY_REVIEW_REQUIRED` state
+  defined in `source-policy.md`: report both sides symmetrically with Drive
+  file ID, SHA-256, locator and publication info, withhold the affected
+  semantic, and continue everything independent of it. Reach it by
+  **investigating the documents**, not by asking an operator to choose between
+  filenames.
+- **Out-of-scope jurisdiction reached** — a FED/ON item turns out to depend on
+  Quebec material, which is `DEFERRED_JURISDICTION`. Record the dependency and
+  continue; do not author Quebec knowledge to unblock it.
 - **Ambiguous provision** — the text supports more than one reading.
 - **Unstated inference** — the published object asserts something the source
   does not say. This is the most dangerous category because it validates
