@@ -63,6 +63,10 @@ class TaxRuleVersion(Base):
     source_url: Mapped[str | None] = mapped_column(String)
     legislation_reference_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     superseded_by_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # What this version's AUTHOR declared it replaces, present from staging.
+    # `superseded_by_version_id` above records what publication actually did to
+    # the predecessor, which is a fact about an event rather than a declaration.
+    supersedes_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # TKMS provenance (nullable — hand-authored / legacy versions predate TKMS).
     import_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -267,6 +271,47 @@ class RuleDeadline(Base):
     description: Mapped[str | None] = mapped_column(Text)
     is_hard: Mapped[bool] = mapped_column(Boolean, default=True)
     jurisdiction_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class RuleExample(Base):
+    """A governed test case for one rule version.
+
+    Verifies authored knowledge and nothing else: the evaluator never reads this
+    table, so an example can never become an eligibility authority.
+    """
+
+    __tablename__ = "rule_example"
+    __table_args__ = {"schema": "rules"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tax_kb.tax_rule_version.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # Facts are TEXT values: a JSON number is a float, and an example whose
+    # threshold shifted by binary rounding would verify the wrong rule.
+    facts: Mapped[dict] = mapped_column(JSONB, default=dict)
+    expect_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    expected_outcome_types: Mapped[list] = mapped_column(JSONB, default=list)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
+    created_at: Mapped[datetime] = created_at_col()
+
+
+class FormulaVector(Base):
+    """One input→exact-output vector for a formula. Compared exactly, never
+    within a tolerance."""
+
+    __tablename__ = "formula_vector"
+    __table_args__ = {"schema": "rules"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    formula_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rules.calc_formula.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    inputs: Mapped[dict] = mapped_column(JSONB, default=dict)
+    expected: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
     created_at: Mapped[datetime] = created_at_col()
 
 
@@ -495,7 +540,7 @@ class KnowledgeCitation(Base):
     __table_args__ = (
         CheckConstraint(
             "num_nonnulls(rule_version_id, formula_id, tax_bracket_set_id, "
-            "contribution_limit_id, benefit_parameter_id) = 1",
+            "contribution_limit_id, benefit_parameter_id, calc_constant_id) = 1",
             name="ck_knowledge_citation_exactly_one_subject"),
         {"schema": "tax_kb"},
     )
@@ -514,4 +559,8 @@ class KnowledgeCitation(Base):
         UUID(as_uuid=True), ForeignKey("tax_kb.contribution_limit.id"))
     benefit_parameter_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tax_kb.benefit_parameter.id"))
+    # A calc constant is read by the engine DIRECTLY and pinned by the rule
+    # snapshot, so nothing owns it and nothing could pass provenance down to it.
+    calc_constant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rules.calc_constant.id"))
     created_at: Mapped[datetime] = created_at_col()

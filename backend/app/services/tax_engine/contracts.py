@@ -172,6 +172,17 @@ class OpportunityContractV2:
     jurisdiction: str | None = None
     tax_year: int | None = None
     contract_version: str = CONTRACT_VERSION
+    #: Distinguishes the opportunities of a rule version that emits MORE THAN
+    #: ONE. `opportunity_code` is the rule's code, so on its own it cannot tell
+    #: two outcomes of one version apart, and the semantic candidate identity
+    #: built from it collapsed them into a single key.
+    #:
+    #: `None` means "this version emits exactly one opportunity", which is every
+    #: version authored before multi-outcome support. Keeping it absent there is
+    #: deliberate: the identity of an existing candidate stays byte-identical, so
+    #: sealed scenarios, counterfactual comparisons and historical graphs keep
+    #: matching the keys they were sealed with.
+    outcome_discriminator: str | None = None
 
     # ---- v1 display fields (unchanged) ----
     mechanism: str | None = None

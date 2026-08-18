@@ -143,11 +143,19 @@ class RulesEvaluatorService:
             documents = tuple(contract["documents"].get(v.id, ()))
             citations = citations_by_version.get(v.id, ())
 
-            for outcome in outcomes_by_version.get(v.id, ()):
+            version_outcomes = outcomes_by_version.get(v.id, ())
+            # A version with several outcomes emits several opportunities, and
+            # `opportunity_code` is the RULE's code, so it cannot tell them
+            # apart. The discriminator is what makes each one identifiable; it
+            # is withheld for the single-outcome case so those keys are exactly
+            # what they have always been.
+            emits_many = len(version_outcomes) > 1
+            for outcome in version_outcomes:
                 impact = impacts.get(outcome.impact_formula_id)
                 opportunities.append(OpportunityContractV2(
                     rule_version_id=v.id,
                     opportunity_code=(rule.code.lower() if rule else "opportunity"),
+                    outcome_discriminator=(str(outcome.id) if emits_many else None),
                     title=outcome.title_template or (rule.name if rule else "Opportunity"),
                     category=(rule.category if rule else "credit"),
                     jurisdiction=jurisdictions.get(v.tax_rule_id),

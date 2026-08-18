@@ -97,4 +97,11 @@ class RulePublication(Base):
     )
     change_request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     published_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # ---- governed publication (entry: authoring pipeline) ----
+    # `channel` is recorded rather than inferred: §52 forbids deciding whether a
+    # publication was production from a rule-code prefix or an environment name.
+    spec_hash: Mapped[str | None] = mapped_column(Text)
+    pack_hash: Mapped[str | None] = mapped_column(Text)
+    policy_version: Mapped[str | None] = mapped_column(Text)
+    channel: Mapped[str] = mapped_column(Text, default="legacy", nullable=False)
     published_at: Mapped[datetime] = created_at_col()

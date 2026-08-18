@@ -14,6 +14,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -116,6 +117,16 @@ class ValidationReport(Base):
     )
     target_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    # ---- governed publishability (entry: authoring pipeline) ----
+    # NULL means this report predates the governed pipeline. It is not a false
+    # and not a true: the question was never asked, and the governed publication
+    # path refuses to treat silence as approval.
+    spec_hash: Mapped[str | None] = mapped_column(Text)
+    spec_schema_version: Mapped[str | None] = mapped_column(Text)
+    policy_version: Mapped[str | None] = mapped_column(Text)
+    publishable: Mapped[bool | None] = mapped_column(Boolean)
+    readiness: Mapped[dict | None] = mapped_column(JSONB)
+    error_codes: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = created_at_col()
 
 

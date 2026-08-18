@@ -122,6 +122,26 @@ class IdempotencyKeyReused(DomainError):
     title = "Idempotency Key Reused"
 
 
+class DuplicateCandidateKey(DomainError):
+    """Two candidates in one run claimed the same semantic identity.
+
+    `candidate_key` is what a portfolio member, a counterfactual comparison and
+    a historical graph node all match on. Two candidates sharing one does not
+    make them the same opportunity; it makes every one of those matches wrong.
+    """
+
+    status_code = 500
+    error_type = "https://onyx.ledger/errors/duplicate-candidate-key"
+    title = "Duplicate Candidate Key"
+
+    def __init__(self, candidate_key: str):
+        self.candidate_key = candidate_key
+        super().__init__(
+            f"two candidates share the semantic key {candidate_key!r}; "
+            "one would silently stand in for the other"
+        )
+
+
 # Sanitized, enumerated failure codes. Never a message, stack trace, or PII.
 ERROR_ANALYSIS_NOT_READY = "ANALYSIS_NOT_READY"
 ERROR_RULES_EVALUATION_FAILED = "RULES_EVALUATION_FAILED"
@@ -552,10 +572,18 @@ class OptimizationOrchestrator:
             # is removing. `uuid7()` produces the same value shape as the column
             # default, and the ordering below is still the domain's.
             candidate_ids = [uuid7() for _ in candidates]
-            key_to_id: dict[str, uuid.UUID] = {
-                candidate.candidate_key: candidate_id
-                for candidate, candidate_id in zip(candidates, candidate_ids, strict=True)
-            }
+            key_to_id: dict[str, uuid.UUID] = {}
+            for candidate, candidate_id in zip(candidates, candidate_ids, strict=True):
+                # A dict comprehension here let a duplicate key overwrite its
+                # predecessor without a sound. Both candidates were still
+                # persisted, but every portfolio member that named either one
+                # resolved to the SAME id, and `UNIQUE (portfolio_id,
+                # candidate_id)` failed an INSERT far from the cause. The
+                # semantic key is an identity; two candidates sharing one is a
+                # contract violation, so it is stated where it happens.
+                if candidate.candidate_key in key_to_id:
+                    raise DuplicateCandidateKey(candidate.candidate_key)
+                key_to_id[candidate.candidate_key] = candidate_id
 
             candidate_rows: list[dict] = []
             effect_rows: list[dict] = []

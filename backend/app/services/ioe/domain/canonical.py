@@ -320,6 +320,15 @@ DOMAIN_RETENTION_CHANGE = "retention_change"
 # from every artifact digest because a locator is provenance metadata, never
 # sealed evidence, and the two must not be able to stand in for each other.
 DOMAIN_SOURCE_LOCATOR = "source_locator"
+# The governed authoring pipeline. A draft's SEMANTIC identity: everything the
+# published knowledge will mean, and nothing about who submitted it or when.
+# Publication binds to this digest, so a draft edited after validation cannot
+# reach production wearing its predecessor's approval.
+DOMAIN_KNOWLEDGE_SPEC = "knowledge_spec"
+# One coherent publication set. Ordered member spec hashes, so a release has an
+# identity that says exactly which knowledge published together — without a
+# release table nothing would need to query.
+DOMAIN_KNOWLEDGE_PACK = "knowledge_pack"
 
 ALL_HASH_DOMAINS = (
     DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
@@ -330,6 +339,7 @@ ALL_HASH_DOMAINS = (
     DOMAIN_SCENARIO_COMPARISON,
     DOMAIN_RETENTION_SNAPSHOT, DOMAIN_RETENTION_CHANGE,
     DOMAIN_SOURCE_LOCATOR,
+    DOMAIN_KNOWLEDGE_SPEC, DOMAIN_KNOWLEDGE_PACK,
 )
 
 

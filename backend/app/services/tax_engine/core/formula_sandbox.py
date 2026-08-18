@@ -10,6 +10,12 @@ from decimal import Decimal
 
 _BINARY = {"+", "-", "*", "/", "min", "max"}
 
+#: The registered primitives, published for the authoring pipeline to validate
+#: against. Exported rather than restated there, so a formula an author submits
+#: is checked against the operations this evaluator actually implements — a
+#: second hardcoded list is a second source of truth waiting to drift.
+SUPPORTED_OPERATIONS: frozenset[str] = frozenset(_BINARY)
+
 
 def evaluate_rpn(expression: str, variables: dict[str, Decimal]) -> Decimal:
     stack: list[Decimal] = []

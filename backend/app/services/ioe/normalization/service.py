@@ -77,8 +77,24 @@ class OpportunityNormalizationService:
 
     @staticmethod
     def candidate_key(opportunity: OpportunityContractV2) -> str:
-        """Deterministic identity: stable across runs for the same opportunity."""
-        return f"{opportunity.opportunity_code}:{opportunity.rule_version_id}"
+        """Deterministic identity: stable across runs for the same opportunity.
+
+        `opportunity_code` names the RULE, so `code:version` identifies a rule
+        version rather than an opportunity. That was enough for as long as a
+        version emitted one opportunity and wrong the moment one emitted two:
+        both got the same key, `key_to_id` kept only the last id, and the two
+        portfolio members that resulted both pointed at it — a unique violation
+        on `(portfolio_id, candidate_id)` that rolled back the whole run.
+
+        The discriminator is appended ONLY when the rules layer supplied one,
+        which it does only for a version emitting more than one opportunity. So
+        every key sealed before this is reproduced byte for byte, and the two
+        opportunities of a two-outcome version are finally distinguishable.
+        """
+        base = f"{opportunity.opportunity_code}:{opportunity.rule_version_id}"
+        if opportunity.outcome_discriminator is None:
+            return base
+        return f"{base}:{opportunity.outcome_discriminator}"
 
     # ---- derivations --------------------------------------------------------
     def _effects(self, o: OpportunityContractV2) -> tuple[EconomicEffect, ...]:

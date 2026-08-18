@@ -29,6 +29,26 @@
       "reason": "Foreign key created by backend/db/sql, typically with an ON DELETE action or a name the ORM does not reproduce."
     },
     {
+      "key": "modify_comment|admin|rule_publication|channel",
+      "kind": "modify_comment",
+      "schema": "admin",
+      "table": "rule_publication",
+      "object": "channel",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|admin|rule_publication|pack_hash",
+      "kind": "modify_comment",
+      "schema": "admin",
+      "table": "rule_publication",
+      "object": "pack_hash",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
       "key": "modify_comment|analysis|analysis_run|user_id",
       "kind": "modify_comment",
       "schema": "analysis",
@@ -129,6 +149,46 @@
       "reason": "Governed column-comment divergence."
     },
     {
+      "key": "modify_comment|tax_kb|tax_rule_version|supersedes_version_id",
+      "kind": "modify_comment",
+      "schema": "tax_kb",
+      "table": "tax_rule_version",
+      "object": "supersedes_version_id",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|tkms|validation_report|publishable",
+      "kind": "modify_comment",
+      "schema": "tkms",
+      "table": "validation_report",
+      "object": "publishable",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|tkms|validation_report|readiness",
+      "kind": "modify_comment",
+      "schema": "tkms",
+      "table": "validation_report",
+      "object": "readiness",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|tkms|validation_report|spec_hash",
+      "kind": "modify_comment",
+      "schema": "tkms",
+      "table": "validation_report",
+      "object": "spec_hash",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
       "key": "modify_default|admin|admin_user|status",
       "kind": "modify_default",
       "schema": "admin",
@@ -144,6 +204,16 @@
       "schema": "admin",
       "table": "rule_change_request",
       "object": "status",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|admin|rule_publication|channel",
+      "kind": "modify_default",
+      "schema": "admin",
+      "table": "rule_publication",
+      "object": "channel",
       "detail": "",
       "class": "SERVER_DEFAULT_OWNED_BY_SQL",
       "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
@@ -1509,6 +1579,16 @@
       "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
     },
     {
+      "key": "modify_default|rules|formula_vector|inputs",
+      "kind": "modify_default",
+      "schema": "rules",
+      "table": "formula_vector",
+      "object": "inputs",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
       "key": "modify_default|rules|rule_action|effort_rating",
       "kind": "modify_default",
       "schema": "rules",
@@ -1564,6 +1644,36 @@
       "schema": "rules",
       "table": "rule_deadline",
       "object": "is_hard",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|rules|rule_example|expected_outcome_types",
+      "kind": "modify_default",
+      "schema": "rules",
+      "table": "rule_example",
+      "object": "expected_outcome_types",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|rules|rule_example|facts",
+      "kind": "modify_default",
+      "schema": "rules",
+      "table": "rule_example",
+      "object": "facts",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|rules|rule_example|sort_order",
+      "kind": "modify_default",
+      "schema": "rules",
+      "table": "rule_example",
+      "object": "sort_order",
       "detail": "",
       "class": "SERVER_DEFAULT_OWNED_BY_SQL",
       "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
@@ -3489,6 +3599,36 @@
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },
     {
+      "key": "modify_type|ref|deadline_type|code",
+      "kind": "modify_type",
+      "schema": "ref",
+      "table": "deadline_type",
+      "object": "code",
+      "detail": "TEXT->String",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|ref|deadline_type|description",
+      "kind": "modify_type",
+      "schema": "ref",
+      "table": "deadline_type",
+      "object": "description",
+      "detail": "TEXT->String",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|ref|deadline_type|label",
+      "kind": "modify_type",
+      "schema": "ref",
+      "table": "deadline_type",
+      "object": "label",
+      "detail": "TEXT->String",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
       "key": "modify_type|ref|document_type|category",
       "kind": "modify_type",
       "schema": "ref",
@@ -4664,6 +4804,16 @@
       "schema": "admin",
       "table": "rule_change_request",
       "object": "rule_change_request_status_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|admin|rule_publication|rule_publication_channel_check",
+      "kind": "remove_constraint",
+      "schema": "admin",
+      "table": "rule_publication",
+      "object": "rule_publication_channel_check",
       "detail": "",
       "class": "RAW_SQL_MANAGED_CHECK",
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
@@ -6239,6 +6389,16 @@
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
     },
     {
+      "key": "remove_constraint|rules|formula_vector|formula_vector_formula_id_name_key",
+      "kind": "remove_constraint",
+      "schema": "rules",
+      "table": "formula_vector",
+      "object": "formula_vector_formula_id_name_key",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
       "key": "remove_constraint|rules|rule_action|rule_action_cost_type_check",
       "kind": "remove_constraint",
       "schema": "rules",
@@ -6314,6 +6474,16 @@
       "schema": "rules",
       "table": "rule_dependency",
       "object": "rule_dependency_rule_version_id_depends_on_rule_code_depend_key",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|rules|rule_example|rule_example_rule_version_id_name_key",
+      "kind": "remove_constraint",
+      "schema": "rules",
+      "table": "rule_example",
+      "object": "rule_example_rule_version_id_name_key",
       "detail": "",
       "class": "RAW_SQL_MANAGED_CHECK",
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
@@ -7539,6 +7709,16 @@
       "reason": "Foreign key created by backend/db/sql, typically with an ON DELETE action or a name the ORM does not reproduce."
     },
     {
+      "key": "remove_fk|tax_kb|tax_rule_version|tax_rule_version_supersedes_version_id_fkey",
+      "kind": "remove_fk",
+      "schema": "tax_kb",
+      "table": "tax_rule_version",
+      "object": "tax_rule_version_supersedes_version_id_fkey",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_FK",
+      "reason": "Foreign key created by backend/db/sql, typically with an ON DELETE action or a name the ORM does not reproduce."
+    },
+    {
       "key": "remove_fk|tax_kb|tax_rule_version|tax_rule_version_tax_rule_id_fkey",
       "kind": "remove_fk",
       "schema": "tax_kb",
@@ -7784,6 +7964,26 @@
       "schema": "admin",
       "table": "rule_change_request",
       "object": "ix_change_request_version",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|admin|rule_publication|ix_rule_publication_pack",
+      "kind": "remove_index",
+      "schema": "admin",
+      "table": "rule_publication",
+      "object": "ix_rule_publication_pack",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|admin|rule_publication|ix_rule_publication_spec",
+      "kind": "remove_index",
+      "schema": "admin",
+      "table": "rule_publication",
+      "object": "ix_rule_publication_spec",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -9189,6 +9389,16 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|rules|formula_vector|ix_formula_vector_formula",
+      "kind": "remove_index",
+      "schema": "rules",
+      "table": "formula_vector",
+      "object": "ix_formula_vector_formula",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|rules|rule_action|ix_rule_action_version",
       "kind": "remove_index",
       "schema": "rules",
@@ -9259,6 +9469,16 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|rules|rule_example|ix_rule_example_version",
+      "kind": "remove_index",
+      "schema": "rules",
+      "table": "rule_example",
+      "object": "ix_rule_example_version",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|rules|rule_outcome|ix_rule_outcome_version",
       "kind": "remove_index",
       "schema": "rules",
@@ -9284,6 +9504,16 @@
       "schema": "rules",
       "table": "rule_shared_resource",
       "object": "ix_rule_shared_resource_version",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|tax_kb|knowledge_citation|ix_knowledge_citation_calc_constant",
+      "kind": "remove_index",
+      "schema": "tax_kb",
+      "table": "knowledge_citation",
+      "object": "ix_knowledge_citation_calc_constant",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -9364,6 +9594,16 @@
       "schema": "tax_kb",
       "table": "tax_rule_version",
       "object": "ix_rule_version_status",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|tax_kb|tax_rule_version|ix_rule_version_supersedes",
+      "kind": "remove_index",
+      "schema": "tax_kb",
+      "table": "tax_rule_version",
+      "object": "ix_rule_version_supersedes",
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
@@ -9549,6 +9789,16 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|tkms|validation_report|uq_validation_report_spec",
+      "kind": "remove_index",
+      "schema": "tkms",
+      "table": "validation_report",
+      "object": "uq_validation_report_spec",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|wealth|asset_valuation|ix_asset_valuation_asset",
       "kind": "remove_index",
       "schema": "wealth",
@@ -9673,6 +9923,36 @@
       "kind": "remove_table_comment",
       "schema": "ioe",
       "table": "retention_checkpoint",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|ref|deadline_type|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "ref",
+      "table": "deadline_type",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|rules|formula_vector|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "rules",
+      "table": "formula_vector",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|rules|rule_example|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "rules",
+      "table": "rule_example",
       "object": "<table_comment>",
       "detail": "",
       "class": "TABLE_COMMENT_METADATA",

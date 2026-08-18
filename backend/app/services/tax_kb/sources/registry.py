@@ -17,6 +17,7 @@ retrieved.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -211,10 +212,13 @@ class TaxSourceRegistry:
         The keyword names the subject kind — `rule_version_id`, `formula_id`,
         `tax_bracket_set_id`, `contribution_limit_id`, `benefit_parameter_id` —
         and the database CHECK enforces that exactly one arrives.
+
+        `calc_constant_id` is here because a constant is read by the engine
+        directly: nothing owns it, so nothing could pass provenance down to it.
         """
         allowed = {
             "rule_version_id", "formula_id", "tax_bracket_set_id",
-            "contribution_limit_id", "benefit_parameter_id",
+            "contribution_limit_id", "benefit_parameter_id", "calc_constant_id",
         }
         unknown = sorted(set(subject) - allowed)
         if unknown:
@@ -316,6 +320,24 @@ class TaxSourceRegistry:
                                      r.label or "", str(r.citation_id)))
         return tuple(resolved)
 
+    async def resolve_citations(
+        self, citation_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, ResolvedCitation]:
+        """Resolve citations named DIRECTLY, before anything links to them.
+
+        The `provenance_for_*` readers answer "what supports this published
+        object?". Authoring asks the question a step earlier — "may these
+        citations support an object that does not exist yet?" — and needs the
+        same pinned resolution with the same fixed statement count. Reusing
+        `_resolve` is what keeps the two answers identical.
+        """
+        if not citation_ids:
+            return {}
+        links = [
+            KnowledgeCitation(citation_id=cid) for cid in dict.fromkeys(citation_ids)
+        ]
+        return {r.citation_id: r for r in await self._resolve(links)}
+
     async def provenance_for_rule_version(
         self, rule_version_id: uuid.UUID
     ) -> tuple[ResolvedCitation, ...]:
@@ -351,7 +373,8 @@ class TaxSourceRegistry:
         they would be exactly what §17 forbids: unexplained constants.
         """
         allowed = {
-            "tax_bracket_set_id", "contribution_limit_id", "benefit_parameter_id"}
+            "tax_bracket_set_id", "contribution_limit_id", "benefit_parameter_id",
+            "calc_constant_id"}
         if len(subject) != 1 or set(subject) - allowed:
             raise ManifestError(
                 f"resolve exactly one reference-data subject from {sorted(allowed)}")

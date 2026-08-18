@@ -81,6 +81,22 @@ class RuleCategory(Base):
     label: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class DeadlineType(Base):
+    """The governed vocabulary of deadline KINDS.
+
+    A code says what sort of deadline a rule is talking about. The date itself
+    is authored per rule version and carries its own source citation, so nothing
+    in this table is tax law.
+    """
+
+    __tablename__ = "deadline_type"
+    __table_args__ = {"schema": "ref"}
+    code: Mapped[str] = mapped_column(String, primary_key=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = created_at_col()
+
+
 class ConditionOperator(Base):
     __tablename__ = "condition_operator"
     __table_args__ = {"schema": "ref"}
