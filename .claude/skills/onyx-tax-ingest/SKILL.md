@@ -177,9 +177,26 @@ Never treat a cached file as the original, and never let a cache hit substitute
 for provenance. If the cache and Drive disagree on size or digest, the cache is
 wrong — discard it and re-download.
 
-**Do not dump large base64 payloads into the main context.** Decode inside a
-subagent or stream to disk. A single mid-size PDF's base64 will otherwise
-consume tens of thousands of tokens for no benefit.
+**Do not dump large base64 payloads into the main context.** A single mid-size
+PDF's base64 costs tens of thousands of tokens for no benefit.
+
+**Never route the payload through model output.** Re-emitting base64 — writing
+it to a file by generating it, in a subagent or anywhere else — is
+transcription, and transcription of a high-entropy string is not exact.
+Measured: a 10,244-byte file relayed this way arrived as 4,228 bytes, and a
+7,343-byte file arrived with an invalid base64 length. Nothing raised; only the
+byte-size check caught it. The connector's own result must reach disk
+unmodified — read it where the harness already wrote it (an oversized result is
+saved to a file and the tool returns that path) rather than copying it.
+
+**Verify decoded length against Drive's `fileSize` before keeping any digest.**
+That check is the only thing standing between a truncated transfer and a
+fingerprint that will be wrong forever.
+
+The connector refuses files over **10 MB** outright, and in practice can fail
+below that on large transfers. Its own error suggests the raw Drive API; that
+is exactly the replacement path this skill forbids. An unfingerprintable source
+is a blocker to report, not a reason to build one.
 
 ## PHASE 1b — Scope: jurisdiction and material class
 
