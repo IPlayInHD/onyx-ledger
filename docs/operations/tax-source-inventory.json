@@ -301,9 +301,9 @@
       "internal_title": "GST/HST calculator (and rates)",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED+ON",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B05",
-      "note": "carries provincial rates including Ontario"
+      "note": "carries provincial rates including Ontario. B05: ONTARIO ONLY authored, 2025 and 2026 \u2014 production scope is FED and ON. All 13 jurisdictions extracted and recorded. An annual constant is faithful for Ontario because its rate is unchanged across every effective period spanning each year; Nova Scotia fails that same test for 2025 (15% to March 31, 14% after) and would not be authorable annually. The federal GST rate is NOT authored: the table has a row per province and no federal row"
     },
     {
       "drive_file_id": "15ifPmeAiP9XMfhNtx0rbW-5IenYUoA-9",
@@ -556,9 +556,15 @@
       "internal_title": "Meal and vehicle rates used to calculate travel expenses",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REDUNDANT_CAPTURE",
       "batch": "B06",
-      "note": "browser capture 2026-08-12 17:47:01 \u2014 REDUNDANT CAPTURE of the same page"
+      "note": "browser capture 2026-08-12 17:47:01 \u2014 REDUNDANT CAPTURE of the same page; content processed once under the operative capture",
+      "related": {
+        "relationship": "REDUNDANT_CAPTURE",
+        "counterpart_drive_file_id": "1hYBTeWU7cWreJEAfEVPGT4-QmTeE5PJ7",
+        "evidence": "same page, same title, captured 7 seconds later; 312,110 bytes against 312,181 with a different SHA-256",
+        "conclusion": "content processed once, under the operative capture"
+      }
     },
     {
       "drive_file_id": "1Q9IpgU8mfvRZbF6FRAktXDKkDirKcAN6",
@@ -879,14 +885,14 @@
       "internal_title": "Meal and vehicle rates used to calculate travel expenses",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B06",
-      "note": "browser capture 2026-08-12 17:46:54",
+      "note": "browser capture 2026-08-12 17:46:54 \u2014 OPERATIVE of the pair, chosen by lower RAW_BYTES_SHA256. B06: 2025 only, the latest year this document publishes; meal rates (national) and the Ontario kilometre rate authored. The kilometre rate keeps the source's cents/km unit and is deliberately NOT converted to the CAD/km that B07 publishes",
       "related": {
         "relationship": "DISTINCT_SOURCE_SNAPSHOT",
         "counterpart_drive_file_id": "1N_JN_xrZFK30DbcZCRbvTNHDohs5diUS",
         "evidence": "same page and title, captures 7 seconds apart",
-        "conclusion": "process the content once when B06 runs"
+        "conclusion": "operative capture; B06 processed the content here once"
       }
     },
     {
@@ -902,9 +908,9 @@
       "internal_title": "Interest rates for the third calendar quarter",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_REPRESENTATION_BLOCKED",
       "batch": "B04",
-      "note": "prescribed interest, 2026-Q3"
+      "note": "prescribed interest, 2026-Q3. B04: registered and cited, NOTHING authored. The document states its own effective window \u2014 July 1 to September 30, 2026 \u2014 and rules.calc_constant is UNIQUE(code, tax_year) with a foreign key to ref.tax_year(year), so four quarters of one year collide on one key and storing any single quarter as the annual value would be false for the other nine months. The SOURCE model can hold the quarter (effective_from/effective_to are registered); the value model cannot. REPRESENTATION_BLOCKER, reported not worked around"
     },
     {
       "drive_file_id": "1k8t3ewIviQw75hq-qH2VMDjGrfIUJFGy",
@@ -953,9 +959,9 @@
       "internal_title": "Automobile or motor vehicle benefits \u2014 allowances or reimbursements provided to an employee",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B07",
-      "note": "FILENAME MISDESCRIBES CONTENT: named meal-vehicle-rates, is a distinct payroll page",
+      "note": "FILENAME MISDESCRIBES CONTENT: named meal-vehicle-rates, is a distinct payroll page. B07: prescribed per-kilometre allowance rates, 2025 and 2026, all four tiers \u2014 the province/territory split is a tier within one federal rule (ITR 7306), not a jurisdiction, so publishing only the province tier would publish half a rule. Published in CAD/km, recorded as published",
       "related": {
         "relationship": "FILENAME_MISDESCRIBES_CONTENT",
         "evidence": "named meal-vehicle-rates but its internal title is 'Automobile or motor vehicle benefits'; 13 pages, different URL",
