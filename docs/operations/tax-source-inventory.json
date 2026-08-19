@@ -267,9 +267,9 @@
       "internal_title": "MP, DB, RRSP, DPSP, ALDA, TFSA limits, YMPE and the YAMPE",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B03",
-      "note": "the genuine RRSP/TFSA limits page (filename carries a trailing space)"
+      "note": "the genuine RRSP/TFSA limits page (filename carries a trailing space). B03: two tables, cited separately \u2014 MP/DB/RRSP/DPSP/YMPE/YAMPE and TFSA/ALDA; 2025 and 2026 authored as CALC_CONSTANT of the 36 years carried. NO CONTRIBUTION_LIMIT objects: contribution_limit.allows_carryforward is NOT NULL DEFAULT false and is sealed into the spec hash, and this document says nothing about carryforward, so an RRSP or TFSA row would publish a carryforward claim the source does not make. YMPE and YAMPE are corroborated here but not re-authored \u2014 they already exist as CPP_MAX_PENSIONABLE_EARNINGS and CPP2_ADDITIONAL_MAX_PENSIONABLE_EARNINGS"
     },
     {
       "drive_file_id": "12LVa9ZuMJJCDrrKmkZv3-3If8gr0qW0Y",
