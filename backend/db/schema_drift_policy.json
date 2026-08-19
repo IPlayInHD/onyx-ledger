@@ -6329,11 +6329,11 @@
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
     },
     {
-      "key": "remove_constraint|rules|calc_constant|calc_constant_code_tax_year_key",
+      "key": "remove_constraint|rules|calc_constant|ck_calc_constant_period_ordered",
       "kind": "remove_constraint",
       "schema": "rules",
       "table": "calc_constant",
-      "object": "calc_constant_code_tax_year_key",
+      "object": "ck_calc_constant_period_ordered",
       "detail": "",
       "class": "RAW_SQL_MANAGED_CHECK",
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
