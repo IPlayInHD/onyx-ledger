@@ -1,4 +1,4 @@
-"""0072_reference_data_effective_period — applies backend/db/sql/07_rules.sql
+"""0072_reference_data_period — applies backend/db/sql/07_rules.sql
 
 Entry: Consolidated P0 reference-data integration.
 
@@ -41,7 +41,7 @@ extends both for rows that actually carry a period; see
 """
 from alembic import op
 
-revision = "0072_reference_data_effective_period"
+revision = "0072_reference_data_period"
 down_revision = "0071_knowledge_authoring"
 branch_labels = None
 depends_on = None
