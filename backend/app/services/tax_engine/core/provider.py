@@ -96,27 +96,31 @@ class TaxDataProvider:
         self.s = session
 
     async def resolve(self, tax_year: int) -> TaxDataset:
+        # ONE statement. Resolution sits on the optimization run's hot path and
+        # inside snapshot capture, so a second round trip here is a second round
+        # trip on every run — the kind of per-call cost that only shows up once
+        # a statement budget is measured.
         rows = (await self.s.execute(
-            select(TaxBracketSet, Jurisdiction)
+            select(TaxBracketSet, Jurisdiction, TaxBracket)
             .join(Jurisdiction, Jurisdiction.id == TaxBracketSet.jurisdiction_id)
+            .outerjoin(TaxBracket, TaxBracket.bracket_set_id == TaxBracketSet.id)
             .where(TaxBracketSet.tax_year == tax_year,
                    TaxBracketSet.kind == INCOME_TAX_KIND))).all()
         if not rows:
             return bootstrap_dataset(tax_year)
 
-        set_ids = [bset.id for bset, _ in rows]
-        brackets = (await self.s.scalars(
-            select(TaxBracket).where(TaxBracket.bracket_set_id.in_(set_ids))
-        )).all()
+        sets: dict[uuid.UUID, tuple[TaxBracketSet, Jurisdiction]] = {}
         by_set: dict[uuid.UUID, list[TaxBracket]] = {}
-        for bracket in brackets:
-            by_set.setdefault(bracket.bracket_set_id, []).append(bracket)
+        for bracket_set, jurisdiction, bracket in rows:
+            sets.setdefault(bracket_set.id, (bracket_set, jurisdiction))
+            if bracket is not None:
+                by_set.setdefault(bracket_set.id, []).append(bracket)
 
         federal = bootstrap.FEDERAL_2025
         provinces = dict(bootstrap.PROVINCES_2025)
         governed: set[str] = set()
 
-        for bset, jurisdiction in rows:
+        for bset, jurisdiction in sets.values():
             code = jurisdiction.code
             ladder = _to_engine_brackets(
                 by_set.get(bset.id, []), f"{code} {tax_year} {bset.kind}")

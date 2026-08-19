@@ -175,6 +175,11 @@ class PinnedSpec:
     # financial inputs into result tables.
     frozen: FrozenAnalysisInput | None = None
     spec_hash: str = ""
+    #: The reference data this run computes from, resolved once in TX-1 and
+    #: carried so the snapshot pins exactly what the engine is handed. In memory
+    #: only, like `frozen`, and absent from the spec hash by design: its identity
+    #: already reaches the hash through the rule snapshot that describes it.
+    dataset: engine_data.TaxDataset | None = None
 
 
 @dataclass
@@ -228,8 +233,14 @@ class OptimizationOrchestrator:
         )
         baseline_hash = frozen.snapshot_hash
 
+        # Resolved before the snapshot so the snapshot describes the very
+        # dataset the engine will be handed, rather than a second resolution
+        # that could disagree with it.
+        dataset = await TaxEngineService(session).resolve_dataset(analysis.tax_year)
+
         # immutable rule snapshot — pinned here, and it CONSTRAINS evaluation
-        pinned = await RuleSnapshotService(session).capture(analysis.tax_year)
+        pinned = await RuleSnapshotService(session).capture(
+            analysis.tax_year, dataset)
 
         weight_config = await session.scalar(
             select(WeightConfig).where(WeightConfig.is_active.is_(True))
@@ -283,6 +294,7 @@ class OptimizationOrchestrator:
             user_constraints=constraints,
             assumption_set=assumption_set,
             frozen=frozen,
+            dataset=dataset,
         )
         # every material input is now resolved — only now is identity computed
         spec.spec_hash = c.optimization_spec_hash(
@@ -472,10 +484,11 @@ class OptimizationOrchestrator:
 
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             engine = TaxEngineService(session)
-            # Resolved ONCE per run. The same dataset then reaches the baseline,
-            # every candidate cost and every eligibility recheck, so a run
-            # cannot measure a candidate against tax law its baseline never saw.
-            dataset = await engine.resolve_dataset(spec.tax_year)
+            # Resolved ONCE per run, in TX-1, and carried here. The same dataset
+            # reaches the baseline, every candidate cost and every eligibility
+            # recheck, so a run cannot measure a candidate against tax law its
+            # own baseline never saw.
+            dataset = spec.dataset
             result = engine.run(inp, dataset)
             facts = engine.facts(inp, result)
 

@@ -50,7 +50,15 @@ from app.services.ioe.orchestrator import OptimizationOrchestrator
 from tests.conftest import frozen_snapshot
 
 # The gate's targets, restated here so a regression names the number it broke.
-MAX_STATEMENTS_PER_RUN = 60
+#
+# Raised from 60 to 61 when the engine began reading its brackets from governed
+# reference data instead of in-code constants. That costs exactly ONE statement
+# per run: the dataset is resolved once in TX-1 and carried, so the snapshot and
+# the calculation share a single resolution rather than each performing their
+# own. It is constant in the number of candidates, which is what this budget
+# exists to protect — `test_statement_count_does_not_grow_with_candidate_count`
+# still measures that property directly and is unchanged.
+MAX_STATEMENTS_PER_RUN = 61
 MAX_STATEMENTS_PER_CANDIDATE_AT_100 = 1.0
 
 

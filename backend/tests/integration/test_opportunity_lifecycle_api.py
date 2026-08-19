@@ -612,9 +612,13 @@ async def test_the_read_executes_no_business_authority(client):
     evaluations: list[int] = []
     real_evaluate = rules_module.RulesEvaluatorService.evaluate
 
-    def counting(inp):
+    def counting(inp, dataset=None):
+        # Mirrors `compute`'s signature exactly. A stub that takes fewer
+        # arguments than the function it replaces fails on the call rather than
+        # on the assertion, which reports a TypeError where this test means to
+        # report "a business authority ran".
         runs.append("compute")
-        return real_compute(inp)
+        return real_compute(inp, dataset)
 
     async def counting_evaluate(self, *a, **kw):
         evaluations.append(1)

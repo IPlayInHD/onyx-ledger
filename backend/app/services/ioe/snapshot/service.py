@@ -86,9 +86,15 @@ class RuleSnapshotService:
     def __init__(self, session: AsyncSession):
         self.s = session
 
-    async def capture(self, tax_year: int) -> PinnedSnapshot:
-        """Capture the published rule content for a year and persist it."""
-        artifacts = await self._collect(tax_year)
+    async def capture(self, tax_year: int,
+                      dataset: engine_data.TaxDataset | None = None) -> PinnedSnapshot:
+        """Capture the published rule content for a year and persist it.
+
+        `dataset` is the reference data the run will compute from. Passing the
+        one the caller already resolved keeps the snapshot pinning exactly what
+        the calculation uses, and saves resolving the same rows twice in one run.
+        """
+        artifacts = await self._collect(tax_year, dataset)
         snapshot_hash = c.rule_snapshot_hash([a.as_hash_input() for a in artifacts])
 
         existing = await self.s.scalar(
@@ -168,8 +174,13 @@ class RuleSnapshotService:
         return "drifted", drifted
 
     # ---- collection ---------------------------------------------------------
-    async def _collect(self, tax_year: int) -> list[SnapshotArtifact]:
-        dataset = await TaxDataProvider(self.s).resolve(tax_year)
+    async def _collect(self, tax_year: int,
+                       dataset: engine_data.TaxDataset | None = None
+                       ) -> list[SnapshotArtifact]:
+        # `verify` deliberately passes nothing: it must recompute today's content
+        # to detect drift, not re-describe what the caller already believes.
+        if dataset is None:
+            dataset = await TaxDataProvider(self.s).resolve(tax_year)
         artifacts: list[SnapshotArtifact] = [
             self._engine_reference_artifact(dataset)]
 
