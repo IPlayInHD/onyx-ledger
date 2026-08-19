@@ -18,9 +18,9 @@
     ]
   },
   "totals": {
-    "files": 43,
-    "bytes": 61443978,
-    "fingerprinted": 40,
+    "files": 44,
+    "bytes": 61583283,
+    "fingerprinted": 41,
     "bytes_unavailable": 3,
     "exact_duplicate_groups": 0
   },
@@ -50,6 +50,17 @@
       "dependencies": "none",
       "expected_future_output": "REFERENCE_DATA (CONTRIBUTION_LIMIT / CALC_CONSTANT) + CITATIONS",
       "note": "the second file is named rrsp-tfsa-limits but contains EI premium rates"
+    },
+    {
+      "batch_id": "B02A",
+      "priority": "P0",
+      "topic": "CPP2 second additional CPP contribution rates and maximums",
+      "source_file_ids": [
+        "1dpFEOci2hWV95ay6cy2hyojFpjLuGder"
+      ],
+      "dependencies": "none",
+      "expected_future_output": "REFERENCE_DATA (CALC_CONSTANT) + CITATIONS",
+      "note": "added to the corpus after B02 closed; CORPUS_GAP - AUTHORITATIVE_CPP2_SOURCE_REQUIRED is CLOSED by this source"
     },
     {
       "batch_id": "B03",
@@ -763,6 +774,23 @@
         "evidence": "identical byte length 1,003,404 with a different SHA-256; 80% of bytes differ because the compressed streams diverge from the one changed timestamp string",
         "conclusion": "content processed once, under the operative capture"
       }
+    },
+    {
+      "drive_file_id": "1dpFEOci2hWV95ay6cy2hyojFpjLuGder",
+      "raw_bytes_sha256": "e0d65b189b19cc26f525c840b2ca4fe071f548a5d958cab15196244b63822d7b",
+      "fingerprint_method": "RAW_BYTES_SHA256",
+      "filename": "026-08_cpp2-rates-maximums.pdf",
+      "folder": "03-rates-amounts",
+      "parent_folder_id": "1JEQvAagThksNL9VU2KJYQGzCkr2F4HDl",
+      "format": "pdf",
+      "mime_type": "application/pdf",
+      "bytes": 139305,
+      "internal_title": "Second additional CPP (CPP2) contribution rates and maximums",
+      "classification": "REFERENCE_DATA",
+      "jurisdiction": "FED",
+      "processing_state": "PROCESSED_OPERATIVE",
+      "batch": "B02A",
+      "note": "closes CORPUS_GAP - AUTHORITATIVE_CPP2_SOURCE_REQUIRED raised by B02; 2025 and 2026 extracted of the 3 published years (2024 is recorded, not published, because CPP/EI 2024 is not published either); the page's printed URL is truncated by its own print stylesheet and the untruncated slug is stated nowhere in the document, so the locator is recorded truncated rather than reconstructed"
     },
     {
       "drive_file_id": "1eoZdx6Vc1IPBoljgN2ktACMtsNadtGIF",
