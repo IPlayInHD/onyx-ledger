@@ -218,9 +218,12 @@ async def test_the_whole_projected_path_runs_no_engine_evaluator_or_optimizer():
     real_resolve = getattr(
         rules_module.RulesEvaluatorService, "_resolve_rule_versions", None)
 
-    def counting_compute(inp):
+    def counting_compute(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         engine_runs.append(1)
-        return real_compute(inp)
+        return real_compute(inp, dataset)
 
     async def counting_evaluate(self, *a, **kw):
         evaluations.append(1)
@@ -476,9 +479,12 @@ async def test_the_projection_still_runs_nothing_after_the_live_state_moved():
     real_compute = engine_module.compute
     real_evaluate = rules_module.RulesEvaluatorService.evaluate
 
-    def counting_compute(inp):
+    def counting_compute(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         engine_runs.append(1)
-        return real_compute(inp)
+        return real_compute(inp, dataset)
 
     async def counting_evaluate(self, *a, **kw):
         evaluations.append(1)

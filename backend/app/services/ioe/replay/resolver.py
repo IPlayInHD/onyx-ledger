@@ -131,6 +131,9 @@ class ResolvedDependencies:
     baseline_result_hash: str | None = None
     baseline_tax: Decimal | None = None
     checked_versions: dict[str, str] = field(default_factory=dict)
+    #: The reference data the sealed run computed from, rebuilt from the
+    #: snapshot artifact. Never re-resolved from the current tables.
+    dataset: engine_data.TaxDataset | None = None
 
 
 class ReplayDependencyResolver:
@@ -214,41 +217,41 @@ class ReplayDependencyResolver:
         if expected_hash and snapshot.snapshot_hash != expected_hash:
             raise DependencyUnavailable(
                 IntegrityReason.PINNED_RULE_SNAPSHOT_UNAVAILABLE)
-        await self._refuse_unreconstructable_reference_data(snapshot.id)
         return snapshot.id, snapshot.snapshot_hash
 
-    async def _refuse_unreconstructable_reference_data(
-        self, snapshot_id: uuid.UUID
-    ) -> None:
-        """Refuse a replay whose reference data this build cannot reproduce.
+    async def sealed_dataset(
+        self, snapshot_id: uuid.UUID, tax_year: int
+    ) -> engine_data.TaxDataset:
+        """The exact reference data the sealed run computed from.
 
-        Replay rebuilds its inputs and runs the engine again. The engine's
-        constants reach it as a resolved dataset, and both replay paths rebuild
-        that dataset rather than reading it out of the seal — so if the sealed
-        run computed from GOVERNED brackets, a replay today would re-resolve
-        them from `tax_kb` and quietly produce whatever those rows say now.
+        Read back from the snapshot artifact, never re-resolved from `tax_kb`.
+        Re-resolving would answer with whatever the tables hold today, which is
+        precisely the substitution a replay exists to rule out — and it would do
+        so invisibly, because the numbers would still look plausible.
 
-        That is the one thing replay may never do. A sealed run computed from
-        governed data is therefore reported as an unavailable dependency until
-        the dataset can be reconstructed from the snapshot artifact, which
-        already materializes its content.
-
-        Runs sealed from the in-code bootstrap are unaffected, including every
-        run sealed before this artifact recorded a source at all: the key is
-        absent, the list is empty, and replay proceeds exactly as before.
+        Missing or unreadable evidence is an UNAVAILABLE dependency. It is never
+        an invitation to fall back to current rows or to the in-code constants:
+        nothing has been shown to differ, we simply cannot look.
         """
+        from app.services.ioe.snapshot.service import (
+            SealedDatasetUnreadable,
+            dataset_from_sealed,
+        )
+
         artifact = await self.s.scalar(
             select(RuleSnapshotArtifact).where(
                 RuleSnapshotArtifact.snapshot_id == snapshot_id,
                 RuleSnapshotArtifact.artifact_kind == "engine_reference_dataset",
             )
         )
-        content = getattr(artifact, "content", None)
-        if not isinstance(content, dict):
-            return
-        if content.get("governed_jurisdictions"):
+        if artifact is None:
             raise DependencyUnavailable(
                 IntegrityReason.REFERENCE_DATA_VERSION_UNAVAILABLE)
+        try:
+            return dataset_from_sealed(artifact.content, tax_year)
+        except SealedDatasetUnreadable as exc:
+            raise DependencyUnavailable(
+                IntegrityReason.REFERENCE_DATA_VERSION_UNAVAILABLE) from exc
 
     async def pinned_rule_versions(self, run_id: uuid.UUID) -> list[uuid.UUID]:
         rows = list(await self.s.scalars(
@@ -320,6 +323,7 @@ class ReplayDependencyResolver:
             canonical_serialization_version=str(
                 manifest.get("canonical_serialization_version",
                             c.CANONICAL_SERIALIZATION_VERSION)),
+            dataset=await self.sealed_dataset(snapshot_id, run.tax_year),
             checked_versions=checked,
         )
 
@@ -387,6 +391,8 @@ class ReplayDependencyResolver:
             baseline_result_hash=scenario.baseline_result_hash,
             baseline_tax=scenario.baseline_tax,
             checked_versions=checked,
+            dataset=await self.sealed_dataset(
+                snapshot_id, scenario.tax_year or 0),
         )
 
 

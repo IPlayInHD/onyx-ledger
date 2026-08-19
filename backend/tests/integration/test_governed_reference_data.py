@@ -285,42 +285,216 @@ async def test_changing_governed_data_makes_a_sealed_snapshot_report_drift():
                    for d in drifted), drifted
 
 
-async def test_replay_proceeds_for_a_run_sealed_from_the_bootstrap():
-    """The overwhelmingly common case must be untouched."""
+async def test_a_bracket_set_with_no_brackets_is_not_governed_data():
+    """A childless set states nothing, so it governs nothing.
+
+    Publication cannot produce one — validation requires a terminal bracket and
+    the rows are written in the same transaction as the set — so such a row is a
+    provenance anchor or residue. Treating it as a broken table would let one
+    stray row disable an entire tax year for every user, and treating it as
+    governed would invent a table that does not exist.
+    """
+    async with _scratch() as session:
+        await _clear_year(session)
+        jurisdiction = await session.scalar(
+            select(Jurisdiction).where(Jurisdiction.code == "FED"))
+        assert jurisdiction is not None
+        session.add(TaxBracketSet(jurisdiction_id=jurisdiction.id,
+                                  tax_year=TAX_YEAR, kind="income_tax"))
+        await session.flush()
+
+        dataset = await TaxDataProvider(session).resolve(TAX_YEAR)
+        # Visible, not silent: the jurisdiction is simply not governed.
+        assert dataset.governed_jurisdictions == frozenset()
+        assert _bands_of(dataset, "FED") == _bootstrap_bands("FED")
+
+
+async def test_a_populated_set_alongside_an_empty_one_still_governs():
+    """Skipping the empty row must not skip the real table beside it."""
+    async with _scratch() as session:
+        await _clear_year(session)
+        empty = await session.scalar(
+            select(Jurisdiction).where(Jurisdiction.code == "FED"))
+        assert empty is not None
+        session.add(TaxBracketSet(jurisdiction_id=empty.id,
+                                  tax_year=TAX_YEAR, kind="income_tax"))
+        await _publish_ladder(session, "ON",
+                              [("0", "50000", "0.05"), ("50000", None, "0.15")])
+        await session.flush()
+
+        dataset = await TaxDataProvider(session).resolve(TAX_YEAR)
+        assert dataset.governed_jurisdictions == frozenset({"ON"})
+        assert _bands_of(dataset, "ON") == [(Decimal("50000"), Decimal("0.05")),
+                                            (None, Decimal("0.15"))]
+
+
+# ---------------------------------------------------------------------------
+# Historical replay: the sealed dataset, never today's rows
+# ---------------------------------------------------------------------------
+V1 = [("0", "50000", "0.10"), ("50000", None, "0.20")]
+V2 = [("0", "50000", "0.30"), ("50000", None, "0.40")]
+
+
+async def _seal(session) -> tuple[uuid.UUID, object]:
+    from app.services.ioe.snapshot.service import RuleSnapshotService
+
+    dataset = await TaxDataProvider(session).resolve(TAX_YEAR)
+    pinned = await RuleSnapshotService(session).capture(TAX_YEAR, dataset)
+    return pinned.snapshot_id, dataset
+
+
+async def test_a_v1_run_replays_from_v1_after_v2_is_published():
+    """The whole point of sealing reference data.
+
+    A run sealed under V1 must replay as V1 even though the tables now hold V2.
+    Re-resolving would produce a confident, plausible, WRONG historical answer.
+    """
     from app.services.ioe.replay.resolver import ReplayDependencyResolver
 
     async with _scratch() as session:
         await _clear_year(session)
-        from app.services.ioe.snapshot.service import RuleSnapshotService
+        await _publish_ladder(session, "ON", V1)
+        snapshot_id, v1_dataset = await _seal(session)
+        assert v1_dataset.governed_jurisdictions == frozenset({"ON"})
 
-        pinned = await RuleSnapshotService(session).capture(TAX_YEAR)
+        # The world moves on: V2 replaces V1 in the governed tables.
+        await _clear_year(session)
+        await _publish_ladder(session, "ON", V2)
+        current = await TaxDataProvider(session).resolve(TAX_YEAR)
+        assert _bands_of(current, "ON") == [(Decimal("50000"), Decimal("0.30")),
+                                            (None, Decimal("0.40"))]
+
         resolver = ReplayDependencyResolver(session, uuid.uuid4())
-        # No raise: nothing governed was sealed, so this build reproduces it.
-        await resolver._refuse_unreconstructable_reference_data(pinned.snapshot_id)
+        replayed = await resolver.sealed_dataset(snapshot_id, TAX_YEAR)
+
+        # EXACT V1 values, and demonstrably not V2.
+        assert _bands_of(replayed, "ON") == [(Decimal("50000"), Decimal("0.10")),
+                                             (None, Decimal("0.20"))]
+        assert _bands_of(replayed, "ON") != _bands_of(current, "ON")
+        assert replayed.governed_jurisdictions == frozenset({"ON"})
 
 
-async def test_replay_refuses_a_run_sealed_from_governed_data():
-    """Replay may never re-resolve governed rows and call the answer historical.
+async def test_replaying_v1_reproduces_the_v1_number_exactly():
+    """Value equivalence, not merely structural equivalence."""
+    from app.services.ioe.replay.resolver import ReplayDependencyResolver
 
-    The sealed dataset is not yet reconstructable from the artifact, so a run
-    computed from governed brackets is an UNAVAILABLE dependency rather than a
-    replay that quietly uses whatever `tax_kb` says today.
-    """
+    async with _scratch() as session:
+        await _clear_year(session)
+        await _publish_ladder(session, "ON", V1)
+        snapshot_id, v1_dataset = await _seal(session)
+        inp = TaxInput(province="ON", year=TAX_YEAR,
+                       employment_income=Decimal("120000"))
+        sealed_time = compute(inp, v1_dataset)
+
+        await _clear_year(session)
+        await _publish_ladder(session, "ON", V2)
+
+        resolver = ReplayDependencyResolver(session, uuid.uuid4())
+        replayed = await resolver.sealed_dataset(snapshot_id, TAX_YEAR)
+        replay_time = compute(inp, replayed)
+
+        assert replay_time == sealed_time
+        assert replay_time.provincial_tax == sealed_time.provincial_tax
+        # And it is genuinely different from what today's data would produce.
+        current = await TaxDataProvider(session).resolve(TAX_YEAR)
+        assert compute(inp, current).provincial_tax != sealed_time.provincial_tax
+
+
+async def test_ontario_governed_data_is_present_in_the_sealed_evidence():
+    """The artifact defect fixed: provincial data really is sealed."""
+    from app.services.ioe.snapshot.service import RuleSnapshotService
+
+    async with _scratch() as session:
+        await _clear_year(session)
+        await _publish_ladder(session, "ON", V1)
+        dataset = await TaxDataProvider(session).resolve(TAX_YEAR)
+        artifact = RuleSnapshotService(session)._engine_reference_artifact(dataset)
+
+        sealed_on = artifact.content["provinces"]["ON"]["brackets"]
+        assert sealed_on == [{"rate": "0.100000", "up_to": "50000.000000"},
+                             {"rate": "0.200000", "up_to": None}]
+        assert artifact.content["governed_jurisdictions"] == ["ON"]
+
+
+async def test_a_bootstrap_sealed_run_keeps_its_historical_identity():
+    """Compatibility: nothing about pre-governed history changes."""
+    from app.services.ioe.replay.resolver import ReplayDependencyResolver
+
+    async with _scratch() as session:
+        await _clear_year(session)
+        snapshot_id, dataset = await _seal(session)
+        assert dataset.is_fully_bootstrap
+
+        resolver = ReplayDependencyResolver(session, uuid.uuid4())
+        replayed = await resolver.sealed_dataset(snapshot_id, TAX_YEAR)
+        assert replayed.is_fully_bootstrap
+        assert _bands_of(replayed, "ON") == _bootstrap_bands("ON")
+
+        inp = TaxInput(province="ON", year=TAX_YEAR,
+                       employment_income=Decimal("120000"))
+        assert compute(inp, replayed) == compute(inp)
+
+
+async def test_an_artifact_predating_governed_data_still_replays():
+    """A seal written before the artifact recorded a source at all."""
+    from app.services.ioe.snapshot.service import dataset_from_sealed
+
+    legacy = {"reference_data_version": "2025.1.0", "federal": {}}
+    rebuilt = dataset_from_sealed(legacy, TAX_YEAR)
+    assert rebuilt.is_fully_bootstrap
+    assert _bands_of(rebuilt, "ON") == _bootstrap_bands("ON")
+
+
+async def test_corrupt_sealed_reference_data_fails_closed():
+    """Never a fallback. Nothing was shown to differ; we cannot look."""
+    from app.services.ioe.snapshot.service import (
+        SealedDatasetUnreadable,
+        dataset_from_sealed,
+    )
+
+    corrupt = {"reference_data_version": "2025.1.0",
+               "governed_jurisdictions": ["ON"],
+               "federal": {"brackets": []},
+               "provinces": {}}
+    with pytest.raises(SealedDatasetUnreadable):
+        dataset_from_sealed(corrupt, TAX_YEAR)
+
+
+async def test_tampered_sealed_reference_data_fails_closed():
+    """A described value that does not round-trip is refused, not repaired."""
+    from app.services.ioe.snapshot.service import (
+        SealedDatasetUnreadable,
+        dataset_from_sealed,
+        describe_dataset,
+    )
+
+    honest = describe_dataset(dataclasses_replace_governed())
+    honest["provinces"]["ON"]["name"] = "Tampered"
+    honest["governed_jurisdictions"] = ["ON"]
+    # `name` rebuilds fine but the description then differs from what was
+    # sealed only if the value is unrepresentable; prove the round-trip guard
+    # by corrupting a Decimal into something that re-describes differently.
+    honest["provinces"]["ON"]["bpa"] = "12747.0000005"
+    with pytest.raises(SealedDatasetUnreadable):
+        dataset_from_sealed(honest, TAX_YEAR)
+
+
+def dataclasses_replace_governed():
+    import dataclasses as dc
+
+    base = bootstrap_dataset(TAX_YEAR)
+    return dc.replace(base, governed_jurisdictions=frozenset({"ON"}))
+
+
+async def test_a_missing_reference_artifact_is_an_unavailable_dependency():
     from app.services.ioe.domain.integrity import (
         DependencyUnavailable,
         IntegrityReason,
     )
     from app.services.ioe.replay.resolver import ReplayDependencyResolver
-    from app.services.ioe.snapshot.service import RuleSnapshotService
 
     async with _scratch() as session:
-        await _clear_year(session)
-        await _publish_ladder(session, "ON",
-                              [("0", "50000", "0.05"), ("50000", None, "0.15")])
-        pinned = await RuleSnapshotService(session).capture(TAX_YEAR)
-
         resolver = ReplayDependencyResolver(session, uuid.uuid4())
         with pytest.raises(DependencyUnavailable) as caught:
-            await resolver._refuse_unreconstructable_reference_data(
-                pinned.snapshot_id)
+            await resolver.sealed_dataset(uuid.uuid4(), TAX_YEAR)
         assert caught.value.reason == IntegrityReason.REFERENCE_DATA_VERSION_UNAVAILABLE

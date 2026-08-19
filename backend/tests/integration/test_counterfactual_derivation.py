@@ -315,9 +315,12 @@ async def test_retaining_the_engine_output_costs_no_extra_engine_execution(monke
     real = engine.compute
     executions: list[int] = []
 
-    def counting(inp):
+    def counting(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         executions.append(1)
-        return real(inp)
+        return real(inp, dataset)
 
     for module in (engine, scenario_service, portfolio, eligibility,
                    tax_engine_service):

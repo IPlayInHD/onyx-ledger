@@ -267,9 +267,12 @@ async def test_the_baseline_tax_state_is_not_recomputed():
     runs: list[int] = []
     real = engine_module.compute
 
-    def counting(inp):
+    def counting(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         runs.append(1)
-        return real(inp)
+        return real(inp, dataset)
 
     engine_module.compute = counting                    # type: ignore[assignment]
     try:
@@ -549,9 +552,12 @@ async def test_the_corrected_read_runs_no_engine_evaluator_or_optimizer():
     real_compute = engine_module.compute
     real_evaluate = rules_module.RulesEvaluatorService.evaluate
 
-    def counting_compute(inp):
+    def counting_compute(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         engine_runs.append(1)
-        return real_compute(inp)
+        return real_compute(inp, dataset)
 
     async def counting_evaluate(self, *a, **kw):
         evaluations.append(1)
@@ -734,13 +740,19 @@ async def test_sealing_v3_costs_one_extra_evaluation_and_no_extra_engine_run():
         real_engine_compute = engine_service.compute
         real_evaluate = rules_module.RulesEvaluatorService.evaluate
 
-        def counting_scenario(inp):
+        def counting_scenario(inp, dataset=None):
+            # Mirrors `compute`'s signature. A stub taking fewer
+            # arguments than what it replaces fails on the call
+            # instead of on this test's actual assertion.
             engine_runs.append(1)
-            return real_scenario_compute(inp)
+            return real_scenario_compute(inp, dataset)
 
-        def counting_engine(inp):
+        def counting_engine(inp, dataset=None):
+            # Mirrors `compute`'s signature. A stub taking fewer
+            # arguments than what it replaces fails on the call
+            # instead of on this test's actual assertion.
             engine_runs.append(1)
-            return real_engine_compute(inp)
+            return real_engine_compute(inp, dataset)
 
         async def counting_evaluate(self, *a, **kw):
             evaluations.append(1)

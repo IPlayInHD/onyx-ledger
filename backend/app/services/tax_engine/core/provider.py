@@ -122,8 +122,23 @@ class TaxDataProvider:
 
         for bset, jurisdiction in sets.values():
             code = jurisdiction.code
+            rows_for_set = by_set.get(bset.id, [])
+            if not rows_for_set:
+                # A bracket set with no brackets states nothing about tax law and
+                # cannot come from publication: validation requires a terminal
+                # bracket, and the rows are written in the same transaction as
+                # the set. Such a row exists only as a provenance anchor or as
+                # residue, so it is not governed data — and treating it as a
+                # broken table instead would let one stray row disable an entire
+                # tax year for everybody.
+                #
+                # Not a silent fallback: the jurisdiction is simply absent from
+                # `governed_jurisdictions`, which the sealed artifact records, so
+                # "this year was not governed" stays visible. A set that DOES
+                # carry brackets which do not form a valid ladder still raises.
+                continue
             ladder = _to_engine_brackets(
-                by_set.get(bset.id, []), f"{code} {tax_year} {bset.kind}")
+                rows_for_set, f"{code} {tax_year} {bset.kind}")
             if code == FEDERAL_CODE:
                 federal = replace(federal, brackets=ladder)
                 governed.add(code)

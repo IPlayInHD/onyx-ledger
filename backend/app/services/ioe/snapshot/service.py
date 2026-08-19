@@ -242,13 +242,7 @@ class RuleSnapshotService:
             # sealed by an earlier build report `unavailable` rather than the
             # `drifted` that honestly describes a widened artifact.
             artifact_key=f"engine:{dataset.bootstrap_version}",
-            content={
-                "reference_data_version": dataset.bootstrap_version,
-                "governed_jurisdictions": sorted(dataset.governed_jurisdictions),
-                "federal": _describe(dataset.federal),
-                "provinces": {code: _describe(dataset.provinces[code])
-                              for code in sorted(dataset.provinces)},
-            },
+            content=describe_dataset(dataset),
         )
 
     async def _formula_artifacts(
@@ -362,6 +356,111 @@ class RuleSnapshotService:
                          "value": c.quantity(k.value), "unit": k.unit},
             ))
         return out
+
+
+def describe_dataset(dataset: engine_data.TaxDataset) -> dict[str, Any]:
+    """The content pinned for a resolved dataset.
+
+    One function so the artifact written at seal time and the reconstruction
+    read back at replay time cannot drift apart.
+    """
+    return {
+        "reference_data_version": dataset.bootstrap_version,
+        "governed_jurisdictions": sorted(dataset.governed_jurisdictions),
+        "federal": _describe(dataset.federal),
+        "provinces": {code: _describe(dataset.provinces[code])
+                      for code in sorted(dataset.provinces)},
+    }
+
+
+class SealedDatasetUnreadable(Exception):
+    """Sealed reference data cannot be turned back into the exact dataset."""
+
+
+def dataset_from_sealed(content: Any, tax_year: int) -> engine_data.TaxDataset:
+    """Rebuild the EXACT dataset a run was sealed with, or refuse.
+
+    Replay re-runs the engine, and the engine takes its constants as data — so
+    a historical replay needs the historical constants. Re-resolving them from
+    `tax_kb` would answer with whatever the tables say today, which is the one
+    thing a replay may never do. The artifact already materializes the whole
+    dataset, so it is read back from there instead.
+
+    Correctness is PROVED per call rather than assumed: the reconstruction is
+    described again and must equal the sealed content byte for byte. Anything
+    that does not round-trip raises, and the caller reports an unavailable
+    dependency rather than computing from an approximation.
+
+    A run sealed before governed data existed carries no governed jurisdictions,
+    and keeps its historical identity: the in-code bootstrap, exactly as that
+    run used and exactly as replay used before this reconstruction existed.
+    """
+    if not isinstance(content, dict):
+        raise SealedDatasetUnreadable("sealed reference data is not an object")
+    if not content.get("governed_jurisdictions"):
+        return engine_data.bootstrap_dataset(tax_year)
+
+    try:
+        federal = _rebuild(engine_data.FederalData, content["federal"])
+        provinces = {code: _rebuild(engine_data.ProvincialData, described)
+                     for code, described in content["provinces"].items()}
+    except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+        raise SealedDatasetUnreadable(f"sealed reference data is unreadable: {exc}") from exc
+
+    rebuilt = engine_data.TaxDataset(
+        tax_year=tax_year, federal=federal, provinces=provinces,
+        governed_jurisdictions=frozenset(content["governed_jurisdictions"]),
+        bootstrap_version=content["reference_data_version"])
+    if describe_dataset(rebuilt) != content:
+        raise SealedDatasetUnreadable(
+            "the reconstructed dataset does not describe back to what was "
+            "sealed; replaying it would compute from something the run did not")
+    return rebuilt
+
+
+def _rebuild(cls: type, described: Any) -> Any:
+    """Invert `_describe` for one dataclass, using its declared field types."""
+    import typing
+    from dataclasses import fields
+
+    hints = typing.get_type_hints(cls)
+    kwargs = {}
+    for f in fields(cls):
+        if f.name not in described:
+            raise KeyError(f"{cls.__name__}.{f.name} absent from sealed content")
+        kwargs[f.name] = _rebuild_value(hints[f.name], described[f.name])
+    return cls(**kwargs)
+
+
+def _rebuild_value(hint: Any, value: Any) -> Any:
+    import types
+    import typing
+    from dataclasses import is_dataclass
+    from decimal import Decimal
+
+    if value is None:
+        return None
+    origin = typing.get_origin(hint)
+    if origin is typing.Union or origin is types.UnionType:
+        inner = [a for a in typing.get_args(hint) if a is not type(None)]
+        return _rebuild_value(inner[0], value)
+    if hint is Decimal:
+        return Decimal(value)
+    if hint in (str, bool, int):
+        return hint(value)
+    if origin in (list, tuple):
+        args = typing.get_args(hint)
+        if origin is tuple and len(args) == 2 and args[1] is not Ellipsis:
+            return tuple(_rebuild_value(a, v)
+                         for a, v in zip(args, value, strict=False))
+        item = args[0] if args else None
+        rebuilt = [_rebuild_value(item, v) for v in value]
+        return rebuilt if origin is list else tuple(rebuilt)
+    # `is_dataclass` alone admits instances as well as classes; a type hint is
+    # always the class, and saying so keeps the checker honest.
+    if isinstance(hint, type) and is_dataclass(hint):
+        return _rebuild(hint, value)
+    return value
 
 
 def _describe(dataset: object) -> dict[str, Any]:

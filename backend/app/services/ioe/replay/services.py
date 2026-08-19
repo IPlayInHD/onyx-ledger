@@ -160,6 +160,10 @@ class OptimizationReplayService:
             manifest_hash=c.version_manifest_hash(deps.version_manifest),
             user_constraints=constraints,
             assumption_set=assumption_set,
+            # The sealed dataset, rebuilt from the snapshot artifact. `_compute`
+            # takes its constants from here, so the replay computes from the tax
+            # law the run was sealed under rather than today's rows.
+            dataset=deps.dataset,
         )
         # The RESULT hash anchors on the spec hash that was sealed, so a result
         # is verifiable even on a run whose spec inputs predate being stored.
@@ -521,6 +525,7 @@ class ScenarioReplayService:
             manifest_hash=c.version_manifest_hash(deps.version_manifest),
             spec=spec,
             spec_hash=spec_hash,
+            dataset=deps.dataset,
         )
 
         service = ScenarioService(self.user_id)

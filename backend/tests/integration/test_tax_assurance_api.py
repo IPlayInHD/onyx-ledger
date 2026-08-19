@@ -293,9 +293,12 @@ async def test_the_read_executes_no_business_authority(client):
     real_compute = engine_service.compute
     real_evaluate = rules_module.RulesEvaluatorService.evaluate
 
-    def counting(inp):
+    def counting(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         runs.append(1)
-        return real_compute(inp)
+        return real_compute(inp, dataset)
 
     async def counting_evaluate(self, *a, **kw):
         evaluations.append(1)

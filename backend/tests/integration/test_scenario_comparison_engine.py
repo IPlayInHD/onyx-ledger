@@ -223,13 +223,19 @@ async def test_an_ordinary_v3_scenario_compares_end_to_end():
     real_engine_compute = engine_service.compute
     real_evaluate = rules_module.RulesEvaluatorService.evaluate
 
-    def counting_scenario(inp):
+    def counting_scenario(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         engine_runs.append(1)
-        return real_scenario_compute(inp)
+        return real_scenario_compute(inp, dataset)
 
-    def counting_engine(inp):
+    def counting_engine(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         engine_runs.append(1)
-        return real_engine_compute(inp)
+        return real_engine_compute(inp, dataset)
 
     async def counting_evaluate(self, *a, **kw):
         evaluations.append(1)
@@ -442,9 +448,12 @@ async def test_the_comparison_does_not_move_when_live_state_moves():
     real_engine_compute = engine_service.compute
     real_evaluate = rules_module.RulesEvaluatorService.evaluate
 
-    def counting_engine(inp):
+    def counting_engine(inp, dataset=None):
+        # Mirrors `compute`'s signature. A stub taking fewer
+        # arguments than what it replaces fails on the call
+        # instead of on this test's actual assertion.
         engine_runs.append(1)
-        return real_engine_compute(inp)
+        return real_engine_compute(inp, dataset)
 
     async def counting_evaluate(self, *a, **kw):
         evaluations.append(1)
