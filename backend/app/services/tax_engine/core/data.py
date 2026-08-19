@@ -18,7 +18,15 @@ from decimal import Decimal
 # silently producing a different number.
 #
 # Additive and inert: no calculation reads this constant.
-REFERENCE_DATA_VERSION = "2025.1.0"
+#
+# 2025.2.0 — the second additional CPP contribution (CPP2) became computable.
+# `cpp2_max_pensionable` and `cpp2_rate` were added and `compute` now produces a
+# CPP2 contribution for a self-employed filer above the year's maximum
+# pensionable earnings, where it previously produced nothing. That changes the
+# answer for those filers, which is exactly the condition this constant exists
+# to signal: a run sealed under 2025.1.0 now reports DRIFTED on verification
+# rather than quietly replaying to a different number.
+REFERENCE_DATA_VERSION = "2025.2.0"
 
 
 def D(x: int | str | Decimal) -> Decimal:
@@ -61,7 +69,13 @@ class FederalData:
     cpp_exemption: Decimal
     cpp_rate: Decimal
     cpp_max: Decimal
+    #: CPP2 applies to the band ABOVE `cpp_max_pensionable` and up to the year's
+    #: ADDITIONAL maximum pensionable earnings (YAMPE). `cpp2_max` is the
+    #: maximum a single employee or employer pays; the self-employed maximum is
+    #: twice it, which the engine derives rather than storing again.
     cpp2_max: Decimal
+    cpp2_max_pensionable: Decimal
+    cpp2_rate: Decimal
     ei_max_insurable: Decimal
     ei_rate: Decimal
     ei_max: Decimal
@@ -87,6 +101,7 @@ FEDERAL_2025 = FederalData(
     credit_rate=D("0.145"), canada_employment=D(1471),
     cpp_max_pensionable=D(71300), cpp_exemption=D(3500), cpp_rate=D("0.0595"),
     cpp_max=D("4034.10"), cpp2_max=D(396),
+    cpp2_max_pensionable=D(81200), cpp2_rate=D("0.04"),
     ei_max_insurable=D(65700), ei_rate=D("0.0164"), ei_max=D("1077.48"),
     medical_pct=D("0.03"), medical_cap=D(2834),
     donation_low=D("0.145"), donation_high=D("0.29"),
@@ -162,13 +177,20 @@ class TaxDataset:
     federal: FederalData
     provinces: dict[str, ProvincialData]
     governed_jurisdictions: frozenset[str] = frozenset()
+    #: Which CALC_CONSTANT codes were overlaid from governed reference data.
+    #: Part of the dataset's identity for the same reason the jurisdictions
+    #: are: a CPP rate that came from a published constant is not the same
+    #: fact as one that came from the constants below, even where the numbers
+    #: agree, and a snapshot that could not tell them apart would let the
+    #: source of a published figure change unnoticed.
+    governed_constants: frozenset[str] = frozenset()
     #: Identifies the in-code portion, so editing the constants above still
     #: invalidates replay exactly as it does today.
     bootstrap_version: str = REFERENCE_DATA_VERSION
 
     @property
     def is_fully_bootstrap(self) -> bool:
-        return not self.governed_jurisdictions
+        return not self.governed_jurisdictions and not self.governed_constants
 
     def describe(self) -> dict:
         """The content a snapshot pins, as plain comparable values."""

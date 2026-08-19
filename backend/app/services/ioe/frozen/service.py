@@ -65,6 +65,7 @@ class FrozenAnalysisInputService:
         *,
         expected_snapshot_hash: str | None = None,
         expected_baseline_result_hash: str | None = None,
+        dataset: engine_data.TaxDataset | None = None,
     ) -> FrozenAnalysisInput:
         """Load, verify and reconstruct. Fails closed at every step.
 
@@ -116,7 +117,15 @@ class FrozenAnalysisInputService:
         # 10. the baseline RESULT identity, re-derived from the frozen input by
         #     the one authority allowed to calculate tax
         engine = TaxEngineService(self.s)
-        baseline = engine.run(tax_input, await engine.resolve_dataset(tax_year))
+        # ONE RUN, ONE DATASET. The caller passes the dataset the rest of the
+        # run will compute from; resolving a second one here would let the
+        # baseline and the candidates it is compared against come from
+        # different tax law, which is the failure the provider exists to make
+        # impossible. Resolving independently is kept as the fallback for
+        # callers outside an optimization run, which have no dataset to hand.
+        if dataset is None:
+            dataset = await engine.resolve_dataset(tax_year)
+        baseline = engine.run(tax_input, dataset)
         baseline_tax = baseline.total_payable.quantize(MONEY, ROUND_HALF_UP)
         # RETAINED, NOT RECOMPUTED. The one permitted engine run just produced
         # these; discarding them left the baseline opportunity set with no way

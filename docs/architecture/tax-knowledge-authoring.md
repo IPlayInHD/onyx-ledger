@@ -262,11 +262,18 @@ about it changes** — a test rebuilds its specification before and after and
 asserts the same hash.
 
 Published **reference data** is immutable by uniqueness: `tax_bracket_set`,
-`contribution_limit` and `calc_constant` are unique on their semantic key and
-carry no version column, so the pipeline INSERTs and refuses a key that already
-exists (`REFERENCE_DATA_ALREADY_PUBLISHED`). Correcting published reference data
-would require a version dimension on tables the engine and the snapshotter read;
-that is a redesign, and it is recorded as a limitation rather than improvised.
+`contribution_limit` and `calc_constant` carry no version column, so the pipeline
+INSERTs and refuses ground that is already covered
+(`REFERENCE_DATA_ALREADY_PUBLISHED`). For brackets and limits that ground is the
+semantic key. For `calc_constant` it is the semantic key **and an effective
+period**: since
+[reference-data effective periods](reference-data-effective-periods.md) a code
+may hold several non-overlapping periods within one tax year, so republication
+is detected by OVERLAP rather than by key equality — a second quarter of a
+prescribed rate is new content, not a correction. Correcting published reference
+data would still require a version dimension on tables the engine and the
+snapshotter read; that is a redesign, and it is recorded as a limitation rather
+than improvised.
 Historical replay is unaffected either way, because `rule_snapshot_artifact`
 materializes reference-data content with its own hash.
 

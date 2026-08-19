@@ -345,15 +345,35 @@ class RuleSnapshotService:
         return out
 
     async def _constant_artifacts(self, tax_year: int) -> list[SnapshotArtifact]:
+        """Pin every constant for the year, including intra-year periods.
+
+        BOTH THE KEY AND THE CONTENT STAY BYTE-IDENTICAL FOR ANNUAL ROWS. This
+        is not tidiness: `verify()` recomputes artifacts and compares them to
+        the stored ones by (artifact_kind, artifact_key), so widening the key
+        would report every historical snapshot as `unavailable`, and adding two
+        nulls to the content would report every one of them as `drifted`. Both
+        would be pure false positives across all history.
+
+        A row that carries a period needs the period in its key, because two
+        quarters of one code and year would otherwise collide on `code:year`
+        and one would silently overwrite the other in the pinned set.
+        """
         out: list[SnapshotArtifact] = []
         for k in await self.s.scalars(
             select(CalcConstant).where(CalcConstant.tax_year == tax_year)
         ):
+            content = {"code": k.code, "tax_year": k.tax_year,
+                       "value": c.quantity(k.value), "unit": k.unit}
+            key = f"{k.code}:{k.tax_year}"
+            if k.effective_from is not None or k.effective_to is not None:
+                content["effective_from"] = (
+                    k.effective_from.isoformat() if k.effective_from else None)
+                content["effective_to"] = (
+                    k.effective_to.isoformat() if k.effective_to else None)
+                key = f"{key}:{k.effective_from}..{k.effective_to}"
             out.append(SnapshotArtifact(
                 artifact_kind="calc_constant", artifact_id=k.id,
-                artifact_key=f"{k.code}:{k.tax_year}",
-                content={"code": k.code, "tax_year": k.tax_year,
-                         "value": c.quantity(k.value), "unit": k.unit},
+                artifact_key=key, content=content,
             ))
         return out
 
@@ -364,13 +384,20 @@ def describe_dataset(dataset: engine_data.TaxDataset) -> dict[str, Any]:
     One function so the artifact written at seal time and the reconstruction
     read back at replay time cannot drift apart.
     """
-    return {
+    described = {
         "reference_data_version": dataset.bootstrap_version,
         "governed_jurisdictions": sorted(dataset.governed_jurisdictions),
         "federal": _describe(dataset.federal),
         "provinces": {code: _describe(dataset.provinces[code])
                       for code in sorted(dataset.provinces)},
     }
+    # Emitted only when constants were actually overlaid, so a dataset that
+    # took none describes exactly as it did before governed constants existed.
+    # The values themselves are already inside `federal`; this records WHICH of
+    # them stopped being in-code, which is the part a number cannot show.
+    if dataset.governed_constants:
+        described["governed_constants"] = sorted(dataset.governed_constants)
+    return described
 
 
 class SealedDatasetUnreadable(Exception):
@@ -397,7 +424,13 @@ def dataset_from_sealed(content: Any, tax_year: int) -> engine_data.TaxDataset:
     """
     if not isinstance(content, dict):
         raise SealedDatasetUnreadable("sealed reference data is not an object")
-    if not content.get("governed_jurisdictions"):
+    # BOTH must be empty for the bootstrap shortcut. A run may take governed
+    # CPP/EI constants while every bracket table is still in-code — that is
+    # precisely the state the first governed constants create — and testing
+    # jurisdictions alone would hand such a run today's bootstrap constants
+    # instead of the ones it was sealed with. That is the substitution replay
+    # exists to prevent.
+    if not content.get("governed_jurisdictions") and not content.get("governed_constants"):
         return engine_data.bootstrap_dataset(tax_year)
 
     try:
@@ -410,6 +443,7 @@ def dataset_from_sealed(content: Any, tax_year: int) -> engine_data.TaxDataset:
     rebuilt = engine_data.TaxDataset(
         tax_year=tax_year, federal=federal, provinces=provinces,
         governed_jurisdictions=frozenset(content["governed_jurisdictions"]),
+        governed_constants=frozenset(content.get("governed_constants", ())),
         bootstrap_version=content["reference_data_version"])
     if describe_dataset(rebuilt) != content:
         raise SealedDatasetUnreadable(

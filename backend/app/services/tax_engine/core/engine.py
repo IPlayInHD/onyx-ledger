@@ -157,11 +157,37 @@ def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
     net_rental = inp.rental_income - inp.rental_expenses
 
     # ---- Self-employed CPP (Schedule 8): both halves on incremental base ----
+    #
+    # TWO BANDS, because Schedule 8 has two. Base CPP runs from the basic
+    # exemption up to the year's maximum pensionable earnings; CPP2 — the second
+    # additional contribution, in force since 2024 — runs from there up to the
+    # year's ADDITIONAL maximum. Both are computed on the base INCREMENTAL to
+    # employment income, because contributions already withheld on a salary are
+    # not owed again on the return.
+    #
+    # CPP2 was previously not computed at all, so a self-employed filer above
+    # the pensionable ceiling was told they owed nothing further when the
+    # published maximum is $792 for 2025. `cpp_payable_se` feeds `total_payable`,
+    # which every baseline, scenario and portfolio comparison is built on, so
+    # the omission understated all of them.
     cpp_ceiling = f.cpp_max + f.cpp2_max
     emp_base = _pos(min(inp.employment_income, f.cpp_max_pensionable) - f.cpp_exemption)
     tot_base = _pos(min(inp.employment_income + _pos(net_se), f.cpp_max_pensionable) - f.cpp_exemption)
     se_cpp_base = _pos(tot_base - emp_base)
-    se_cpp_total = _r(se_cpp_base * f.cpp_rate * 2)
+
+    emp_base2 = _pos(min(inp.employment_income, f.cpp2_max_pensionable)
+                     - f.cpp_max_pensionable)
+    tot_base2 = _pos(min(inp.employment_income + _pos(net_se), f.cpp2_max_pensionable)
+                     - f.cpp_max_pensionable)
+    se_cpp2_base = _pos(tot_base2 - emp_base2)
+
+    se_cpp_total = _r(se_cpp_base * f.cpp_rate * 2 + se_cpp2_base * f.cpp2_rate * 2)
+    # The existing self-employed convention — half deducted, half credited —
+    # applies to the combined figure. CPP2 sits in the ENHANCED portion, whose
+    # real treatment is deduction rather than credit, but no registered source
+    # states that and asserting it here would make the engine the authority for
+    # a rule nothing published. Recorded as a deferred gap; what is fixed here
+    # is the amount owed, which was wrong.
     se_cpp_deduction = _r(se_cpp_total / 2)
     se_cpp_credit = se_cpp_total / 2
 

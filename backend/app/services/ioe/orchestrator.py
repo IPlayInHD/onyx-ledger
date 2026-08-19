@@ -228,15 +228,17 @@ class OptimizationOrchestrator:
         # snapshot, idempotency — describes THIS input or it describes nothing.
         # A missing, corrupt, incomplete or unsupported snapshot fails closed
         # here, before a single engine run.
+        # Resolved before the frozen baseline AND before the snapshot, so one
+        # dataset serves the baseline, the pinned snapshot and every candidate.
+        # The baseline previously resolved its own, which cost a second set of
+        # round trips and left open the possibility of a baseline computed from
+        # different tax law than the candidates it is the comparison point for.
+        dataset = await TaxEngineService(session).resolve_dataset(analysis.tax_year)
+
         frozen = await FrozenAnalysisInputService(session, self.user_id).resolve(
-            analysis_id
+            analysis_id, dataset=dataset
         )
         baseline_hash = frozen.snapshot_hash
-
-        # Resolved before the snapshot so the snapshot describes the very
-        # dataset the engine will be handed, rather than a second resolution
-        # that could disagree with it.
-        dataset = await TaxEngineService(session).resolve_dataset(analysis.tax_year)
 
         # immutable rule snapshot — pinned here, and it CONSTRAINS evaluation
         pinned = await RuleSnapshotService(session).capture(

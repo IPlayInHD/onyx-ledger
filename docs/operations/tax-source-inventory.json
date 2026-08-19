@@ -908,9 +908,9 @@
       "internal_title": "Interest rates for the third calendar quarter",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "PROCESSED_REPRESENTATION_BLOCKED",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B04",
-      "note": "prescribed interest, 2026-Q3. B04: registered and cited, NOTHING authored. The document states its own effective window \u2014 July 1 to September 30, 2026 \u2014 and rules.calc_constant is UNIQUE(code, tax_year) with a foreign key to ref.tax_year(year), so four quarters of one year collide on one key and storing any single quarter as the annual value would be false for the other nine months. The SOURCE model can hold the quarter (effective_from/effective_to are registered); the value model cannot. REPRESENTATION_BLOCKER, reported not worked around"
+      "note": "prescribed interest, 2026-Q3. B04: five rates from the 'Income tax' section authored for 2026-07-01..2026-09-30, the window the document states for itself. The REPRESENTATION_BLOCKER this batch raised is CLOSED: rules.calc_constant now carries an effective period and an exclusion constraint refusing overlapping ones, so a quarter is stored as a quarter rather than encoded into a code or filed as the annual value. The 'Other taxes, duties, or charges' table \u2014 GST/HST, excise, fuel-charge, softwood lumber, UHT, luxury, digital services, global minimum tax \u2014 is extracted and recorded, not authored: none of it is a personal income-tax semantic. No runtime consumer reads prescribed interest, so nothing was wired"
     },
     {
       "drive_file_id": "1k8t3ewIviQw75hq-qH2VMDjGrfIUJFGy",

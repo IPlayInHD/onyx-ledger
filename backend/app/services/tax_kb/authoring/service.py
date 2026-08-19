@@ -223,28 +223,33 @@ class KnowledgeAuthoringService:
 
         return frozenset(await self.s.scalars(select(Assumption.code).distinct()))
 
-    async def _published_reference_data(self) -> frozenset[tuple[str, str, int]]:
+    async def _published_reference_data(self) -> frozenset[v.PublishedReferenceData]:
         """Every reference-data object already published, by semantic key.
 
         Keyed the way the tables are unique — jurisdiction+kind, registered
         type, constant code — rather than by row id, so a manifest resolves
         identically in every environment.
         """
-        out: set[tuple[str, str, int]] = set()
+        out: set[v.PublishedReferenceData] = set()
         for jurisdiction, kind, year in await self.s.execute(
             select(Jurisdiction.code, TaxBracketSet.kind, TaxBracketSet.tax_year)
             .join(Jurisdiction, Jurisdiction.id == TaxBracketSet.jurisdiction_id)
         ):
-            out.add((ReferenceDataKind.TAX_BRACKET_SET,
-                     f"{jurisdiction}:{kind}", year))
+            out.add(v.PublishedReferenceData(
+                ReferenceDataKind.TAX_BRACKET_SET, f"{jurisdiction}:{kind}", year))
         for registered_type, year in await self.s.execute(
             select(ContributionLimit.registered_type, ContributionLimit.tax_year)
         ):
-            out.add((ReferenceDataKind.CONTRIBUTION_LIMIT, registered_type, year))
-        for code, year in await self.s.execute(
-            select(CalcConstant.code, CalcConstant.tax_year)
+            out.add(v.PublishedReferenceData(
+                ReferenceDataKind.CONTRIBUTION_LIMIT, registered_type, year))
+        # Only the constant table carries periods; brackets and limits remain
+        # whole-year objects, so they resolve to unbounded records above.
+        for code, year, start, end in await self.s.execute(
+            select(CalcConstant.code, CalcConstant.tax_year,
+                   CalcConstant.effective_from, CalcConstant.effective_to)
         ):
-            out.add((ReferenceDataKind.CALC_CONSTANT, code, year))
+            out.add(v.PublishedReferenceData(
+                ReferenceDataKind.CALC_CONSTANT, code, year, start, end))
         return frozenset(out)
 
     # =======================================================================
@@ -354,15 +359,26 @@ class KnowledgeAuthoringService:
                     f"{spec.rule_code} for {spec.tax_year} appears twice in one "
                     "pack; which of the two would publish is undefined"))
             seen.add(key)
-        seen_ref: set[tuple[str, str, int]] = set()
+        # Overlap rather than key equality: one pack may legitimately carry
+        # four quarters of one prescribed rate, and refusing them as duplicates
+        # would refuse the case the period columns exist for. What is still
+        # refused is two objects in one pack covering the same days.
+        seen_ref: list[ReferenceDataSpec] = []
         for rd in reference_data:
-            rkey = (rd.kind, rd.key, rd.tax_year)
-            if rkey in seen_ref:
+            clash = next(
+                (p for p in seen_ref
+                 if (p.kind, p.key, p.tax_year) == (rd.kind, rd.key, rd.tax_year)
+                 and v.periods_overlap(rd.effective_from, rd.effective_to,
+                                       p.effective_from, p.effective_to)),
+                None)
+            if clash is not None:
                 builder.add(error(
                     rd.key, Family.REFERENCE_DATA,
                     ValidationCode.PACK_DUPLICATE_OBJECT,
-                    f"{rd.kind} {rd.key!r} for {rd.tax_year} appears twice"))
-            seen_ref.add(rkey)
+                    f"{rd.kind} {rd.key!r} for {rd.tax_year} appears twice over "
+                    "overlapping effective periods; which of the two would "
+                    "publish is undefined"))
+            seen_ref.append(rd)
 
         builder.extend(v.detect_dependency_cycles(specs))
         for family in Family:
@@ -383,7 +399,9 @@ class KnowledgeAuthoringService:
         # the rules are validated against a context that already knows about it.
         rule_ctx = replace(ctx, published_reference_data=(
             ctx.published_reference_data
-            | frozenset((rd.kind, rd.key, rd.tax_year) for rd in reference_data)))
+            | frozenset(v.PublishedReferenceData(
+                rd.kind, rd.key, rd.tax_year, rd.effective_from, rd.effective_to)
+                for rd in reference_data)))
         for spec in specs:
             members.append(await self.validate(
                 spec, ctx=rule_ctx, pack_codes=codes, provenance=provenance))
@@ -903,7 +921,8 @@ class KnowledgeAuthoringService:
         else:
             constant = CalcConstant(
                 code=spec.key, tax_year=spec.tax_year, value=spec.value,
-                unit=spec.unit)
+                unit=spec.unit, effective_from=spec.effective_from,
+                effective_to=spec.effective_to)
             self.s.add(constant)
             await self.s.flush()
             subject = {"calc_constant_id": constant.id}

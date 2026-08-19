@@ -44,14 +44,37 @@ CREATE TABLE rules.calc_formula_input (
 );
 
 -- Named constants per tax year (indexation factors, fixed thresholds).
+--
+-- EFFECTIVE PERIODS. Most published parameters are annual and leave both period
+-- columns NULL, which reads as "this is the value for the whole tax year". Some
+-- are not: CRA sets prescribed interest rates per QUARTER, so one code and one
+-- tax year legitimately carry four different values. Encoding the quarter into
+-- the code would put data in the key and make the code non-semantic, and
+-- storing one quarter as the annual value would be false for the other nine
+-- months, so the period is stored as what it is.
+--
+-- The EXCLUDE constraint replaces UNIQUE (code, tax_year) and is strictly
+-- stronger. `daterange(NULL, NULL, '[]')` is (-infinity, infinity), so an
+-- annual row still excludes a second annual row exactly as the unique
+-- constraint did — AND it excludes any period row for the same code and year,
+-- which is the correct reading of "the 2026 value is X" sitting beside "the Q3
+-- 2026 value is Y". Two periods that do not overlap coexist.
 CREATE TABLE rules.calc_constant (
-    id          uuid PRIMARY KEY DEFAULT ref.uuid_generate_v7(),
-    code        text NOT NULL,                       -- 'MEDICAL_FLOOR_RATE'
-    tax_year    ref.tax_year_num NOT NULL REFERENCES ref.tax_year(year),
-    value       numeric NOT NULL,
-    unit        text,
-    created_at  timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (code, tax_year)
+    id              uuid PRIMARY KEY DEFAULT ref.uuid_generate_v7(),
+    code            text NOT NULL,                   -- 'MEDICAL_FLOOR_RATE'
+    tax_year        ref.tax_year_num NOT NULL REFERENCES ref.tax_year(year),
+    value           numeric NOT NULL,
+    unit            text,
+    effective_from  date,                            -- NULL = whole tax year
+    effective_to    date,                            -- NULL = whole tax year
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ck_calc_constant_period_ordered CHECK (
+        effective_from IS NULL OR effective_to IS NULL
+        OR effective_from <= effective_to),
+    CONSTRAINT ex_calc_constant_no_overlap EXCLUDE USING gist (
+        code WITH =,
+        tax_year WITH =,
+        daterange(effective_from, effective_to, '[]') WITH &&)
 );
 
 -- Now that calc_formula exists, wire up the deferred FKs from 06_tax_kb.

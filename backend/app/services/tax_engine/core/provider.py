@@ -18,23 +18,34 @@ constants, a run's baseline and its candidates would be computed from different
 tax law and every delta between them would be meaningless. Resolving once and
 passing the result is what makes that impossible rather than merely unlikely.
 
-WHAT IS GOVERNED TODAY. Bracket tables, and only bracket tables. Everything else
-the engine needs — basic personal amounts, credit rates, CPP/EI parameters —
-has no published governed representation yet, so it continues to come from the
-in-code bootstrap. The dataset records exactly which jurisdictions were governed
-so that the distinction is visible in a snapshot rather than assumed.
+WHAT IS GOVERNED TODAY. Bracket tables, and the CPP/EI/CPP2 parameters listed in
+`FEDERAL_CONSTANT_FIELDS`. Everything else the engine needs — basic personal
+amounts, credit rates, dividend factors — has no published governed
+representation yet and continues to come from the in-code bootstrap. The dataset
+records exactly which jurisdictions and which constants were governed, so the
+distinction is visible in a snapshot rather than assumed.
+
+WHY NOT EVERY GOVERNED CONSTANT. Fifty-one constants are published across the
+completed ingestion batches; ten of them name a value the engine already reads.
+The rest are inputs to rules, formulas and expense guidance, or have no runtime
+consumer at all. Mapping those into engine fields would invent a field per row
+to make a count look complete, and each invented field is a second place a tax
+figure lives.
 """
 
 from __future__ import annotations
 
 import uuid
 from dataclasses import replace
+from datetime import date
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
-from app.database.models import Jurisdiction, TaxBracket, TaxBracketSet
+from app.database.models import CalcConstant, Jurisdiction, TaxBracket, TaxBracketSet
 from app.services.tax_engine.core import data as bootstrap
 from app.services.tax_engine.core.data import Bracket, TaxDataset, bootstrap_dataset
 
@@ -45,6 +56,30 @@ FEDERAL_CODE = "FED"
 #: `surtax` is a separate kind the engine models separately and is not a
 #: substitute for it.
 INCOME_TAX_KIND = "income_tax"
+
+#: Governed constant code -> (FederalData field, the unit the field is in).
+#:
+#: Every entry names a value `compute()` already reads. The unit is checked
+#: rather than trusted: `EI_PREMIUM_RATE` published as CAD would be a premium
+#: amount wearing a rate's name, and multiplying insurable earnings by it would
+#: produce a confident, enormous, wrong number.
+#:
+#: Deliberately absent: CPP_MAX_CONTRIBUTORY_EARNINGS and the two
+#: MAX_SELF_EMPLOYED_CONTRIBUTION figures, which the engine DERIVES from the
+#: ceiling, exemption and rate. Storing them as well would create a second
+#: authority for a number already computed, and the two could disagree.
+FEDERAL_CONSTANT_FIELDS: dict[str, tuple[str, str]] = {
+    "CPP_MAX_PENSIONABLE_EARNINGS": ("cpp_max_pensionable", "CAD"),
+    "CPP_BASIC_EXEMPTION": ("cpp_exemption", "CAD"),
+    "CPP_CONTRIBUTION_RATE": ("cpp_rate", "ratio"),
+    "CPP_MAX_EMPLOYEE_CONTRIBUTION": ("cpp_max", "CAD"),
+    "CPP2_MAX_EMPLOYEE_CONTRIBUTION": ("cpp2_max", "CAD"),
+    "CPP2_ADDITIONAL_MAX_PENSIONABLE_EARNINGS": ("cpp2_max_pensionable", "CAD"),
+    "CPP2_CONTRIBUTION_RATE": ("cpp2_rate", "ratio"),
+    "EI_MAX_INSURABLE_EARNINGS": ("ei_max_insurable", "CAD"),
+    "EI_PREMIUM_RATE": ("ei_rate", "ratio"),
+    "EI_MAX_EMPLOYEE_PREMIUM": ("ei_max", "CAD"),
+}
 
 
 class ReferenceDataError(Exception):
@@ -95,19 +130,36 @@ class TaxDataProvider:
     def __init__(self, session: AsyncSession):
         self.s = session
 
-    async def resolve(self, tax_year: int) -> TaxDataset:
-        # ONE statement. Resolution sits on the optimization run's hot path and
-        # inside snapshot capture, so a second round trip here is a second round
-        # trip on every run — the kind of per-call cost that only shows up once
-        # a statement budget is measured.
+    async def resolve(self, tax_year: int,
+                      as_of: date | None = None) -> TaxDataset:
+        """Resolve the whole dataset for a tax year in a bounded number of trips.
+
+        `as_of` selects among constants that carry an intra-year effective
+        period. It is genuinely optional because every constant the engine
+        reads today is annual — CPP and EI ceilings are set for a year by
+        statute — and requiring a date to resolve a year's brackets would be
+        ceremony. When it is absent, periodised rows are not eligible at all
+        rather than being guessed at; see `_constant_overlay`.
+        """
+        # TWO statements, one per family, and both flat in the size of the
+        # year's data. Resolution sits on the optimization run's hot path and
+        # inside snapshot capture, so each round trip here is a round trip on
+        # every run — the kind of per-call cost that only shows up once a
+        # statement budget is measured.
         rows = (await self.s.execute(
             select(TaxBracketSet, Jurisdiction, TaxBracket)
             .join(Jurisdiction, Jurisdiction.id == TaxBracketSet.jurisdiction_id)
             .outerjoin(TaxBracket, TaxBracket.bracket_set_id == TaxBracketSet.id)
             .where(TaxBracketSet.tax_year == tax_year,
                    TaxBracketSet.kind == INCOME_TAX_KIND))).all()
+        federal, governed_constants = await self._constant_overlay(tax_year, as_of)
         if not rows:
-            return bootstrap_dataset(tax_year)
+            # No governed brackets, but constants may still have been applied.
+            base = bootstrap_dataset(tax_year)
+            if not governed_constants:
+                return base
+            return replace(base, federal=federal,
+                           governed_constants=frozenset(governed_constants))
 
         sets: dict[uuid.UUID, tuple[TaxBracketSet, Jurisdiction]] = {}
         by_set: dict[uuid.UUID, list[TaxBracket]] = {}
@@ -116,7 +168,6 @@ class TaxDataProvider:
             if bracket is not None:
                 by_set.setdefault(bracket_set.id, []).append(bracket)
 
-        federal = bootstrap.FEDERAL_2025
         provinces = dict(bootstrap.PROVINCES_2025)
         governed: set[str] = set()
 
@@ -154,4 +205,63 @@ class TaxDataProvider:
             federal=federal,
             provinces=provinces,
             governed_jurisdictions=frozenset(governed),
+            governed_constants=frozenset(governed_constants),
         )
+
+    async def _constant_overlay(
+        self, tax_year: int, as_of: date | None,
+    ) -> tuple[bootstrap.FederalData, set[str]]:
+        """Overlay governed CALC_CONSTANTs onto the federal constants.
+
+        Returns the federal data to use and the codes that actually came from
+        governed rows, so the dataset can record which figures stopped being
+        in-code. A code with no published row keeps its bootstrap value and is
+        simply absent from that set — the same visible, pre-publication state
+        the bracket path already reports, not a live-data fallback.
+
+        A row that exists but cannot be used raises. A governed constant whose
+        unit disagrees with the field it feeds is not a value the engine may
+        quietly ignore and it is not one the engine may use.
+        """
+        # Periodised rows are eligible only when a date was supplied, and only
+        # when they contain it. Without a date there is no basis on which to
+        # prefer one quarter over another, and picking one anyway is how a
+        # replay silently acquires a number nobody chose.
+        annual = CalcConstant.effective_from.is_(None) & CalcConstant.effective_to.is_(None)
+        eligible: ColumnElement[bool] = annual
+        if as_of is not None:
+            eligible = or_(annual, (CalcConstant.effective_from <= as_of)
+                           & (CalcConstant.effective_to >= as_of))
+        rows = list(await self.s.scalars(
+            select(CalcConstant).where(
+                CalcConstant.tax_year == tax_year,
+                CalcConstant.code.in_(FEDERAL_CONSTANT_FIELDS),
+                eligible)))
+
+        applied: set[str] = set()
+        seen: dict[str, CalcConstant] = {}
+        changes: dict[str, Any] = {}
+        for row in rows:
+            field, expected_unit = FEDERAL_CONSTANT_FIELDS[row.code]
+            if row.code in seen:
+                # The database's exclusion constraint makes this unreachable
+                # for overlapping periods; reaching it means the constraint is
+                # missing or the predicate above is wrong, and either way the
+                # engine must not pick one row arbitrarily.
+                raise ReferenceDataError(
+                    f"{row.code} {tax_year}: two governed rows are eligible "
+                    f"for {as_of or 'the whole year'}; resolution is ambiguous")
+            if row.unit != expected_unit:
+                raise ReferenceDataError(
+                    f"{row.code} {tax_year}: published in {row.unit!r} but "
+                    f"{field} is {expected_unit!r}; the value does not mean "
+                    "what the field would read it as")
+            if row.value is None:
+                raise ReferenceDataError(f"{row.code} {tax_year}: no value")
+            seen[row.code] = row
+            changes[field] = Decimal(row.value)
+            applied.add(row.code)
+        # One `replace` for the whole overlay rather than one per row: a frozen
+        # dataclass rebuilt ten times would allocate nine datasets nobody reads.
+        federal = replace(bootstrap.FEDERAL_2025, **changes)
+        return federal, applied

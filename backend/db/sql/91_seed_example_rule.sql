@@ -20,7 +20,12 @@ INSERT INTO rules.calc_constant (code, tax_year, value, unit) VALUES
     ('MEDICAL_FLOOR_RATE', 2025, 0.03, 'ratio'),
     ('MEDICAL_FLOOR_CAP',  2025, 2834, 'CAD'),
     ('FED_CREDIT_RATE',    2025, 0.145, 'ratio')   -- 2025 blended rate
-ON CONFLICT (code, tax_year) DO NOTHING;
+-- Untargeted DO NOTHING: (code, tax_year) is no longer a unique constraint, so
+-- it cannot be named as a conflict target. `rules.calc_constant` now guards
+-- itself with an EXCLUDE over the effective period, and the untargeted form
+-- covers exclusion violations as well as unique ones — which is all this seed
+-- ever wanted, namely to be re-runnable.
+ON CONFLICT DO NOTHING;
 
 -- ---- Formula: eligible credit = (medical - min(net*0.03, cap)) * credit_rate -
 -- Stored as RPN over named inputs; evaluated in the engine sandbox.

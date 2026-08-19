@@ -38,7 +38,8 @@ CTX = v.KnowledgeContext(
     known_rule_codes=frozenset({"RRSP_BASIC", "OTHER_FED", "ON_ONLY", "BC_ONLY"}),
     rule_jurisdictions={"RRSP_BASIC": "FED", "OTHER_FED": "FED",
                         "ON_ONLY": "ON", "BC_ONLY": "BC"},
-    published_reference_data=frozenset({("CALC_CONSTANT", "MEDICAL_FLOOR", 2025)}),
+    published_reference_data=frozenset({
+        v.PublishedReferenceData("CALC_CONSTANT", "MEDICAL_FLOOR", 2025)}),
     published_formulas={},
     published_rule_versions={},
     rule_identities={},

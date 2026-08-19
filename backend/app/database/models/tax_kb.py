@@ -418,6 +418,13 @@ class CalcConstant(Base):
     tax_year: Mapped[int] = mapped_column(nullable=False)
     value: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
     unit: Mapped[str | None] = mapped_column(String)
+    #: Both NULL means the value applies to the whole tax year, which is what
+    #: every annual parameter is and what every row predating 0072 stays. A
+    #: bound is set only when the source publishes one — CRA prescribes
+    #: interest rates per quarter — and the database refuses two rows for one
+    #: code and year whose periods overlap.
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = created_at_col()
 
 

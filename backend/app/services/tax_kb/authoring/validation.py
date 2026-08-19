@@ -79,6 +79,23 @@ _MAX_LITERAL_EXPONENT = 6
 
 
 @dataclass(frozen=True)
+class PublishedReferenceData:
+    """One reference-data object already live, and the ground it covers.
+
+    Was a bare (kind, key, tax_year) tuple. Once a code may carry several
+    non-overlapping periods within one year, that triple stops being an
+    identity — the second quarter of a prescribed rate shares it with the first
+    — so what is published has to be compared by the days it covers.
+    """
+
+    kind: str
+    key: str
+    tax_year: int
+    effective_from: date | None = None
+    effective_to: date | None = None
+
+
+@dataclass(frozen=True)
 class KnowledgeContext:
     """Everything the validators must resolve names against.
 
@@ -101,7 +118,7 @@ class KnowledgeContext:
     #: publish before it can be checked.
     known_rule_codes: frozenset[str] = frozenset()
     rule_jurisdictions: Mapping[str, str] = field(default_factory=dict)
-    published_reference_data: frozenset[tuple[str, str, int]] = frozenset()
+    published_reference_data: frozenset[PublishedReferenceData] = frozenset()
     published_formulas: Mapping[str, str] = field(default_factory=dict)
     #: Published (rule_code, tax_year) → the version id currently holding it.
     #: Its KEYS are the set of occupied slots; the values let a declared
@@ -688,7 +705,10 @@ def validate_reference_data_refs(spec: TaxKnowledgeDraftSpec,
                 f"reference-data kind {pin.kind!r} is not one of "
                 f"{sorted(ReferenceDataKind.ALL)}"))
             continue
-        if (pin.kind, pin.key, pin.tax_year) not in ctx.published_reference_data:
+        # A formula pins a semantic for a year, not a particular period of it,
+        # so ANY published period satisfies the pin.
+        if not any((pub.kind, pub.key, pub.tax_year) == (pin.kind, pin.key, pin.tax_year)
+                   for pub in ctx.published_reference_data):
             out.append(error(
                 ref, Family.REFERENCE_DATA, ValidationCode.REFERENCE_DATA_MISSING,
                 f"{pin.kind} {pin.key!r} for {pin.tax_year} is not published; a "
@@ -710,14 +730,24 @@ def validate_reference_data(spec: ReferenceDataSpec,
         out.append(error(ref, Family.REFERENCE_DATA,
                          ValidationCode.UNKNOWN_TAX_YEAR,
                          f"tax year {spec.tax_year} is not a seeded year"))
-    if (spec.kind, spec.key, spec.tax_year) in ctx.published_reference_data:
-        out.append(error(
-            ref, Family.REFERENCE_DATA,
-            ValidationCode.REFERENCE_DATA_ALREADY_PUBLISHED,
-            f"{spec.kind} {spec.key!r} for {spec.tax_year} is already "
-            "published. Published reference data is immutable — the tables are "
-            "unique on their semantic key and carry no version column, so a "
-            "correction would rewrite what sealed snapshots were computed from"))
+    out.extend(_reference_data_period(spec))
+    for pub in ctx.published_reference_data:
+        if (pub.kind, pub.key, pub.tax_year) != (spec.kind, spec.key, spec.tax_year):
+            continue
+        # Overlap, not equality. A second quarter of the same code and year is
+        # new content rather than a correction, so identity alone would refuse
+        # exactly the case the period columns exist to allow. What is still
+        # refused is publishing over ground that is already covered.
+        if periods_overlap(spec.effective_from, spec.effective_to,
+                           pub.effective_from, pub.effective_to):
+            out.append(error(
+                ref, Family.REFERENCE_DATA,
+                ValidationCode.REFERENCE_DATA_ALREADY_PUBLISHED,
+                f"{spec.kind} {spec.key!r} for {spec.tax_year} is already "
+                f"published for {_period_text(pub.effective_from, pub.effective_to)} "
+                f"and this object covers {_period_text(spec.effective_from, spec.effective_to)}. "
+                "Published reference data is immutable — a correction would "
+                "rewrite what sealed snapshots were computed from"))
 
     if spec.kind == ReferenceDataKind.TAX_BRACKET_SET:
         out.extend(_brackets(spec, ctx))
@@ -742,6 +772,73 @@ def validate_reference_data(spec: ReferenceDataSpec,
             out.append(error(ref, Family.REFERENCE_DATA,
                              ValidationCode.MISSING_REQUIRED_FIELD,
                              "a constant with no value"))
+    return out
+
+
+def _period_text(start: date | None, end: date | None) -> str:
+    return "the whole tax year" if start is None and end is None else f"{start}..{end}"
+
+
+def periods_overlap(a_from: date | None, a_to: date | None,
+                    b_from: date | None, b_to: date | None) -> bool:
+    """Do two reference-data applicability periods cover any common day?
+
+    An absent bound is unbounded, so an annual object (both absent) overlaps
+    everything for its code and year — which is the point. "The 2026 value is
+    X" and "the Q3 2026 value is Y" are not two facts that coexist; one of them
+    is wrong. Two bounded, non-adjacent quarters overlap nothing and coexist.
+
+    Mirrors `daterange(effective_from, effective_to, '[]') &&` in
+    `ex_calc_constant_no_overlap`, so the validator refuses with a coded
+    finding what the database would otherwise refuse with an IntegrityError.
+    Both ends are INCLUSIVE: a period ending 2026-09-30 and one starting
+    2026-10-01 are adjacent, not overlapping.
+    """
+    if a_from is not None and b_to is not None and a_from > b_to:
+        return False
+    if b_from is not None and a_to is not None and b_from > a_to:
+        return False
+    return True
+
+
+def _reference_data_period(spec: ReferenceDataSpec) -> list[Finding]:
+    """An intra-year period must be complete, ordered, and inside its year.
+
+    Reference data may carry an intra-year period even though a RULE VERSION
+    may not (see `validate_effective_period`, which refuses one with
+    INTRA_YEAR_EFFECTIVE_SCOPE_UNSUPPORTED). That is not an inconsistency: a
+    rule version is selected by the evaluator on (tax_year, status) with no
+    date predicate, so a mid-year rule would silently take effect on
+    publication. Reference data is resolved through `TaxDataProvider`, which
+    takes the effective date and applies it, so the period it declares is the
+    period it gets.
+    """
+    ref: str = spec.key
+    out: list[Finding] = []
+    start, end = spec.effective_from, spec.effective_to
+    if start is None and end is None:
+        return out                      # annual, and nothing to check
+    if start is None or end is None:
+        out.append(error(
+            ref, Family.REFERENCE_DATA, ValidationCode.INVALID_EFFECTIVE_PERIOD,
+            "an intra-year period needs both effective_from and effective_to. "
+            "A half-open period inside one tax year is ambiguous where the "
+            "year's own end would do, and it cannot be checked for overlap "
+            "against its neighbours"))
+        return out
+    if end < start:
+        out.append(error(
+            ref, Family.REFERENCE_DATA, ValidationCode.INVALID_EFFECTIVE_PERIOD,
+            f"effective_to {end} precedes effective_from {start}"))
+        return out
+    year_start, year_end = date(spec.tax_year, 1, 1), date(spec.tax_year, 12, 31)
+    if start < year_start or end > year_end:
+        out.append(error(
+            ref, Family.REFERENCE_DATA,
+            ValidationCode.EFFECTIVE_PERIOD_OUTSIDE_TAX_YEAR,
+            f"period {start}..{end} falls outside tax year {spec.tax_year}. A "
+            "value is resolved within the year it is filed under, so a period "
+            "reaching beyond the year could never be selected"))
     return out
 
 

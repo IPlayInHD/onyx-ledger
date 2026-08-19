@@ -925,6 +925,12 @@ class ReferenceDataSpec:
     allows_carryforward: bool = False
     value: Decimal | None = None
     unit: str | None = None
+    #: Intra-year applicability. Both absent is the ordinary case and means the
+    #: value applies to the whole tax year. A bound is set only when the source
+    #: publishes one — CRA prescribes interest rates per calendar quarter, so
+    #: one code and one tax year carry four different values.
+    effective_from: date | None = None
+    effective_to: date | None = None
     citation_ids: tuple[uuid.UUID, ...] = ()
     schema_version: str = KNOWLEDGE_SPEC_SCHEMA_VERSION
 
@@ -951,13 +957,15 @@ class ReferenceDataSpec:
             allows_carryforward=bool(f.flag("allows_carryforward", default=False)),
             value=f.number("value"),
             unit=f.text("unit"),
+            effective_from=f.day("effective_from"),
+            effective_to=f.day("effective_to"),
             citation_ids=f.identifiers("citation_ids"),
         )
         f.done()
         return spec
 
     def as_canonical(self) -> dict:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "kind": self.kind,
             "key": self.key,
@@ -974,6 +982,18 @@ class ReferenceDataSpec:
             "unit": self.unit,
             "citation_ids": sorted(str(x) for x in self.citation_ids),
         }
+        # The period keys appear ONLY on a spec that carries a period. An
+        # annual object has no intra-year applicability to state, so emitting
+        # two nulls for it would say nothing while changing every annual spec
+        # hash ever recorded — including the ones stored on validation reports
+        # that publication rebinds against. Absent and null mean the same thing
+        # here, so absent is the canonical form and existing content keeps its
+        # identity.
+        if self.effective_from is not None:
+            payload["effective_from"] = self.effective_from
+        if self.effective_to is not None:
+            payload["effective_to"] = self.effective_to
+        return payload
 
     def spec_identity(self) -> str:
         return c.domain_hash(c.DOMAIN_KNOWLEDGE_SPEC, self.as_canonical())

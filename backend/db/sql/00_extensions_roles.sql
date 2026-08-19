@@ -9,6 +9,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- gen_random_uuid(), digest(), cryp
 CREATE EXTENSION IF NOT EXISTS citext;      -- case-insensitive email
 CREATE EXTENSION IF NOT EXISTS pg_trgm;     -- fuzzy / ILIKE search
 CREATE EXTENSION IF NOT EXISTS btree_gin;   -- composite GIN (jsonb + scalar)
+CREATE EXTENSION IF NOT EXISTS btree_gist;  -- scalar + range EXCLUDE (effective periods)
 CREATE EXTENSION IF NOT EXISTS vector;      -- pgvector: AI retrieval embeddings
 
 -- ---- Schemas (one per bounded context + shared reference) -------------------

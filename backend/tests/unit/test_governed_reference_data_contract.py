@@ -228,3 +228,130 @@ def test_dataset_type_is_importable_without_the_database_layer():
     out = subprocess.run([sys.executable, "-c", probe], capture_output=True,
                          text=True, cwd=".", check=True)
     assert out.stdout.strip() == "False", out.stdout
+
+
+# ---------------------------------------------------------------------------
+# Sealing and replaying governed CONSTANTS
+#
+# Brackets already had this proof. Constants need their own, because they reach
+# the sealed dataset by a different route and because a run may take governed
+# constants while every bracket table is still in-code — which is exactly the
+# state the first published constants create.
+# ---------------------------------------------------------------------------
+def _with_constants(tax_year: int, **fields):
+    """A dataset whose CPP/EI figures came from governed rows."""
+    import dataclasses
+
+    base = bootstrap_dataset(tax_year)
+    return dataclasses.replace(
+        base,
+        federal=dataclasses.replace(base.federal, **fields),
+        governed_constants=frozenset(fields),
+    )
+
+
+def test_governed_constants_are_part_of_the_sealed_description():
+    from app.services.ioe.snapshot.service import describe_dataset
+
+    plain = describe_dataset(bootstrap_dataset(2025))
+    governed = describe_dataset(_with_constants(2025, cpp_rate=Decimal("0.0595")))
+    # Absent when there are none, so a bootstrap run describes as it always did.
+    assert "governed_constants" not in plain
+    assert governed["governed_constants"] == ["cpp_rate"]
+
+
+def test_a_dataset_with_governed_constants_round_trips_exactly():
+    from app.services.ioe.snapshot.service import dataset_from_sealed, describe_dataset
+
+    sealed = describe_dataset(_with_constants(
+        2025, cpp_rate=Decimal("0.0595"), ei_rate=Decimal("0.0164")))
+    rebuilt = dataset_from_sealed(sealed, 2025)
+    assert describe_dataset(rebuilt) == sealed
+    assert rebuilt.governed_constants == frozenset({"cpp_rate", "ei_rate"})
+
+
+def test_replay_uses_the_sealed_constants_not_todays():
+    """V1 sealed, V2 arrives, replay V1 — and gets V1.
+
+    The substitution this prevents is silent: both datasets compute, and the
+    replayed number would simply be the wrong one.
+    """
+    from app.services.ioe.snapshot.service import dataset_from_sealed, describe_dataset
+
+    v1 = _with_constants(2025, cpp_rate=Decimal("0.0500"))
+    sealed_v1 = describe_dataset(v1)
+    # V2 is what the tables would say today. It is never consulted.
+    v2 = _with_constants(2025, cpp_rate=Decimal("0.0900"))
+    assert describe_dataset(v2) != sealed_v1
+
+    replayed = dataset_from_sealed(sealed_v1, 2025)
+    assert replayed.federal.cpp_rate == Decimal("0.0500")
+
+    inp = TaxInput(province="ON", year=2025,
+                   self_employment_income=Decimal("80000"))
+    assert compute(inp, replayed).cpp_payable_se == compute(inp, v1).cpp_payable_se
+    assert compute(inp, replayed).cpp_payable_se != compute(inp, v2).cpp_payable_se
+
+
+def test_a_constants_only_run_is_not_mistaken_for_a_bootstrap_run():
+    """The bootstrap shortcut must test BOTH kinds of governance.
+
+    A run with governed constants and no governed brackets would otherwise take
+    the shortcut and be handed today's in-code constants instead of its own.
+    """
+    from app.services.ioe.snapshot.service import dataset_from_sealed, describe_dataset
+
+    sealed = describe_dataset(_with_constants(2025, cpp_rate=Decimal("0.0500")))
+    assert sealed["governed_jurisdictions"] == []       # no governed brackets
+    assert dataset_from_sealed(sealed, 2025).federal.cpp_rate == Decimal("0.0500")
+
+
+def test_tampered_sealed_constants_fail_closed():
+    from app.services.ioe.snapshot.service import (
+        SealedDatasetUnreadable,
+        dataset_from_sealed,
+        describe_dataset,
+    )
+
+    sealed = describe_dataset(_with_constants(2025, cpp_rate=Decimal("0.0595")))
+
+    # An edited VALUE is refused. The round-trip proof is what catches it: the
+    # sealed description carries canonical scale, so a hand-edited "0.0700"
+    # re-describes as "0.070000" and no longer equals the bytes it claims to
+    # be. Replay stops rather than computing from an approximation of itself.
+    tampered = {**sealed, "federal": {**sealed["federal"], "cpp_rate": "0.0700"}}
+    with pytest.raises(SealedDatasetUnreadable, match="does not describe back"):
+        dataset_from_sealed(tampered, 2025)
+
+    # A REMOVED field cannot be reconstructed at all.
+    broken = {**sealed, "federal": {k: val for k, val in sealed["federal"].items()
+                                    if k != "cpp_rate"}}
+    with pytest.raises(SealedDatasetUnreadable):
+        dataset_from_sealed(broken, 2025)
+
+    # Relabelling governed evidence as bootstrap is caught, but NOT here — and
+    # it is worth being exact about where. `dataset_from_sealed` deliberately
+    # replays a bootstrap run from the in-code constants, which is what lets
+    # runs sealed before governed data existed keep replaying at all. So an
+    # artifact edited to claim it governed nothing does reconstruct.
+    #
+    # What makes that safe is the layer above: the artifact's content hash is
+    # stored beside it, so any edit to the content changes the hash and
+    # `SnapshotService.verify()` reports drift. Tamper-evidence lives in the
+    # seal, not in the reader.
+    from app.services.ioe.domain import canonical as canon
+
+    relabelled = {**sealed, "governed_constants": []}
+    assert dataset_from_sealed(relabelled, 2025).governed_constants == frozenset()
+    assert canon.canonical_hash(relabelled) != canon.canonical_hash(sealed)
+
+
+def test_a_legacy_artifact_without_the_constants_key_still_reconstructs():
+    """Runs sealed before governed constants existed keep replaying."""
+    from app.services.ioe.snapshot.service import dataset_from_sealed, describe_dataset
+
+    legacy = describe_dataset(bootstrap_dataset(2025))
+    assert "governed_constants" not in legacy
+    rebuilt = dataset_from_sealed(legacy, 2025)
+    assert rebuilt.governed_constants == frozenset()
+    assert rebuilt.federal.cpp_rate == bootstrap_dataset(2025).federal.cpp_rate
