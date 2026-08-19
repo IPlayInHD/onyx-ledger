@@ -664,9 +664,9 @@
       "internal_title": "EI premium rates and maximums",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B02",
-      "note": "FILENAME MISDESCRIBES CONTENT: named rrsp-tfsa-limits, contains EI premium rates",
+      "note": "FILENAME MISDESCRIBES CONTENT: named rrsp-tfsa-limits, contains EI premium rates. B02: FEDERAL table only, 2025 and 2026 extracted of 29 federal years; the Quebec table in the same document carries different rates, is DEFERRED_JURISDICTION, and was not extracted",
       "related": {
         "relationship": "FILENAME_MISDESCRIBES_CONTENT",
         "evidence": "named rrsp-tfsa-limits but its internal title is 'EI premium rates and maximums'",
@@ -981,9 +981,9 @@
       "internal_title": "CPP contribution rates, maximums and exemptions",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B02",
-      "note": ""
+      "note": "B02: one table spanning 2010\u20132026, so the document carries no tax year of its own; 2025 and 2026 extracted, the other 15 years recorded and not published"
     },
     {
       "drive_file_id": "1yFs0Alt_RMFIw2UXEsyQGjZomdlZvkxE",
