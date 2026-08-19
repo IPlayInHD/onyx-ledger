@@ -40,6 +40,7 @@ from app.database.models import (
 )
 from app.services.ioe.domain import canonical as c
 from app.services.tax_engine.core import data as engine_data
+from app.services.tax_engine.core.provider import TaxDataProvider
 
 # Artifacts whose content is materialized (not just hashed), so a drifted run
 # remains explainable. Deliberately the small, high-risk set (decision D-10).
@@ -168,7 +169,9 @@ class RuleSnapshotService:
 
     # ---- collection ---------------------------------------------------------
     async def _collect(self, tax_year: int) -> list[SnapshotArtifact]:
-        artifacts: list[SnapshotArtifact] = [self._engine_reference_artifact()]
+        dataset = await TaxDataProvider(self.s).resolve(tax_year)
+        artifacts: list[SnapshotArtifact] = [
+            self._engine_reference_artifact(dataset)]
 
         versions = list(await self.s.scalars(
             select(TaxRuleVersion).where(
@@ -205,26 +208,36 @@ class RuleSnapshotService:
         artifacts.extend(await self._constant_artifacts(tax_year))
         return artifacts
 
-    def _engine_reference_artifact(self) -> SnapshotArtifact:
-        """Hash the engine's IN-CODE reference dataset.
+    def _engine_reference_artifact(
+        self, dataset: engine_data.TaxDataset
+    ) -> SnapshotArtifact:
+        """Hash the reference dataset the run will actually compute from.
 
-        Nothing else can detect that this changed: it is not in the database, so
-        without this artifact a corrected bracket would alter replay silently.
+        Covers the RESOLVED dataset, so it describes governed brackets when the
+        registry supplies them and the in-code constants when it does not, and
+        records which jurisdictions were governed. A change on either side then
+        moves this hash, which moves the snapshot hash, which moves the scenario
+        spec hash — so a corrected bracket surfaces as drift instead of quietly
+        producing a different number.
+
+        This previously read `engine_data.PROVINCES`, an attribute that does not
+        exist — the module defines `PROVINCES_2025`. The `getattr` default meant
+        the branch never ran, so NO provincial data was covered at all and a
+        changed Ontario rate was invisible to integrity verification.
         """
-        federal = engine_data.FEDERAL_2025
-        content = {
-            "reference_data_version": engine_data.REFERENCE_DATA_VERSION,
-            "federal": _describe(federal),
-        }
-        provinces = getattr(engine_data, "PROVINCES", None)
-        if isinstance(provinces, dict):
-            content["provinces"] = {
-                code: _describe(provinces[code]) for code in sorted(provinces)
-            }
         return SnapshotArtifact(
             artifact_kind="engine_reference_dataset",
-            artifact_key=f"engine:{engine_data.REFERENCE_DATA_VERSION}",
-            content=content,
+            # Key deliberately unchanged: a new key would make every snapshot
+            # sealed by an earlier build report `unavailable` rather than the
+            # `drifted` that honestly describes a widened artifact.
+            artifact_key=f"engine:{dataset.bootstrap_version}",
+            content={
+                "reference_data_version": dataset.bootstrap_version,
+                "governed_jurisdictions": sorted(dataset.governed_jurisdictions),
+                "federal": _describe(dataset.federal),
+                "provinces": {code: _describe(dataset.provinces[code])
+                              for code in sorted(dataset.provinces)},
+            },
         )
 
     async def _formula_artifacts(

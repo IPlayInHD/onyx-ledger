@@ -97,6 +97,7 @@ from app.services.ioe.scenario.held_evidence import HistoricalHeldEvidenceSnapsh
 from app.services.ioe.snapshot.service import RuleSnapshotService
 from app.services.tax_engine.contracts import CONTRACT_VERSION
 from app.services.tax_engine.core import data as engine_data
+from app.services.tax_engine.core.data import TaxDataset
 from app.services.tax_engine.core.engine import compute
 from app.services.tax_engine.rules_service import RulesEvaluatorService
 from app.services.tax_engine.service import ENGINE_VERSION, TaxEngineService
@@ -180,6 +181,15 @@ class PinnedScenarioSpec:
     manifest_hash: str
     spec: ScenarioSpec
     spec_hash: str = ""
+    #: The reference data this scenario computes from, resolved in TX-1 where a
+    #: session exists. Carried rather than looked up because the compute phase
+    #: deliberately holds no session and must have no route to live data.
+    #:
+    #: Absent from `compute_spec_hash` by design, and that is not a gap: the
+    #: dataset is covered by the rule snapshot's `engine_reference_dataset`
+    #: artifact, and `rule_snapshot_hash` is already part of the identity. A
+    #: changed bracket therefore moves the spec hash through the snapshot, once.
+    dataset: TaxDataset | None = None
 
     @property
     def baseline_input_snapshot_hash(self) -> str:
@@ -314,6 +324,8 @@ class ScenarioService:
             version_manifest=manifest,
             manifest_hash=manifest_hash,
             spec=spec,
+            dataset=await TaxEngineService(session).resolve_dataset(
+                analysis.tax_year),
         )
         # Every material input is now resolved — only now is identity computed,
         # and only then is it bound back onto the frozen input it describes.
@@ -639,7 +651,7 @@ class ScenarioService:
         assert clone == frozen.baseline_clone(), "baseline input was mutated in place"
 
         scenario_input = to_tax_input(applied.inputs)
-        scenario_result = compute(scenario_input)
+        scenario_result = compute(scenario_input, pinned.dataset)
         scenario_tax = scenario_result.total_payable.quantize(MONEY, ROUND_HALF_UP)
         tax_delta = (pinned.baseline_tax - scenario_tax).quantize(MONEY, ROUND_HALF_UP)
 

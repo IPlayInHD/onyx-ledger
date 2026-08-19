@@ -115,7 +115,8 @@ class FrozenAnalysisInputService:
 
         # 10. the baseline RESULT identity, re-derived from the frozen input by
         #     the one authority allowed to calculate tax
-        baseline = TaxEngineService(self.s).run(tax_input)
+        engine = TaxEngineService(self.s)
+        baseline = engine.run(tax_input, await engine.resolve_dataset(tax_year))
         baseline_tax = baseline.total_payable.quantize(MONEY, ROUND_HALF_UP)
         # RETAINED, NOT RECOMPUTED. The one permitted engine run just produced
         # these; discarding them left the baseline opportunity set with no way

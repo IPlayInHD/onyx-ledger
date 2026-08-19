@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.models import RuleCondition, RuleConditionGroup
 from app.services.ioe.domain.models import OptimizationCandidate
 from app.services.tax_engine.core.condition_eval import eval_group
+from app.services.tax_engine.core.data import TaxDataset
 from app.services.tax_engine.core.engine import compute
 
 ELIGIBILITY_RECHECK_VERSION = "1.0.0"
@@ -154,13 +155,31 @@ async def load_pinned_condition_trees(
     return trees
 
 
-def engine_facts_for(inputs: dict) -> dict:
-    """Recompute the fact map from hypothetical inputs, via the engine only."""
-    from app.services.ioe.portfolio.service import to_tax_input
-    from app.services.tax_engine.service import TaxEngineService
+def engine_facts_for_dataset(dataset: TaxDataset | None) -> Callable[[dict], dict]:
+    """Bind one resolved dataset to the fact recomputation.
 
-    inp = to_tax_input(inputs)
-    return TaxEngineService.facts_for(inp, compute(inp))
+    The rechecker decides whether a candidate is still eligible after earlier
+    candidates were applied. Those facts must descend from the same tax law the
+    run's baseline and costs did, so the dataset is bound once here rather than
+    read per call.
+    """
+
+    def facts(inputs: dict) -> dict:
+        from app.services.ioe.portfolio.service import to_tax_input
+        from app.services.tax_engine.service import TaxEngineService
+
+        inp = to_tax_input(inputs)
+        return TaxEngineService.facts_for(inp, compute(inp, dataset))
+
+    return facts
+
+
+def engine_facts_for(inputs: dict) -> dict:
+    """Recompute the fact map from hypothetical inputs, via the engine only.
+
+    Bootstrap-bound; a run with a resolved dataset uses the factory above.
+    """
+    return engine_facts_for_dataset(None)(inputs)
 
 
 __all__ = [
@@ -168,5 +187,6 @@ __all__ = [
     "PinnedEligibilityRechecker",
     "RecheckResult",
     "engine_facts_for",
+    "engine_facts_for_dataset",
     "load_pinned_condition_trees",
 ]

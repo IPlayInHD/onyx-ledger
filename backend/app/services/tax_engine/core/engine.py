@@ -12,11 +12,11 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.services.tax_engine.core.data import (
-    FEDERAL_2025,
-    PROVINCES_2025,
     Bracket,
     FederalData,
     ProvincialData,
+    TaxDataset,
+    bootstrap_dataset,
 )
 
 Q = Decimal("0.01")
@@ -132,9 +132,22 @@ def _marginal_total(ti: Decimal, f: FederalData, p: ProvincialData) -> Decimal:
     return fed + prov
 
 
-def compute(inp: TaxInput) -> TaxResult:
-    f = FEDERAL_2025
-    p = PROVINCES_2025.get(inp.province, PROVINCES_2025["ON"])
+def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
+    """Compute one tax result from an input and a resolved dataset.
+
+    `dataset` is how governed reference data reaches the engine. It stays a
+    parameter rather than a lookup because this function is called from
+    synchronous paths that hold no session — candidate costing, scenarios,
+    counterfactuals, replay — and one run must use ONE dataset throughout. A
+    baseline computed from governed brackets and a candidate computed from the
+    in-code constants would produce a delta between two different tax laws.
+
+    Omitting it uses the in-code bootstrap, which is exactly what every caller
+    got before the provider existed.
+    """
+    data = dataset if dataset is not None else bootstrap_dataset(inp.year)
+    f = data.federal
+    p = data.provinces.get(inp.province, data.provinces["ON"])
 
     # ---- Income ----
     taxable_cap_gains = inp.capital_gains * f.capital_gains_inclusion

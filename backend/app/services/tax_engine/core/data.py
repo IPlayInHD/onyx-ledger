@@ -25,6 +25,11 @@ def D(x: int | str | Decimal) -> Decimal:
     return Decimal(str(x))
 
 
+def _describe_brackets(brackets: list[Bracket]) -> list[dict]:
+    return [{"up_to": None if b.up_to is None else str(b.up_to),
+             "rate": str(b.rate)} for b in brackets]
+
+
 @dataclass(frozen=True)
 class Bracket:
     up_to: Decimal | None  # None = top bracket (∞)
@@ -133,3 +138,52 @@ PROVINCES_2025: dict[str, ProvincialData] = {
         bpa=D(18571), credit_rate=D("0.14"), abatement=D("0.165"),
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Resolved datasets
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class TaxDataset:
+    """One coherent set of tax constants, resolved for one tax year.
+
+    The engine receives one of these and never fetches. Which jurisdictions came
+    from governed reference data is part of the dataset's identity on purpose: a
+    dataset whose Ontario brackets came from the registry is not the same
+    dataset as one whose Ontario brackets came from the constants below, even
+    where the numbers happen to agree, and a snapshot that could not tell them
+    apart would let the source of a published figure change unnoticed.
+
+    Lives here rather than beside the provider so that the pure engine can take
+    a dataset without importing the database layer.
+    """
+
+    tax_year: int
+    federal: FederalData
+    provinces: dict[str, ProvincialData]
+    governed_jurisdictions: frozenset[str] = frozenset()
+    #: Identifies the in-code portion, so editing the constants above still
+    #: invalidates replay exactly as it does today.
+    bootstrap_version: str = REFERENCE_DATA_VERSION
+
+    @property
+    def is_fully_bootstrap(self) -> bool:
+        return not self.governed_jurisdictions
+
+    def describe(self) -> dict:
+        """The content a snapshot pins, as plain comparable values."""
+        return {
+            "tax_year": self.tax_year,
+            "bootstrap_version": self.bootstrap_version,
+            "governed_jurisdictions": sorted(self.governed_jurisdictions),
+            "federal": _describe_brackets(self.federal.brackets),
+            "provinces": {code: _describe_brackets(self.provinces[code].brackets)
+                          for code in sorted(self.provinces)},
+        }
+
+
+def bootstrap_dataset(tax_year: int) -> TaxDataset:
+    """The in-code dataset, unchanged, labelled for what it is."""
+    return TaxDataset(tax_year=tax_year, federal=FEDERAL_2025,
+                      provinces=dict(PROVINCES_2025),
+                      governed_jurisdictions=frozenset())

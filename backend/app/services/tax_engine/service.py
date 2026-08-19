@@ -17,7 +17,9 @@ from app.database.models import (
     IncomeType,
     TaxProfile,
 )
+from app.services.tax_engine.core.data import TaxDataset
 from app.services.tax_engine.core.engine import TaxInput, TaxResult, compute
+from app.services.tax_engine.core.provider import TaxDataProvider
 
 ENGINE_VERSION = "py-1.0.0"
 
@@ -102,8 +104,24 @@ class TaxEngineService:
                         getattr(inp, expense_field) + expense.amount)
         return inp
 
-    def run(self, inp: TaxInput) -> TaxResult:
-        return compute(inp)
+    async def resolve_dataset(self, tax_year: int) -> TaxDataset:
+        """Resolve the governed reference data for a tax year.
+
+        The one place a calculation's constants are fetched. Callers resolve
+        ONCE per run and pass the result into every `run`/`compute` that run
+        performs, so a baseline and the candidates measured against it cannot
+        come from different tax law.
+        """
+        return await TaxDataProvider(self.s).resolve(tax_year)
+
+    def run(self, inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
+        """Run the engine. Stays synchronous, and still never fetches.
+
+        Passing `dataset` is what makes the calculation read governed reference
+        data; omitting it uses the in-code bootstrap, which is what every caller
+        got before the provider existed.
+        """
+        return compute(inp, dataset)
 
     def facts(self, inp: TaxInput, result: TaxResult) -> dict[str, object]:
         """Fact map keyed by fact_definition.fact_key for the rules evaluator."""

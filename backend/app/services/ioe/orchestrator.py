@@ -96,7 +96,7 @@ from app.services.ioe.normalization.service import (
 from app.services.ioe.portfolio.eligibility import (
     ELIGIBILITY_RECHECK_VERSION,
     PinnedEligibilityRechecker,
-    engine_facts_for,
+    engine_facts_for_dataset,
     load_pinned_condition_trees,
 )
 from app.services.ioe.portfolio.service import (
@@ -472,7 +472,11 @@ class OptimizationOrchestrator:
 
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
             engine = TaxEngineService(session)
-            result = engine.run(inp)
+            # Resolved ONCE per run. The same dataset then reaches the baseline,
+            # every candidate cost and every eligibility recheck, so a run
+            # cannot measure a candidate against tax law its baseline never saw.
+            dataset = await engine.resolve_dataset(spec.tax_year)
+            result = engine.run(inp, dataset)
             facts = engine.facts(inp, result)
 
             # CONSTRAINED to the pinned snapshot: a rule published after TX-1
@@ -510,7 +514,8 @@ class OptimizationOrchestrator:
         relationships = relationship_rules.derive(ranked)
 
         # ---- P4: constrained assembly, every figure measured by the engine ----
-        rechecker = PinnedEligibilityRechecker(condition_trees, engine_facts_for)
+        rechecker = PinnedEligibilityRechecker(
+            condition_trees, engine_facts_for_dataset(dataset))
         constraints = assembly.AssemblyConstraints(
             available_cash=available_cash,
             objective_metric=savings_domain.PORTFOLIO_OBJECTIVE_CODE,
@@ -521,7 +526,7 @@ class OptimizationOrchestrator:
             eligibility_recheck=rechecker.check,
         )
         portfolio = PortfolioEvaluationService().evaluate(
-            ranked, relationships, inp, constraints
+            ranked, relationships, inp, constraints, dataset=dataset
         )
 
         # Measured interactions exist only among the candidates the engine

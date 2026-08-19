@@ -34,7 +34,8 @@ class AnalysisService:
 
     async def run(self, user_id: uuid.UUID, tax_year: int) -> AnalysisRun:
         inp = await self.engine.build_input_from_live_sources(user_id, tax_year)
-        result = self.engine.run(inp)
+        dataset = await self.engine.resolve_dataset(tax_year)
+        result = self.engine.run(inp, dataset)
         facts = self.engine.facts(inp, result)
 
         run = AnalysisRun(

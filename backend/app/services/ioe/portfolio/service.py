@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Callable
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +47,7 @@ from app.services.ioe.domain import canonical as c
 from app.services.ioe.domain import portfolio as assembly
 from app.services.ioe.domain import savings as savings_domain
 from app.services.ioe.domain.models import OptimizationCandidate, StrategyPortfolio
+from app.services.tax_engine.core.data import TaxDataset
 from app.services.tax_engine.core.engine import TaxInput, compute
 
 PORTFOLIO_SERVICE_VERSION = "1.0.0"
@@ -72,8 +74,27 @@ def to_tax_input(inputs: dict) -> TaxInput:
     return TaxInput(**inputs)
 
 
+def engine_evaluator_for(dataset: TaxDataset | None) -> Callable[[dict], Decimal]:
+    """Bind one resolved dataset to the cost evaluator.
+
+    Candidates must be costed from the SAME tax law as the baseline they are
+    measured against. Binding the dataset here, once, is what makes that
+    structural: assembly receives a callable that cannot reach any other
+    dataset, rather than a function that reads whatever the module holds.
+    """
+
+    def evaluate(inputs: dict) -> Decimal:
+        return compute(to_tax_input(inputs), dataset).total_payable
+
+    return evaluate
+
+
 def engine_evaluator(inputs: dict) -> Decimal:
-    """The single authority for what a hypothetical costs: the tax engine."""
+    """The single authority for what a hypothetical costs: the tax engine.
+
+    Bootstrap-bound. Retained for callers that have no resolved dataset; a run
+    that has one passes it through `engine_evaluator_for`.
+    """
     return compute(to_tax_input(inputs)).total_payable
 
 
@@ -86,13 +107,19 @@ class PortfolioEvaluationService:
         relationships: list,
         baseline_input: TaxInput,
         constraints: assembly.AssemblyConstraints,
+        dataset: TaxDataset | None = None,
     ) -> StrategyPortfolio:
-        """Assemble and evaluate. Every figure here is engine-measured."""
+        """Assemble and evaluate. Every figure here is engine-measured.
+
+        `dataset` is the run's resolved reference data. Passing it keeps every
+        candidate cost on the same tax law as the baseline; omitting it uses the
+        in-code bootstrap, as before the provider existed.
+        """
         return assembly.assemble(
             candidates,
             relationships,
             inputs_from(baseline_input),
-            engine_evaluator,
+            engine_evaluator_for(dataset),
             constraints,
         )
 
@@ -237,6 +264,7 @@ __all__ = [
     "PORTFOLIO_SERVICE_VERSION",
     "PortfolioEvaluationService",
     "engine_evaluator",
+    "engine_evaluator_for",
     "inputs_from",
     "to_tax_input",
 ]
