@@ -403,9 +403,9 @@
       "internal_title": "Federal Worksheet",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B08",
-      "note": ""
+      "note": "T1 Federal Worksheet, 2025. B08: registered and cited, NOTHING authored, on the same ground as Worksheet ON428 \u2014 worksheet arithmetic is not a second runtime authority. Located by CRA form title; the document prints no URL. Filename carries a doubled '.pdf' extension"
     },
     {
       "drive_file_id": "1Cd7moxxiCj7jBNFK-ky-LUPKH3zSdf7W",
@@ -420,9 +420,9 @@
       "internal_title": "NETFILE",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B10",
-      "note": ""
+      "note": "NETFILE service page, captured 2026-08. B10: registered and cited, NOTHING authored. Two citations record what the page actually states: the transmission window \u2014 open Monday, February 23, 2026 at 6:00 a.m. Eastern until Friday, January 29, 2027, unavailable 3 to 6 a.m. ET daily and February 1 to 22, 2026 \u2014 and the eligibility restrictions. A channel service window is an operational fact about CRA's transmitter, not a tax rule and not a taxpayer deadline; the certified model has no filing-channel semantic, and rules.rule_deadline is a child of a rule version, so recording it would mean inventing a rule from a filing page"
     },
     {
       "drive_file_id": "1CgB5DaMWzVY7ey_3LciLV2fXpUrSGZ95",
@@ -471,9 +471,9 @@
       "internal_title": "T5, Statement of Investment Income",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B09",
-      "note": ""
+      "note": "T5 information-return XML specification, version 2026V4, last updated 2026-01-30. B09: registered and cited, NOTHING authored, on the same ground as the T4 specification"
     },
     {
       "drive_file_id": "1Fz6FGev3im1s7yB0mm-F9G5V_idz8eg5",
@@ -505,9 +505,9 @@
       "internal_title": "EFILE for electronic filers",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B10",
-      "note": ""
+      "note": "EFILE for electronic filers, captured 2026-08. B10: registered and cited, NOTHING authored. States its own transmission window \u2014 open Monday, February 23, 2026 at 8:30 a.m. Eastern until Friday, January 29, 2027 \u2014 which is 2h30m later than NETFILE's on the same day. That is a SCOPE_DIFFERENCE between two distinct channels, not an AUTHORITY_CONFLICT: neither page governs the other's service"
     },
     {
       "drive_file_id": "1K3Hp05eagD6cy_YMV2kwh0ujdeiVWdjL",
@@ -579,9 +579,9 @@
       "internal_title": "Worksheet ON428",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "ON",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B08",
-      "note": "filename contains U+2013 EN DASH"
+      "note": "Worksheet ON428, 2025, CRA form 5006-D. B08: registered and cited, NOTHING authored. Its arithmetic duplicates calculations TaxEngineService already owns; transcribing it would create a second tax calculator from worksheet arithmetic, so it is kept as verification/citation material only. Located by form number"
     },
     {
       "drive_file_id": "1QhvYsg1QUf-5C74SlQbnSJX3XLS7amqI",
@@ -630,9 +630,9 @@
       "internal_title": "CRA Forms and publications",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B11",
-      "note": "navigation index"
+      "note": "CRA Forms and publications, captured 2026-08. B11: registered and cited, NOTHING authored. A 48-line landing page of links to other indexes; it lists no form and states no tax value"
     },
     {
       "drive_file_id": "1Ryf3rzWaOEsCt2zQHAx26v2v8kgxIun-",
@@ -703,9 +703,9 @@
       "internal_title": "Income Tax and Benefit Return (T1, ON)",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "FED+ON",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B08",
-      "note": ""
+      "note": "T1 Income Tax and Benefit Return for Ontario, 2025. B08: registered and cited, NOTHING authored. A form states WHERE a number is reported, not what the number is; the governed reference-data vocabulary is TAX_BRACKET_SET / CONTRIBUTION_LIMIT / CALC_CONSTANT, none of which represents a form line, and evidence/deadline specs exist only as children of a tax_rule_version \u2014 so recording one would mean inventing a rule the form does not state. REPRESENTATION_BLOCKER, reported not worked around. Located by CRA form number 5006-R: the document prints no URL and carries no link annotations, so none was reconstructed"
     },
     {
       "drive_file_id": "1ZRI9CO8FSASuCz4kZH2ZYlRv9d4i8-1Z",
@@ -720,9 +720,9 @@
       "internal_title": "CRA forms listed by number",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B11",
-      "note": "navigation index"
+      "note": "CRA forms listed by number, captured 2026-08. B11: registered and cited, NOTHING authored \u2014 an index description is not a tax rule. The capture states its own pagination, 'Showing 1 to 100 of 1,244 entries' (8.0%), sorted by last update rather than by number, and contains no 5xxx-series form; that measured fact is why no B08 or B09 identifier appears here, classified SCOPE_DIFFERENCE and not EXTRACTION_DEFECT"
     },
     {
       "drive_file_id": "1_aAH2poxOukHgMB-QdTpzJUVvz0_6AqJ",
@@ -737,9 +737,9 @@
       "internal_title": "Find certified tax software",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B10",
-      "note": ""
+      "note": "Find certified tax software, captured 2026-08. B10: registered and cited, NOTHING authored. A vendor list is administrative guidance about third-party products, carries no tax semantic, and names no value Onyx computes"
     },
     {
       "drive_file_id": "1aEaM0xDATWYb3SwvNdDPkdwK66efQhEK",
@@ -754,9 +754,9 @@
       "internal_title": "Income tax folio index",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B11",
-      "note": "navigation index"
+      "note": "Income tax folio index, captured 2026-08. B11: registered and cited, NOTHING authored. Indexes a different product family (folios), so its silence about the B08/B09 forms is SCOPE_DIFFERENCE. A folio's title in an index is not the folio, and no rule was created from a listing"
     },
     {
       "drive_file_id": "1cpuZzBCG7ABXB25s6VD4gEHneXaP9aMw",
@@ -811,9 +811,9 @@
       "internal_title": "T4, Statement of Remuneration Paid",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B09",
-      "note": ""
+      "note": "T4 information-return XML specification, version 2026V4, last updated 2026-01-30. B09: registered and cited, NOTHING authored. The document defines XML element names and validation rules for TRANSMITTING an information return to CRA; Onyx has no information-return submission subsystem, and not every XML field belongs in Onyx. No generic tax-form subsystem was created. That CRA documents an interface does not give Onyx a live CRA integration \u2014 it has none"
     },
     {
       "drive_file_id": "1f56HFxO67-kS4iqhdh2v0TNEUMWLJlQG",
@@ -868,9 +868,9 @@
       "internal_title": "Auto-fill My Return for professional tax preparers",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B10",
-      "note": ""
+      "note": "Auto-fill My Return, captured 2026-08. B10: registered and cited, NOTHING authored. Describes a CRA data-delivery service for certified software; Onyx neither implements nor claims it. No external API/provider integration was built"
     },
     {
       "drive_file_id": "1hYBTeWU7cWreJEAfEVPGT4-QmTeE5PJ7",
@@ -1032,9 +1032,9 @@
       "internal_title": "Ontario Tax (ON428)",
       "classification": "FILING_SPECIFICATION",
       "jurisdiction": "ON",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B08",
-      "note": "filename carries a truncated year prefix '025_'"
+      "note": "Ontario Tax (ON428), 2025, CRA form 5006-C. B08: registered and cited, NOTHING authored, for the reason recorded on the T1. Line 58040 states 'Basic personal amount Claim $12,747', which equals the Ontario BPA the engine already holds \u2014 used as INDEPENDENT VERIFICATION and citation material, never as a second runtime authority, and nothing was authored from it. Located by form number; the document prints no URL"
     }
   ]
 }
