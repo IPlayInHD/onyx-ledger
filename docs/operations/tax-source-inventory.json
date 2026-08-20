@@ -596,9 +596,9 @@
       "internal_title": "Bank of Canada Valet API (OpenAPI 3.0.3)",
       "classification": "API_SPECIFICATION",
       "jurisdiction": "N/A",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B17",
-      "note": "Drive reported application/octet-stream; content is YAML, 7 paths"
+      "note": "Bank of Canada Valet API, OpenAPI 3.0.3, version 1.0.1, server bankofcanada.ca/valet, 7 paths. B17: registered and cited, NOTHING authored \u2014 an API specification describes an external data interface and is not a tax rule. Routed by extension and parsed content despite Drive's application/octet-stream label. No client was implemented, no runtime web call exists, and Onyx has no live FX retrieval"
     },
     {
       "drive_file_id": "1QrHUFzmPIamuCEndPU8EirsCYFCU2VzW",
@@ -664,9 +664,9 @@
       "internal_title": "Bank of Canada annual average exchange rates",
       "classification": "REFERENCE_DATA",
       "jurisdiction": "N/A",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B17",
-      "note": "multi-section export, UTF-8 BOM, real header at the OBSERVATIONS banner; issuer Bank of Canada maps to IssuerCode OTHER"
+      "note": "Bank of Canada Valet export, 'Annual exchange rates', permalink p=195751. B17: 23 annual-average FX rates authored for 2025 as CALC_CONSTANT \u2014 one per series carrying a value in the 2025-01-01 observation row; MYR, PLN, THB and VND print no 2025 value and were not invented. The Bank's quote direction (one unit of foreign currency expressed in Canadian dollars) is preserved in the CAD/XXX unit and values are the file's verbatim decimal strings, trailing zeros included. The multi-section export was parsed by its banners \u2014 the observation header is the line after OBSERVATIONS, never line 1. 2017\u20132024 observations extracted and recorded, not authored. Issuer Bank of Canada maps to IssuerCode OTHER. NO_RUNTIME_CONSUMER (measured): no FX/currency-conversion code path exists in app/ or workers/, so nothing was wired"
     },
     {
       "drive_file_id": "1Tjo0qdciGBwA43yern2YO9nPlgFC2wQY",
@@ -828,9 +828,9 @@
       "internal_title": "ONYX monitoring sources",
       "classification": "MONITORING_METADATA",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
       "batch": "B18",
-      "note": "watchlist of URLs; its own first line says 'check these, don't download them'"
+      "note": "internal watchlist of 5 monitoring targets (Canada Gazette, LEGISinfo, Finance draft legislation, federal budget, Tax Court decisions), each with a check cadence. B18: registered as SECONDARY_COMMENTARY \u2014 operational metadata, never tax authority; its own first line says \"check these, don't download them\". NOTHING authored, no monitoring subsystem built, no external requests made, and no watchlist URL appears in any manifest"
     },
     {
       "drive_file_id": "1fvU81wht_sPDzI-4dfISrJ7L6rDhfUEM",
