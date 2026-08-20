@@ -29,6 +29,7 @@ from app.database.models import (
     IncomeSource,
     IncomeType,
     Jurisdiction,
+    MultiYearProjection,
     OptimizationCandidate,
     OptimizationRun,
     PortfolioEvaluationStep,
@@ -58,7 +59,17 @@ from tests.conftest import frozen_snapshot
 # own. It is constant in the number of candidates, which is what this budget
 # exists to protect — `test_statement_count_does_not_grow_with_candidate_count`
 # still measures that property directly and is unchanged.
-MAX_STATEMENTS_PER_RUN = 61
+#
+# Raised from 61 to 62 for `ioe.multi_year_projection`: a run whose candidate
+# set contains any projection-authorized published rule writes its governed
+# projections in exactly ONE batched statement, constant in the number of
+# candidates. The fixture publishes such a rule itself (see `_run_with`) so
+# that statement is always present. Previously it appeared only when another
+# file's published rules (test_ioe_freshness_events.py) were left behind in
+# the shared database — the budget held in isolation and failed in a
+# full-suite run, which is exactly the state-dependence tests here must not
+# have.
+MAX_STATEMENTS_PER_RUN = 62
 MAX_STATEMENTS_PER_CANDIDATE_AT_100 = 1.0
 
 
@@ -203,7 +214,11 @@ async def _impact_formula(code: str) -> uuid.UUID:
 
 async def _publish(code: str, *, lever_code: str, amount: str,
                    shared_resource_code: str | None,
-                   impact_formula_id: uuid.UUID | None = None) -> uuid.UUID:
+                   impact_formula_id: uuid.UUID | None = None,
+                   effect_type: str = "current_year_tax_reduction",
+                   projection_eligibility: str | None = None,
+                   projection_method: str | None = None,
+                   maximum_projection_horizon: int | None = None) -> uuid.UUID:
     async with unit_of_work(actor_type="admin") as s:
         jur = await s.scalar(select(Jurisdiction).where(Jurisdiction.code == "FED"))
         rule = TaxRule(code=code, name=f"{code} rule", category="deduction",
@@ -220,10 +235,13 @@ async def _publish(code: str, *, lever_code: str, amount: str,
         s.add(RuleOutcome(
             rule_version_id=version.id, outcome_type="recommend", priority=1,
             title_template=f"{code} opportunity",
-            economic_effect_type="current_year_tax_reduction",
+            economic_effect_type=effect_type,
             reversibility="reversible", portfolio_lever_code=lever_code,
             lever_parameters={"amount": "action.cost_amount"},
             impact_formula_id=impact_formula_id,
+            projection_eligibility=projection_eligibility,
+            projection_method=projection_method,
+            maximum_projection_horizon=maximum_projection_horizon,
         ))
         s.add(RuleAction(
             rule_version_id=version.id, action_code="CONTRIBUTE",
@@ -248,6 +266,17 @@ async def _run_with(rule_count: int) -> tuple[uuid.UUID, uuid.UUID, _Counter, in
         await _publish(f"BATCH{tag}_{i:03d}", lever_code=lever,
                        amount=str(400 + i * 20), shared_resource_code=resource,
                        impact_formula_id=formula_id)
+    # One projection-authorized rule, ALWAYS: any published one anywhere in the
+    # shared database (test_ioe_freshness_events.py leaves several) makes the
+    # run write `ioe.multi_year_projection`, so the state it depends on is
+    # established here rather than inherited from whichever files ran first.
+    await _publish(f"BATCH{tag}_PROJ", lever_code="INCREASE_RRSP_DEDUCTION",
+                   amount="500", shared_resource_code=None,
+                   impact_formula_id=formula_id,
+                   effect_type="recurring_annual_benefit",
+                   projection_eligibility="eligible",
+                   projection_method="flat_recurring",
+                   maximum_projection_horizon=5)
 
     with counting() as counter:
         outcome = await OptimizationOrchestrator(uid).generate(analysis_id)
@@ -352,6 +381,10 @@ async def test_every_child_row_is_still_written():
                            CandidateCost.candidate_id.in_(candidate_ids)) > 0
         assert await count(CandidateEconomicEffect,
                            CandidateEconomicEffect.candidate_id.in_(candidate_ids)) > 0
+        # the fixture's projection-authorized rule must really project — the
+        # 62nd budgeted statement is work, not slack
+        assert await count(MultiYearProjection,
+                           MultiYearProjection.run_id == run_id) > 0
         assert await count(RecommendationRelationship,
                            RecommendationRelationship.run_id == run_id) > 0
         assert await count(PortfolioEvaluationStep,
