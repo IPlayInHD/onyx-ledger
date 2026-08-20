@@ -437,9 +437,9 @@
       "internal_title": "T4002 Self-employed Business, Professional, Commission, Farming and Fishing Income",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B12",
-      "note": "116p CRA guide"
+      "note": "T4002(E) Rev. 25, the 2025 guide. B12: six CCA class rates authored from its class-description headings (14.1, 43, 43.1, 43.2, 44, 53), and its own CCA-rates chart (p.106) cited as the second, independent statement of the 19 rates the web chapter's table carries \u2014 the two agree on every class. NO rule or formula authored: the CCA computation is a stateful per-class pool (Area A Column 2 starts from prior-year UCC; Column 18 applies the half-year rule to net current-year additions), the formula language is six stateless operations, and no fact exists for UCC, additions, dispositions or class membership \u2014 REPRESENTATION_BLOCKER, reported not simulated. The June 15/April 30 filing obligations it states have no outcome type in the certified vocabulary and rule_deadline is a child of a rule version \u2014 also blocked, not distorted into a recommendation. Located by publication number; the PDF prints no document URL"
     },
     {
       "drive_file_id": "1D0Hi4qfT0ywCoO1W3CwxuBneoGcQO-zZ",
@@ -522,9 +522,9 @@
       "internal_title": "Self-employed Business, Professional, Commission, Farming and Fishing Income (CCA chapter)",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B12",
-      "note": "FILENAME SAYS 'cca-classes'; internal title is the T4002 chapter"
+      "note": "FILENAME SAYS 'cca-classes'; the capture is the T4002 web chapter 'Capital cost allowance (CCA) rates' (t4002-10, modified 2026-04-16). B12: operative source for the 19 rates in its Rate-by-class table, authored as CALC_CONSTANT ratios for 2025, each also citing the guide's own chart. Class 13 deliberately NOT authored: the table lists it with no rate and the footnote makes the maximum rate depend on the terms of the lease, so no single ratio represents it"
     },
     {
       "drive_file_id": "1Kf0wTisGbNtyaGJmge6SENFrKbvm2c4H",
@@ -925,9 +925,9 @@
       "internal_title": "When to register for and start charging the GST/HST",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B13",
-      "note": ""
+      "note": "When to register for and start charging the GST/HST, modified 2026-06-16. B13: GST_SMALL_SUPPLIER_THRESHOLD 30000 CAD authored for 2026 from the most-businesses table; RC4022 states the identical figure. The three temporal tests the table defines \u2014 a single-calendar-quarter test, a four-consecutive-calendar-quarter test, and cessation at the end of the month following the crossing quarter \u2014 are NOT authored: they measure worldwide taxable-supply revenue BEFORE expenses, including associates, per calendar quarter, and no fact measures taxable supplies at all, let alone by quarter; collapsing them into an annual net-income predicate would author a different rule than the source states. The event-relative timing (effective date no later than the crossing supply; register within 29 days) and the taxi/ride-share must-register-regardless carve-out are likewise blocked: deadlines carry only fixed dates as children of a rule version, and no occupation fact exists. The 50,000 and 250,000 public-service-body/charity figures are extracted and recorded, not authored \u2014 out of product scope"
     },
     {
       "drive_file_id": "1kksxdL_P6apL5YwNzapXgAk6Pyjpcfon",
@@ -981,9 +981,9 @@
       "internal_title": "RC4022 General Information for GST/HST Registrants",
       "classification": "OFFICIAL_ADMIN_GUIDANCE",
       "jurisdiction": "FED",
-      "processing_state": "FINGERPRINTED_READY",
+      "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B13",
-      "note": "89p CRA guide"
+      "note": "RC4022(E) Rev. 25, General Information for GST/HST Registrants. B13: operative source for GST_SMALL_SUPPLIER_THRESHOLD 30000 CAD for 2025 \u2014 its Definitions entry states the figure and its own worked example runs in April 2025. Agrees with the when-to-register page on the threshold and on the exclusions (goodwill, financial services, sales of capital property). Located by publication number; the PDF prints no document URL"
     },
     {
       "drive_file_id": "1xk-Okz8Qjh9W3rlLIjVnlMg2G3F_Qdth",
