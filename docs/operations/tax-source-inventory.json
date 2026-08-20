@@ -18,9 +18,9 @@
     ]
   },
   "totals": {
-    "files": 44,
-    "bytes": 61583283,
-    "fingerprinted": 41,
+    "files": 47,
+    "bytes": 62232146,
+    "fingerprinted": 44,
     "bytes_unavailable": 3,
     "exact_duplicate_groups": 0
   },
@@ -61,6 +61,19 @@
       "dependencies": "none",
       "expected_future_output": "REFERENCE_DATA (CALC_CONSTANT) + CITATIONS",
       "note": "added to the corpus after B02 closed; CORPUS_GAP - AUTHORITATIVE_CPP2_SOURCE_REQUIRED is CLOSED by this source"
+    },
+    {
+      "batch_id": "B02B",
+      "priority": "P0",
+      "topic": "CPP2 deduction/credit treatment (Schedule 8 + line guidance)",
+      "source_file_ids": [
+        "18v9_ptpYbG9m16IHQtnP-mgfhzZPyKk1",
+        "1xdFCMG3Hi0hG3pC0nSNx9B0ilyIGSwj_",
+        "1mtxztW-PydhmxZa_cpSiarOMI6US3BuK"
+      ],
+      "dependencies": "B02, B02A",
+      "expected_future_output": "REFERENCE_DATA (CALC_CONSTANT) + CITATIONS + engine-treatment comparison",
+      "note": "added to the corpus 2026-08-20 for the targeted CPP2 deduction/credit authority run; CORPUS_GAP - CPP2_DEDUCTION_CREDIT_SOURCE is CLOSED by Schedule 8. The authoritative treatment is measured against the engine and the engine's 50/50 allocation is a PRODUCTION_DEFECT, deferred to an engineering entry"
     },
     {
       "batch_id": "B03",
@@ -338,6 +351,23 @@
       "processing_state": "DEFERRED_JURISDICTION",
       "batch": null,
       "note": "inventoried and fingerprinted; never authored"
+    },
+    {
+      "drive_file_id": "18v9_ptpYbG9m16IHQtnP-mgfhzZPyKk1",
+      "raw_bytes_sha256": "32827b2773fce2d4caab493809e2874949c5d5d2c800b7a7b2b2177c91534656",
+      "fingerprint_method": "RAW_BYTES_SHA256",
+      "filename": "5000-s8-fill-25e.pdf",
+      "folder": "02-cra-guidance",
+      "parent_folder_id": "1s4EGiutGE8MeOwIkh6WuNxn9TergY0rp",
+      "format": "pdf",
+      "mime_type": "application/pdf",
+      "bytes": 342443,
+      "internal_title": "Canada Pension Plan Contributions and Overpayment",
+      "classification": "FILING_SPECIFICATION",
+      "jurisdiction": "FED",
+      "processing_state": "PROCESSED_OPERATIVE",
+      "batch": "B02B",
+      "note": "Schedule 8, 5000-S8 E (25), T1-2025 \u2014 a CRA-issued fillable PDF (Designer 6.3, created 2025-09-09), not a browser capture. B02B: the decisive authority for the CPP2 deduction/credit split. Part 4 line 14 sends base(9.9%) + first(2%) + second(8%) additional contributions to line 42100 as payable; line 15 sends 50% of the BASE contribution only to line 31000 as the credit; line 17 sends that 50% plus ALL first and second additional contributions to line 22200 as the deduction \u2014 the second additional contribution is fully deductible and earns no credit. Ten split rates/maxima authored as CALC_CONSTANT (base 4.95%/9.9%, first additional 1%/2%, SE second additional 8%, the four maxima, and the 83.1933% box-16 split factor); nothing already governed re-authored. The treatment itself is NOT authored as a rule/formula \u2014 Part 4 arithmetic is the calculation TaxEngineService owns, and a parallel formula would be a second runtime authority. Measured against the engine read-only: payable identical; the engine's 50/50 split of the COMBINED total misallocates half of the first+second additional from deduction to credit (PRODUCTION_DEFECT, up to $1,074.00 misallocated and $108.48 total-payable overstatement in measured 2025 ON cases; not fixed in this ingestion run). CLOSES the CPP2_DEDUCTION_CREDIT corpus gap"
     },
     {
       "drive_file_id": "19i8q6_2IIOlje6qwWOQCEhSSnYulVnIK",
@@ -947,6 +977,23 @@
       "note": "UNVERIFIED_CANDIDATE_INTERPRETATION; self-declares still_unverified_todo (9) and deprecated_do_not_build (4)"
     },
     {
+      "drive_file_id": "1mtxztW-PydhmxZa_cpSiarOMI6US3BuK",
+      "raw_bytes_sha256": "5612f0b311cd5a99d8f055f9eee9a8f95773f821c5fa7e152db3b9ae505336e6",
+      "fingerprint_method": "RAW_BYTES_SHA256",
+      "filename": "Line 31000 - Base CPP or QPP contributions on self-employment income and other earnings - Canada.ca.pdf",
+      "folder": "02-cra-guidance",
+      "parent_folder_id": "1s4EGiutGE8MeOwIkh6WuNxn9TergY0rp",
+      "format": "pdf",
+      "mime_type": "application/pdf",
+      "bytes": 118298,
+      "internal_title": "Line 31000 - Base CPP or QPP contributions on self-employment income and other earnings - Canada.ca",
+      "classification": "OFFICIAL_ADMIN_GUIDANCE",
+      "jurisdiction": "FED",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
+      "batch": "B02B",
+      "note": "browser-generated capture (Chrome 149/Skia, 2026-08-20) of the official canada.ca Line 31000 page, Date modified 2026-01-20 \u2014 recorded honestly as a capture. B02B: registered and cited, NOTHING authored from it. Its own title scopes the credit line to BASE contributions, and it defers the amount to Schedule 8. CONSISTENT with Schedule 8's line 15 (line 10 \u00d7 50% to line 31000); no conflicts"
+    },
+    {
       "drive_file_id": "1rElem7LBgvgV2Kk7Ko8nhQ-_4inGpqn9",
       "raw_bytes_sha256": "a05f70061e81798469d4dfcff93e89d1e894cd53c33369726ce21c479426641b",
       "fingerprint_method": "RAW_BYTES_SHA256",
@@ -984,6 +1031,23 @@
       "processing_state": "PROCESSED_OPERATIVE",
       "batch": "B13",
       "note": "RC4022(E) Rev. 25, General Information for GST/HST Registrants. B13: operative source for GST_SMALL_SUPPLIER_THRESHOLD 30000 CAD for 2025 \u2014 its Definitions entry states the figure and its own worked example runs in April 2025. Agrees with the when-to-register page on the threshold and on the exclusions (goodwill, financial services, sales of capital property). Located by publication number; the PDF prints no document URL"
+    },
+    {
+      "drive_file_id": "1xdFCMG3Hi0hG3pC0nSNx9B0ilyIGSwj_",
+      "raw_bytes_sha256": "c2efdad8d501a768ade3824b816db4e8f02190ca6af00ff0e8784b38b180a3fb",
+      "fingerprint_method": "RAW_BYTES_SHA256",
+      "filename": "Line 22200 - Deduction for CPP or QPP contributions on self-employment income and other earnings - Canada.ca.pdf",
+      "folder": "02-cra-guidance",
+      "parent_folder_id": "1s4EGiutGE8MeOwIkh6WuNxn9TergY0rp",
+      "format": "pdf",
+      "mime_type": "application/pdf",
+      "bytes": 188122,
+      "internal_title": "Line 22200 - Deduction for CPP or QPP contributions on self-employment income and other earnings - Canada.ca",
+      "classification": "OFFICIAL_ADMIN_GUIDANCE",
+      "jurisdiction": "FED",
+      "processing_state": "REGISTERED_PROVENANCE_ONLY",
+      "batch": "B02B",
+      "note": "browser-generated capture (Chrome 149/Skia, 2026-08-20) of the official canada.ca Line 22200 page, Date modified 2026-01-20 \u2014 recorded honestly as a capture, not an original CRA-issued PDF. B02B: registered and cited, NOTHING authored from it. States that CPP contributions consist of a base, first additional and second additional amount, corroborates governed YMPE $71,300 / YAMPE $81,200, and defers the deduction amount to Schedule 8 ('Enter on line 22200 of your return the result from Schedule 8'), which is where the split is authored from. CONSISTENT with Schedule 8; no conflicts"
     },
     {
       "drive_file_id": "1xk-Okz8Qjh9W3rlLIjVnlMg2G3F_Qdth",
