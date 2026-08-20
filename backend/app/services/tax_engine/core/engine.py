@@ -181,15 +181,26 @@ def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
                      - f.cpp_max_pensionable)
     se_cpp2_base = _pos(tot_base2 - emp_base2)
 
-    se_cpp_total = _r(se_cpp_base * f.cpp_rate * 2 + se_cpp2_base * f.cpp2_rate * 2)
-    # The existing self-employed convention — half deducted, half credited —
-    # applies to the combined figure. CPP2 sits in the ENHANCED portion, whose
-    # real treatment is deduction rather than credit, but no registered source
-    # states that and asserting it here would make the engine the authority for
-    # a rule nothing published. Recorded as a deferred gap; what is fixed here
-    # is the amount owed, which was wrong.
-    se_cpp_deduction = _r(se_cpp_total / 2)
-    se_cpp_credit = se_cpp_total / 2
+    # Allocation follows Schedule 8 (5000-S8 E (25)) Part 4 and ITA
+    # 60(e)/(e.1)/118.7: line 15 sends HALF OF THE BASE contribution to the
+    # line 31000 credit, and line 17 sends that half plus ALL first and second
+    # additional contributions to the line 22200 deduction.
+    #
+    # The combined figure stays priced by `cpp_rate`, so a governed
+    # CPP_CONTRIBUTION_RATE overlay still governs the amount payable exactly
+    # as it did before the split existed; the base component is priced by
+    # `cpp_base_rate` and the first additional is the REMAINDER — the same
+    # decomposition Schedule 8 itself uses on the employment side (Part 3
+    # line 10 is line 8 minus the base at line 9). With the bootstrap rates
+    # the remainder is exactly band × 2%, the Part 4 line 11 figure.
+    se_cpp_combined = se_cpp_base * f.cpp_rate * 2
+    se_cpp_base_contrib = se_cpp_base * f.cpp_base_rate * 2
+    se_cpp_first_addl = se_cpp_combined - se_cpp_base_contrib
+    se_cpp_second_addl = se_cpp2_base * f.cpp2_rate * 2
+    se_cpp_total = _r(se_cpp_combined + se_cpp_second_addl)
+    se_cpp_deduction = _r(se_cpp_base_contrib / 2
+                          + se_cpp_first_addl + se_cpp_second_addl)
+    se_cpp_credit = se_cpp_base_contrib / 2
 
     total_income = (
         inp.employment_income + net_se + inp.interest_income + grossed_elig + grossed_nonelig
@@ -219,7 +230,8 @@ def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
     fed_credit_base = (
         fed_bpa + cpp + ei + canada_employment + inp.tuition + spousal + medical_eligible
     )
-    fed_nonref = f.credit_rate * fed_credit_base + _donation_credit(inp.donations, f)
+    fed_nonref = (f.credit_rate * fed_credit_base
+                  + _donation_credit(inp.donations, taxable_income, f))
     fed_dtc = grossed_elig * f.eligible_div_dtc + grossed_nonelig * f.non_eligible_div_dtc
     federal_tax = _pos(fed_before - fed_nonref - fed_dtc)
     federal_tax *= (Decimal(1) - p.abatement)
@@ -268,9 +280,24 @@ def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
     )
 
 
-def _donation_credit(donations: Decimal, f: FederalData) -> Decimal:
+def _donation_credit(donations: Decimal, taxable_income: Decimal,
+                     f: FederalData) -> Decimal:
+    """ITA 118.1(3): A×B + C×D + E×F.
+
+    A×B is the appropriate percentage on the first $200. C is the highest
+    individual percentage — the top band's rate, read from the dataset's own
+    ladder rather than stored twice — and D is the over-$200 portion matched
+    by income taxed in that band: the lesser of the remaining gift and the
+    amount taxable above the top threshold. E×F takes the rest at the
+    ordinary upper rate. D and F partition the over-$200 amount, so no dollar
+    is counted at both rates.
+    """
     if donations <= 0:
         return Decimal(0)
     first = min(donations, Decimal(200)) * f.donation_low
-    rest = _pos(donations - Decimal(200)) * f.donation_high
-    return first + rest
+    over = _pos(donations - Decimal(200))
+    top_threshold = f.brackets[-2].up_to
+    top_matched = min(over, _pos(taxable_income - top_threshold)) \
+        if top_threshold is not None else Decimal(0)
+    rest = over - top_matched
+    return first + top_matched * f.brackets[-1].rate + rest * f.donation_high

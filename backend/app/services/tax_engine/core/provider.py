@@ -25,12 +25,13 @@ representation yet and continues to come from the in-code bootstrap. The dataset
 records exactly which jurisdictions and which constants were governed, so the
 distinction is visible in a snapshot rather than assumed.
 
-WHY NOT EVERY GOVERNED CONSTANT. Fifty-one constants are published across the
-completed ingestion batches; ten of them name a value the engine already reads.
-The rest are inputs to rules, formulas and expense guidance, or have no runtime
-consumer at all. Mapping those into engine fields would invent a field per row
-to make a count look complete, and each invented field is a second place a tax
-figure lives.
+WHY NOT EVERY GOVERNED CONSTANT. Of the constants authored across the
+completed ingestion batches, thirteen name a value the engine already reads —
+the CPP/EI/CPP2 parameters, the Schedule 8 base and first-additional split
+rates, and the annual FHSA participation room. The rest are inputs to rules,
+formulas and expense guidance, or have no runtime consumer at all. Mapping
+those into engine fields would invent a field per row to make a count look
+complete, and each invented field is a second place a tax figure lives.
 """
 
 from __future__ import annotations
@@ -72,6 +73,15 @@ FEDERAL_CONSTANT_FIELDS: dict[str, tuple[str, str]] = {
     "CPP_MAX_PENSIONABLE_EARNINGS": ("cpp_max_pensionable", "CAD"),
     "CPP_BASIC_EXEMPTION": ("cpp_exemption", "CAD"),
     "CPP_CONTRIBUTION_RATE": ("cpp_rate", "ratio"),
+    # The Schedule 8 split of the combined employee rate. Employee-side
+    # values, like every rate above; the engine derives the self-employed
+    # doubles rather than storing them again.
+    "CPP_BASE_CONTRIBUTION_RATE_EMPLOYEE": ("cpp_base_rate", "ratio"),
+    "CPP_FIRST_ADDITIONAL_CONTRIBUTION_RATE_EMPLOYEE":
+        ("cpp_first_additional_rate", "ratio"),
+    # Annual FHSA participation room — the default FHSA_ROOM capacity for a
+    # run whose user declared none.
+    "FHSA_ANNUAL_PARTICIPATION_ROOM": ("fhsa_annual", "CAD"),
     "CPP_MAX_EMPLOYEE_CONTRIBUTION": ("cpp_max", "CAD"),
     "CPP2_MAX_EMPLOYEE_CONTRIBUTION": ("cpp2_max", "CAD"),
     "CPP2_ADDITIONAL_MAX_PENSIONABLE_EARNINGS": ("cpp2_max_pensionable", "CAD"),

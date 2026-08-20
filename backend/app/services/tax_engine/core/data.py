@@ -19,6 +19,23 @@ from decimal import Decimal
 #
 # Additive and inert: no calculation reads this constant.
 #
+# 2025.3.0 — three calculation behaviours changed to match registered
+# authority, so results differ for affected filers and sealed runs from
+# earlier versions must report DRIFTED rather than silently replaying:
+#   1. Self-employed CPP allocation now follows Schedule 8 (5000-S8 E (25))
+#      Part 4 lines 15/17 and ITA 60(e)/(e.1)/118.7: the credit is HALF OF THE
+#      BASE contribution only, and the first and second additional
+#      contributions are fully deductible. `cpp_base_rate` and
+#      `cpp_first_additional_rate` were added to carry the split the schedule
+#      states; the amount payable is unchanged (0.0495 + 0.01 = 0.0595).
+#   2. The federal donation credit now includes the ITA 118.1(3) C x D term —
+#      the highest individual percentage on the top-bracket-matched portion of
+#      gifts over the first tier. Top-bracket donors previously had tax
+#      overstated.
+#   3. `fhsa_annual` is now consumed: it is the default FHSA_ROOM capacity for
+#      a run whose user declared none, and the provider can overlay it from a
+#      published FHSA_ANNUAL_PARTICIPATION_ROOM constant.
+#
 # 2025.2.0 — the second additional CPP contribution (CPP2) became computable.
 # `cpp2_max_pensionable` and `cpp2_rate` were added and `compute` now produces a
 # CPP2 contribution for a self-employed filer above the year's maximum
@@ -26,7 +43,7 @@ from decimal import Decimal
 # answer for those filers, which is exactly the condition this constant exists
 # to signal: a run sealed under 2025.1.0 now reports DRIFTED on verification
 # rather than quietly replaying to a different number.
-REFERENCE_DATA_VERSION = "2025.2.0"
+REFERENCE_DATA_VERSION = "2025.3.0"
 
 
 def D(x: int | str | Decimal) -> Decimal:
@@ -68,6 +85,15 @@ class FederalData:
     cpp_max_pensionable: Decimal
     cpp_exemption: Decimal
     cpp_rate: Decimal
+    #: The split Schedule 8 states inside the combined employee rate:
+    #: `cpp_rate == cpp_base_rate + cpp_first_additional_rate`. The split is
+    #: load-bearing, not decorative — the BASE portion is half-credited and
+    #: half-deducted for the self-employed while both additional portions are
+    #: fully deducted (5000-S8 E (25) Part 4 lines 15/17; ITA 60(e)/(e.1),
+    #: 118.7), so an engine holding only the combined rate cannot allocate.
+    #: Self-employed rates (9.9%/2%) are these doubled, derived not stored.
+    cpp_base_rate: Decimal
+    cpp_first_additional_rate: Decimal
     cpp_max: Decimal
     #: CPP2 applies to the band ABOVE `cpp_max_pensionable` and up to the year's
     #: ADDITIONAL maximum pensionable earnings (YAMPE). `cpp2_max` is the
@@ -100,6 +126,7 @@ FEDERAL_2025 = FederalData(
     bpa_max=D(16129), bpa_min=D(14538), bpa_phase_start=D(177882), bpa_phase_end=D(253414),
     credit_rate=D("0.145"), canada_employment=D(1471),
     cpp_max_pensionable=D(71300), cpp_exemption=D(3500), cpp_rate=D("0.0595"),
+    cpp_base_rate=D("0.0495"), cpp_first_additional_rate=D("0.01"),
     cpp_max=D("4034.10"), cpp2_max=D(396),
     cpp2_max_pensionable=D(81200), cpp2_rate=D("0.04"),
     ei_max_insurable=D(65700), ei_rate=D("0.0164"), ei_max=D("1077.48"),

@@ -30,8 +30,13 @@ def test_self_employed_60k_has_schedule8_cpp():
     r = compute(TaxInput(province="ON", year=2025, self_employment_income=D(60000)))
     # self-employed CPP (both halves) on the net $60k
     assert approx(r.cpp_payable_se, 6723.50)
-    assert approx(r.net_income, 56638.25)         # $3,361.75 deduction applied
-    assert approx(r.total_payable, 14910.47, tol=2.0)
+    # Deduction per Schedule 8 (5000-S8 E (25)) Part 4 line 17: half the base
+    # contribution (5,593.50 / 2) plus the full first additional (1,130.00) =
+    # $3,926.75; the credit takes only the other half of the base.
+    # $23.17 below the pre-fix figure: the extra $565 deduction lands at
+    # Ontario's 9.15% bracket while the credit it replaced was worth 5.05%.
+    assert approx(r.net_income, 56073.25)
+    assert approx(r.total_payable, 14887.30, tol=2.0)
 
 
 def test_rental_is_ordinary_income():

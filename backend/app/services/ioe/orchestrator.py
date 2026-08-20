@@ -535,7 +535,7 @@ class OptimizationOrchestrator:
             available_cash=available_cash,
             objective_metric=savings_domain.PORTFOLIO_OBJECTIVE_CODE,
             objective_version=savings_domain.PORTFOLIO_OBJECTIVE_VERSION,
-            resource_capacities=_resource_capacities(spec.user_constraints),
+            resource_capacities=_resource_capacities(spec.user_constraints, dataset),
             jurisdiction=spec.jurisdiction,
             tax_year=spec.tax_year,
             eligibility_recheck=rechecker.check,
@@ -872,14 +872,29 @@ def _available_cash(constraints: dict) -> Decimal | None:
     return Decimal(raw) if raw is not None else None
 
 
-def _resource_capacities(constraints: dict) -> dict[str, Decimal]:
+def _resource_capacities(
+    constraints: dict, dataset: engine_data.TaxDataset | None,
+) -> dict[str, Decimal]:
     """Declared shared-pool capacities (RRSP room, FHSA room, ...).
 
     An UNDECLARED pool is uncapped, not zero: the assembler must not invent a
     contribution limit the user never stated and the rules did not publish.
+
+    FHSA_ROOM is the one exception, because its limit IS published: the annual
+    participation room (CRA 'Participating in your FHSAs'; ITA s. 146.6(1))
+    now reaches the run through the resolved dataset. A user who declared
+    room — including a larger figure from legitimate carry-forward — keeps
+    exactly what they declared; only an UNDECLARED pool defaults, and it
+    defaults to the current annual room rather than to carry-forward the user
+    never claimed. Uncapped FHSA contributions are no longer possible.
     """
     raw = constraints.get("resource_capacities") or {}
-    return {code: Decimal(str(raw[code])) for code in sorted(raw)}
+    capacities = {code: Decimal(str(raw[code])) for code in sorted(raw)}
+    # `dataset` is None only on paths that also hand compute() no dataset,
+    # where the engine itself falls back to the same bootstrap constants.
+    federal = dataset.federal if dataset is not None else engine_data.FEDERAL_2025
+    capacities.setdefault("FHSA_ROOM", federal.fhsa_annual)
+    return capacities
 
 
 __all__ = [
