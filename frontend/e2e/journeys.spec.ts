@@ -408,3 +408,49 @@ test.describe('protected routes', () => {
     expect(page.url()).toMatch(/\/sign-in/)
   })
 })
+
+test.describe('AI explanations stay a renderer, never an authority', () => {
+  test('an explanation is produced on request and never claims to decide the figure', async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'desktop project only')
+    test.setTimeout(120_000)
+
+    // The AI surface had unit coverage of its FRAMING but was never exercised
+    // against the real endpoint. A trust surface that has never round-tripped
+    // is not a verified trust surface.
+    const seeded = await seedPersona(request, PERSONAS[0]!)
+    await signIn(page, seeded.email)
+
+    await page.goto('/app/twin')
+    await page.getByLabel(/amount to contribute/i).fill('3000')
+    await page.getByRole('button', { name: /model against/i }).click()
+    await expect(page.locator('.twin__side--modelled')).toBeVisible({ timeout: 60_000 })
+
+    // Before asking, the product states the posture rather than pre-generating.
+    await expect(page.getByText(/does not decide any amount/i)).toBeVisible()
+
+    await page.getByRole('button', { name: /explain this model/i }).click()
+
+    const panel = page.locator('section[aria-labelledby="twin-explain-heading"]')
+    // Either an explanation lands or the surface says plainly that it could
+    // not produce one. Both are acceptable; silence is not.
+    await expect
+      .poll(async () => (await panel.innerText()).toLowerCase(), { timeout: 60_000 })
+      .not.toMatch(/^\s*why the figure moved\s*$/)
+
+    const text = (await panel.innerText()).toLowerCase()
+
+    // Whatever came back, the authority separation must hold on screen.
+    expect(text, 'the AI surface must stay labelled').toMatch(/onyx|explanation|written|plain/)
+    expect(text, 'AI must never be presented as deciding tax').not.toMatch(
+      /\bai (decided|determined|calculated) (your|the) (tax|amount|figure)\b/,
+    )
+    expect(text, 'no model or vendor may be named to the customer').not.toMatch(
+      /gpt|claude|llama|openai|anthropic|gemini|model version/,
+    )
+    // Internal machinery never reaches a customer: not a hash, not a mode.
+    expect(text).not.toMatch(/renderer_mode|fallback|prompt|token|[0-9a-f]{32}/)
+  })
+})

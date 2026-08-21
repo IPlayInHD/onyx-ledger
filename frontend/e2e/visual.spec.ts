@@ -195,6 +195,19 @@ test('capture the product for design review', async ({ page, request }, testInfo
     })
   await shoot('twin-modelled')
 
+  // The AI explanation is generated on request, so a capture that never asks
+  // photographs only the invitation to ask.
+  const explain = page.getByRole('button', { name: /explain this model/i })
+  if (await explain.isVisible().catch(() => false)) {
+    await explain.click()
+    await page
+      .locator('section[aria-labelledby="twin-explain-heading"] p')
+      .nth(1)
+      .waitFor({ state: 'visible', timeout: 60_000 })
+      .catch(() => {})
+    await shoot('twin-explained')
+  }
+
   // A viewport-only frame at rest. Full-page capture stitches, and a sticky
   // navigation bar lands wherever it was at the final scroll offset — which
   // reads in the stitched image as a nav bar dropped into the middle of the
