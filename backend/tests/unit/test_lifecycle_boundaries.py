@@ -196,9 +196,10 @@ def test_login_and_refresh_consult_the_cutoff():
     }
     for name in ("authenticate", "refresh"):
         assert name in bodies, f"AuthService.{name} has been renamed"
-        assert "_refuse_if_deleting" in bodies[name], (
-            f"AuthService.{name} issues tokens without consulting the deletion "
-            "cutoff, so a deleting account could still obtain a working session"
+        assert "_refuse_if_account_unusable" in bodies[name], (
+            f"AuthService.{name} issues tokens without consulting the account "
+            "cutoff, so a deleting, suspended or closed account could still "
+            "obtain a working session"
         )
 
 

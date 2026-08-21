@@ -128,8 +128,19 @@ def create_app() -> FastAPI:
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
             return {"status": "ready"}
-        except Exception as e:  # noqa: BLE001
-            return JSONResponse(status_code=503, content={"status": "not_ready", "detail": str(e)})
+        except Exception:  # noqa: BLE001
+            # THE REASON DOES NOT GO IN THE RESPONSE. This endpoint is
+            # unauthenticated — a load balancer has to reach it, so anyone can.
+            # `str(e)` on a connection failure is not a tidy sentence: SQLAlchemy
+            # and asyncpg put the host, the port, the database name and the
+            # runtime username into it, and a DSN parse error can carry the
+            # password itself. That is a free map of the private network handed
+            # to whoever asks.
+            #
+            # The prober only needs the verdict. The operator needs the reason,
+            # and gets it from the log, where it is already correlated.
+            log.warning("readiness_check_failed", exc_info=True)
+            return JSONResponse(status_code=503, content={"status": "not_ready"})
 
     return app
 

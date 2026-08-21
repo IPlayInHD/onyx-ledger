@@ -166,8 +166,12 @@ def test_the_cutoff_is_held_on_the_request_transaction_itself():
     assert "pg_advisory_xact_lock_shared" in check, (
         "the cutoff no longer takes the shared lifecycle lock, so a deletion "
         "can commit underneath an in-flight analysis")
+    # The PROPERTY, not the query text: the lock has to be granted in its own
+    # statement before the statement that reads lifecycle state. Asserting the
+    # exact SELECT made this fail when the read was widened to also check
+    # account status, which changed the SQL without changing the ordering.
     assert check.index("pg_advisory_xact_lock_shared") < check.index(
-        "SELECT state FROM identity.account_lifecycle"), (
+        "identity.account_lifecycle"), (
         "the state is read before the lock is granted; under READ COMMITTED "
         "that read carries a snapshot from before the wait")
 

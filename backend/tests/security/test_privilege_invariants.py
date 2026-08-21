@@ -310,17 +310,7 @@ async def test_a_failing_run_records_a_code_not_a_message_containing_secrets():
     assert SYNTHETIC_AMOUNT not in serialized
 
 
-@pytest.mark.asyncio
-async def test_the_api_error_body_is_sanitized_and_correlated(client):
-    """RFC-9457 shape, an enumerated code, a correlation id, and no internals."""
-    from app.core.security.jwt import create_access_token
-
-    uid = uuid.uuid4()
-    headers = {"Authorization": f"Bearer {create_access_token(str(uid))}"}
-    response = await client.get(
-        f"/api/v1/ioe/scenarios/{uuid.uuid4()}", headers=headers
-    )
-    assert response.status_code == 404
+def _assert_sanitized_problem_document(response) -> None:
     body = response.json()
     assert "type" in body and "title" in body, "not an RFC-9457 problem document"
     assert "correlation_id" in body
@@ -328,6 +318,50 @@ async def test_the_api_error_body_is_sanitized_and_correlated(client):
     for leak in ("Traceback", "SELECT ", "psycopg2", "asyncpg", "sqlalchemy",
                  SYNTHETIC_SIN, SYNTHETIC_AMOUNT):
         assert leak not in text_body, f"error body leaked {leak!r}"
+
+
+@pytest.mark.asyncio
+async def test_the_api_error_body_is_sanitized_and_correlated(client):
+    """RFC-9457 shape, an enumerated code, a correlation id, and no internals.
+
+    A REAL account asking for a scenario that does not exist. It used to forge a
+    token for a fabricated user id, which no longer reaches the route: a token
+    naming an account that does not exist is now refused before routing, because
+    an access token is a claim about identity and never evidence that the
+    account still exists. That refusal is covered separately below; the
+    non-enumerating 404 needs a caller the system will actually admit.
+    """
+    email = f"errshape_{uuid.uuid4().hex[:10]}@example.com"
+    assert (await client.post("/api/v1/auth/register",
+                              json={"email": email, "password": "supersecret1"})
+            ).status_code == 201
+    login = await client.post("/api/v1/auth/login",
+                              json={"email": email, "password": "supersecret1"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    response = await client.get(
+        f"/api/v1/ioe/scenarios/{uuid.uuid4()}", headers=headers
+    )
+    assert response.status_code == 404, response.text
+    _assert_sanitized_problem_document(response)
+
+
+@pytest.mark.asyncio
+async def test_a_token_for_an_account_that_does_not_exist_is_refused(client):
+    """A validly signed token is not proof the account is still there.
+
+    Reaching the route with a fabricated subject let a purged account keep
+    operating as a ghost identity until its token expired. The refusal carries
+    the same sanitized problem document as any other error.
+    """
+    from app.core.security.jwt import create_access_token
+
+    headers = {"Authorization": f"Bearer {create_access_token(str(uuid.uuid4()))}"}
+    response = await client.get(
+        f"/api/v1/ioe/scenarios/{uuid.uuid4()}", headers=headers
+    )
+    assert response.status_code == 403, response.text
+    _assert_sanitized_problem_document(response)
 
 
 @pytest.mark.asyncio

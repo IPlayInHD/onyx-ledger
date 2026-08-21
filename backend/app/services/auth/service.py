@@ -51,7 +51,7 @@ class AuthService:
         # Checking first would answer "is this address being deleted?" to
         # anyone who typed it, which is a worse disclosure than the one it would
         # save. A caller who gets here has already proved they own the account.
-        await self._refuse_if_deleting(user.id)
+        await self._refuse_if_account_unusable(user.id)
         user.last_login_at = datetime.now(tz=UTC)
         self.s.add(LoginEvent(user_id=user.id, event_type="success", ip_address=ip))
         return await self._issue_tokens(user.id, ip)
@@ -71,20 +71,35 @@ class AuthService:
         # A token minted before the deletion request must not survive rotation:
         # revocation closes the sessions that exist, and this closes the path
         # that would create new ones.
-        await self._refuse_if_deleting(sess.user_id)
+        await self._refuse_if_account_unusable(sess.user_id)
         return await self._issue_tokens(sess.user_id, ip)
 
-    async def _refuse_if_deleting(self, user_id: uuid.UUID) -> None:
-        """Deny authentication for an account past its deletion cutoff.
+    async def _refuse_if_account_unusable(self, user_id: uuid.UUID) -> None:
+        """Deny authentication for an account that may not transact.
 
-        Goes through `identity.account_deletion_state` rather than reading the
-        table, because this session is ANONYMOUS: `app.user_id` is unset during
-        login, so the RLS policy correctly hides the lifecycle row — and a check
-        that silently sees nothing would admit every deleting account. That is a
-        failure mode worth naming, because the query looks right and does the
-        opposite of what it claims.
+        TWO SEPARATE REASONS, deliberately not merged. An account past its
+        deletion cutoff is deleting; an account that is suspended or closed is
+        not. Answering a suspended customer with "deletion in progress" would be
+        a false statement about their data.
+
+        The lifecycle half goes through `identity.account_deletion_state` rather
+        than reading the table, because this session is ANONYMOUS: `app.user_id`
+        is unset during login, so the RLS policy correctly hides the lifecycle
+        row — and a check that silently sees nothing would admit every deleting
+        account. That is a failure mode worth naming, because the query looks
+        right and does the opposite of what it claims.
+
+        The status half reads `identity.user_account` directly, which is sound
+        for the opposite reason: that table carries no RLS, so an anonymous
+        session sees the row. If RLS is ever enabled on it, this check silently
+        becomes the failure mode described above and must move behind a
+        SECURITY DEFINER function too.
         """
-        from app.services.privacy.lifecycle import AccountDeletionInProgress
+        from app.services.privacy.lifecycle import (
+            BLOCKING_ACCOUNT_STATUSES,
+            AccountDeletionInProgress,
+            AccountNotActive,
+        )
 
         state = await self.s.scalar(
             text("SELECT identity.account_deletion_state(:uid)"),
@@ -92,6 +107,18 @@ class AuthService:
         )
         if state is not None:
             raise AccountDeletionInProgress()
+
+        row = (
+            await self.s.execute(
+                text(
+                    "SELECT status, (deleted_at IS NOT NULL) "
+                    "FROM identity.user_account WHERE id = :uid"
+                ),
+                {"uid": user_id},
+            )
+        ).one_or_none()
+        if row is None or row[1] or row[0] in BLOCKING_ACCOUNT_STATUSES:
+            raise AccountNotActive()
 
     # ---- effects that must outlive the raise that follows them -------------
     #

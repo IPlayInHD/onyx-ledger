@@ -87,6 +87,38 @@ class LifecycleFailureCode(StrEnum):
     LIFECYCLE_CUTOFF_CONFLICT = "LIFECYCLE_CUTOFF_CONFLICT"
 
 
+#: Account statuses that must not transact. `pending_verification` is
+#: DELIBERATELY ABSENT: registration currently creates accounts `active`, email
+#: verification is not implemented yet, and blocking the status before the flow
+#: exists would lock out every account with no way to clear it. When the
+#: verification flow ships it belongs here, and the test that pins this set is
+#: where that decision has to be made explicitly rather than by drift.
+BLOCKING_ACCOUNT_STATUSES = frozenset({"suspended", "closed"})
+
+
+class AccountNotActive(DomainError):
+    """The account exists and authenticated, but its status forbids acting.
+
+    Separate from AccountDeletionInProgress on purpose. A suspended account is
+    not a deleting one, and answering a suspended customer with "deletion in
+    progress" would be a false statement about their data.
+
+    403, for the same reason: the caller proved who they are and is refused for
+    what the account is. A 401 would invite a client to retry a login that is
+    also going to be refused.
+    """
+
+    error_type = "https://onyx.ledger/errors/account-not-active"
+    title = "Account Not Active"
+    status_code = 403
+
+    def __init__(self) -> None:
+        # Says nothing about WHICH state. "Suspended" versus "closed" is
+        # operational detail, and the difference is not the customer's to
+        # discover from an error body.
+        super().__init__("This account cannot be used right now.")
+
+
 class AccountDeletionInProgress(DomainError):
     """The account is past its deletion cutoff and may not act.
 
@@ -233,12 +265,34 @@ class AccountLifecycleService:
                  "identity.lifecycle_lock_key(:uid))"),
             {"uid": user_id},
         )
-        state = await self.s.scalar(
-            text("SELECT state FROM identity.account_lifecycle WHERE user_id = :uid"),
-            {"uid": user_id},
-        )
+        row = (
+            await self.s.execute(
+                text(
+                    "SELECT a.status, (a.deleted_at IS NOT NULL) AS is_deleted, l.state "
+                    "FROM identity.user_account a "
+                    "LEFT JOIN identity.account_lifecycle l ON l.user_id = a.id "
+                    "WHERE a.id = :uid"
+                ),
+                {"uid": user_id},
+            )
+        ).one_or_none()
+
+        # No row at all: the account was hard-removed while a token for it is
+        # still inside its lifetime. Deny — an access token is a claim about who
+        # the caller is, never evidence that the account still exists.
+        if row is None:
+            raise AccountNotActive()
+
+        status, is_deleted, state = row
+
+        # ORDER MATTERS. Deletion is checked first so an account that is both
+        # closed and deleting still gets the deletion answer, which is the more
+        # specific and the more actionable of the two.
         if state is not None and LifecycleState(state) in _BLOCKING_STATES:
             raise AccountDeletionInProgress()
+
+        if is_deleted or status in BLOCKING_ACCOUNT_STATUSES:
+            raise AccountNotActive()
 
     # ---------------------------------------------------------- request --
     async def request_deletion(self, user_id: uuid.UUID) -> LifecycleStatus:
