@@ -1,0 +1,156 @@
+/* =========================================================================
+   VISUAL CAPTURE — for human design review, not for assertion
+   =========================================================================
+   This does not test anything. It drives a real account through the real
+   product and writes full-page images so a person (or a model) can LOOK at
+   the result: hierarchy, density, rhythm, whether the provenance system reads
+   at a glance, and whether the thing has any character of its own.
+
+   Screenshot DIFFING is deliberately not done here. A pixel baseline on a
+   surface whose figures come from a live engine would fail on a legitimate
+   change to someone's tax position, and a test that cries wolf gets muted.
+
+   Opt-in: ONYX_VISUAL=1. Otherwise a routine suite run would spend two
+   minutes producing artefacts nobody asked for.
+   ========================================================================= */
+import { expect, test } from '@playwright/test'
+
+const API = process.env.ONYX_E2E_API ?? 'http://127.0.0.1:8099'
+const PASSWORD = 'supersecret1'
+const TAX_YEAR = 2025
+const OUT = 'visual'
+
+/** Enough facts that every screen has something real to render. An empty
+ *  product photographs beautifully and tells you nothing. */
+async function seed(request: import('@playwright/test').APIRequestContext) {
+  const email = `e2e_visual_${Date.now()}@test.ca`
+  const registered = await request.post(`${API}/api/v1/auth/register`, {
+    data: { email, password: PASSWORD },
+  })
+  expect(registered.status()).toBe(201)
+  const loggedIn = await request.post(`${API}/api/v1/auth/login`, {
+    data: { email, password: PASSWORD },
+  })
+  const { access_token } = (await loggedIn.json()) as { access_token: string }
+  const headers = { authorization: `Bearer ${access_token}` }
+
+  await request.put(`${API}/api/v1/users/me/tax-profile`, {
+    headers,
+    data: { province_code: 'ON', marital_status: 'single' },
+  })
+  await request.post(`${API}/api/v1/financials/income`, {
+    headers,
+    data: { tax_year: TAX_YEAR, income_type_code: 'employment', amount: '96000' },
+  })
+  await request.post(`${API}/api/v1/financials/income`, {
+    headers,
+    data: { tax_year: TAX_YEAR, income_type_code: 'interest', amount: '2400' },
+  })
+  await request.post(`${API}/api/v1/financials/expenses`, {
+    headers,
+    data: { tax_year: TAX_YEAR, expense_category_code: 'donation', amount: '3000' },
+  })
+  await request.post(`${API}/api/v1/financials/registered-accounts`, {
+    headers,
+    data: { tax_year: TAX_YEAR, registered_type: 'rrsp', contributions_ytd: '4000' },
+  })
+  // An analysis alone leaves every opportunity family reading "not established
+  // yet", so the flagship screens would photograph as empty states. Running the
+  // optimization is what gives Opportunities, Evidence and the assurance ledger
+  // real engine output to render.
+  const analysis = await request.post(`${API}/api/v1/analysis`, {
+    headers,
+    data: { tax_year: TAX_YEAR },
+  })
+  expect(analysis.status()).toBe(201)
+  const { id: analysisId } = (await analysis.json()) as { id: string }
+
+  const optimization = await request.post(`${API}/api/v1/ioe/optimizations`, {
+    headers,
+    data: { analysis_id: analysisId },
+  })
+  // Recorded rather than asserted: if the engine declines to optimize this
+  // profile, the capture is still worth having — it just photographs the
+  // honest empty state, which is itself a design surface worth reviewing.
+  console.log(`optimization run: ${optimization.status()}`)
+  return email
+}
+
+const SCREENS = [
+  ['landing', '/'],
+  ['overview', '/app'],
+  ['position', '/app/position'],
+  ['opportunities', '/app/opportunities'],
+  ['twin', '/app/twin'],
+  ['before-you-act', '/app/before-you-act'],
+  ['evidence', '/app/evidence'],
+  ['changes', '/app/changes'],
+  ['onboarding', '/app/onboarding'],
+  ['settings', '/app/settings'],
+  ['trust', '/trust'],
+  ['legal', '/legal/terms'],
+] as const
+
+test('capture the product for design review', async ({ page, request }, testInfo) => {
+  test.skip(!process.env.ONYX_VISUAL, 'set ONYX_VISUAL=1 to capture')
+  test.setTimeout(300_000)
+
+  const theme = process.env.ONYX_VISUAL_THEME ?? 'light'
+  const email = await seed(request)
+
+  // Seed the stored preference AND the attribute: the settings screen reads
+  // storage on mount and would otherwise reset the attribute to system.
+  await page.addInitScript(
+    ([key, value]) => {
+      try {
+        if (value === 'system') window.localStorage.removeItem(key as string)
+        else window.localStorage.setItem(key as string, value as string)
+      } catch {
+        /* ignore */
+      }
+      if (value !== 'system') {
+        document.documentElement.dataset.theme = value as string
+      }
+    },
+    ['onyx.theme', theme],
+  )
+
+  await page.goto('/sign-in')
+  await page.getByLabel(/email/i).fill(email)
+  await page.getByLabel(/password/i).fill(PASSWORD)
+  await page.getByRole('button', { name: /sign in/i }).click()
+  await page.waitForURL(/\/app/, { timeout: 30_000 })
+
+  const project = testInfo.project.name
+  const shoot = async (name: string) => {
+    // Let figure transitions settle so the capture is the resting state, not
+    // a frame mid-animation.
+    await page.waitForTimeout(600)
+    await page.screenshot({
+      path: `${OUT}/${theme}-${project}-${name}.png`,
+      fullPage: true,
+    })
+  }
+
+  for (const [name, path] of SCREENS) {
+    await page.goto(path)
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })
+    await shoot(name)
+  }
+
+  // The Decision Twin's whole point is the comparison, and an unmodelled bench
+  // photographs as an empty panel. Drive it to an actual modelled position so
+  // the flagship surface can be reviewed as customers will meet it.
+  await page.goto('/app/twin')
+  await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })
+  await page.getByLabel(/amount to contribute/i).fill('8000')
+  await page.getByRole('button', { name: /model against/i }).click()
+  await page
+    .getByText(/modelled position|modelled state|refus/i)
+    .first()
+    .waitFor({ state: 'visible', timeout: 60_000 })
+    .catch(() => {
+      /* Captured either way: a refusal is a designed surface too. */
+    })
+  await shoot('twin-modelled')
+})

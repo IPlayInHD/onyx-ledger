@@ -35,7 +35,7 @@ import {
   SupportSignal,
   TrustPair,
 } from '@/components/trust'
-import { humanize, isDecrease, isoDate, magnitude, money } from '@/lib/format'
+import { humanize, isoDate, magnitude, money } from '@/lib/format'
 import {
   latestAnalysisFor,
   useAnalyses,
@@ -142,7 +142,7 @@ interface Problem {
 
 /* ------------------------------------------------------- delta direction -- */
 
-interface DeltaTone {
+export interface DeltaTone {
   modifier: string
   arrow: string
   word: string
@@ -150,33 +150,62 @@ interface DeltaTone {
   spoken: string
 }
 
+/** Effect types whose amount is stated as a BENEFIT: a positive figure is a
+ *  reduction in what you owe, not an increase. `current_year_tax_reduction` is
+ *  computed by the engine as `baseline_tax - scenario_tax`. */
+const REDUCTION_EFFECTS = new Set(['current_year_tax_reduction'])
+
 /**
  * Which way the connector points.
  *
- * `isDecrease` (lib/format) reads the sign the backend already put on
- * `tax_delta`. The one reading it does not cover is a difference of nothing,
- * and calling a zero delta "higher" would state something the engine never
- * said. Nothing here derives a delta — the amount rendered is always
+ * READ THE EFFECT TYPE, NOT JUST THE SIGN. `tax_delta` is not an ordinary
+ * signed difference — the engine computes `baseline_tax - scenario_tax` and
+ * labels it `current_year_tax_reduction`, so a POSITIVE amount means the
+ * modelled tax is LOWER. Treating it as a plain difference inverted this badge
+ * completely: it told a customer that an $8,000 RRSP contribution raised their
+ * tax by $2,403.79, in red, with an up arrow, next to a caption correctly
+ * reading "current year tax reduction" — and said the same thing to screen
+ * readers.
+ *
+ * A figure whose effect type is not a known benefit gets NO directional claim.
+ * Guessing a direction from a sign whose meaning we have not established is
+ * precisely what produced the inversion.
+ *
+ * Nothing here derives a delta — the amount rendered is always
  * `tax_delta.amount`, and the arrow is aria-hidden because the WORD beside it
  * is what carries the direction.
  */
-function deltaTone(amount: string): DeltaTone {
-  if (isDecrease(amount)) {
+export function deltaTone(delta: Monetary): DeltaTone {
+  const numeric = Number(delta.amount)
+
+  if (!REDUCTION_EFFECTS.has(delta.effect_type) || !Number.isFinite(numeric)) {
+    const kind = humanize(delta.effect_type)
+    return {
+      modifier: '',
+      arrow: '·',
+      word: kind,
+      spoken: `${magnitude(delta.amount)}, ${kind.toLowerCase()}`,
+    }
+  }
+
+  if (numeric === 0) {
+    return { modifier: '', arrow: '=', word: 'No change', spoken: 'unchanged' }
+  }
+
+  if (numeric > 0) {
     return {
       modifier: ' twin__delta--down',
       arrow: '↓',
       word: 'Lower',
-      spoken: `${magnitude(amount)} lower`,
+      spoken: `${magnitude(delta.amount)} lower`,
     }
   }
-  if (Number(amount) === 0) {
-    return { modifier: '', arrow: '=', word: 'No change', spoken: 'unchanged' }
-  }
+
   return {
     modifier: ' twin__delta--up',
     arrow: '↑',
     word: 'Higher',
-    spoken: `${magnitude(amount)} higher`,
+    spoken: `${magnitude(delta.amount)} higher`,
   }
 }
 
@@ -466,7 +495,7 @@ function Refusal({ error, lever }: { error: ApiError; lever: LeverOption }) {
 
 function Twin({ ready }: { ready: ReadyScenario }) {
   const { scenario, baseline, modelled, delta } = ready
-  const tone = deltaTone(delta.amount)
+  const tone = deltaTone(delta)
 
   return (
     <div className="stack stack-5">
@@ -769,7 +798,7 @@ export default function DecisionTwin() {
   const announcement = create.isPending
     ? 'Modelling this decision.'
     : ready
-      ? `Result ready. Estimated tax under this model is ${deltaTone(ready.delta.amount).spoken}.`
+      ? `Result ready. Estimated tax under this model is ${deltaTone(ready.delta).spoken}.`
       : ''
 
   return (

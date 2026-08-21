@@ -9,3 +9,6 @@ test-results/
 
 # TypeScript incremental build state — a local artifact, not source.
 *.tsbuildinfo
+
+# Design-review captures: regenerate with ONYX_VISUAL=1; never a repo artifact.
+visual/

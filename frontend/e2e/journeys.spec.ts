@@ -309,6 +309,50 @@ test.describe('value parity: the screen shows the engine figure', () => {
   }
 })
 
+test.describe('decision twin: the product must say which way the money moved', () => {
+  test('a contribution that lowers tax is announced as lower', async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'desktop project only')
+
+    // This exists because the value-parity journeys asserted that the FIGURE
+    // appeared and never that the product read it correctly. It shipped
+    // inverted: a reduction was announced as an increase, in red, with an up
+    // arrow. Parity of digits is not parity of meaning.
+    const seeded = await seedPersona(request, PERSONAS[0]!)
+    await signIn(page, seeded.email)
+
+    await page.goto('/app/twin')
+    await page.getByLabel(/amount to contribute/i).fill('3000')
+    await page.getByRole('button', { name: /model against/i }).click()
+
+    const twin = page.locator('.twin').first()
+    const modelledSide = twin.locator('.twin__side--modelled')
+    await expect(modelledSide, 'the model did not produce a twin').toBeVisible({
+      timeout: 60_000,
+    })
+
+    const asNumber = async (locator: ReturnType<typeof page.locator>) => {
+      const text = (await locator.locator('.figure').first().innerText()).trim()
+      return Number(text.replace(/[^0-9.-]/g, ''))
+    }
+
+    const current = await asNumber(twin.locator('.twin__side').first())
+    const modelled = await asNumber(modelledSide)
+    const word = (await twin.locator('.twin__delta-caption').innerText()).toLowerCase()
+
+    // The test compares the two figures the ENGINE produced and checks the
+    // product's own word against them. It computes no tax; it only refuses to
+    // let the screen describe a smaller number as a larger one.
+    expect(modelled, 'an RRSP deduction should not raise tax').toBeLessThan(current)
+    expect(word, `modelled ${modelled} < current ${current}, so this must read lower`).toContain(
+      'lower',
+    )
+    expect(word).not.toContain('higher')
+  })
+})
+
 test.describe('new user journey', () => {
   test('register, land in the product, and reach the trust surfaces', async ({ page }) => {
     const email = `e2e_new_${Date.now()}@test.ca`
