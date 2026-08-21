@@ -198,6 +198,72 @@ def test_definer_function_owners_are_controlled():
     )
 
 
+def test_definer_owners_can_reach_every_application_schema():
+    """A definer function runs as its OWNER, so the owner must be able to reach
+    the schemas it reads.
+
+    THE DEFECT THIS EXISTS FOR. `identity.subject_key_for` is SECURITY DEFINER
+    owned by `onyx_migrator`, and `audit.log_change` calls it on every write.
+    Nothing in `db/sql` grants `onyx_migrator` USAGE on `identity`; the design
+    relied entirely on that role also OWNING the schema, which is true only
+    because the migrator happens to be the identity that ran the DDL.
+
+    Apply the same schema as any other identity — an RDS master user, a
+    provisioning superuser, a CI service container — and `onyx_migrator` is
+    created by `00_extensions_roles.sql` as a plain NOLOGIN role with no USAGE
+    on anything. Every INSERT into `identity.user_account` then dies inside the
+    audit trigger with `permission denied for schema identity`, which is to say
+    the first customer registration fails and nothing before it does.
+
+    Reproduced exactly, on a database whose schema was applied by `postgres`:
+
+        ERROR: permission denied for schema identity
+        QUERY: v_subject_key := identity.subject_key_for(v_subject_user)
+        CONTEXT: PL/pgSQL function audit.log_change() line 65 at assignment
+
+    USAGE is name resolution and nothing else, and these owners already hold
+    the DDL, so requiring it costs no privilege that is not already implied. The
+    invariant is catalogue-driven on both sides — every definer owner, every
+    application schema — so a schema or a definer function added later is
+    covered without editing this test.
+    """
+    conn, cur = _owner_cursor()
+    try:
+        cur.execute("""
+            SELECT DISTINCT pg_get_userbyid(p.proowner)
+              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+             WHERE p.prosecdef AND n.nspname NOT LIKE 'pg_%%'
+               AND n.nspname <> 'information_schema'
+        """)
+        owners = sorted(r[0] for r in cur.fetchall())
+        cur.execute("""
+            SELECT nspname FROM pg_namespace
+             WHERE nspname NOT LIKE 'pg_%%'
+               AND nspname <> 'information_schema'
+             ORDER BY nspname
+        """)
+        schemas = [r[0] for r in cur.fetchall()]
+
+        unreachable: list[str] = []
+        for owner in owners:
+            for schema in schemas:
+                cur.execute(
+                    "SELECT has_schema_privilege(%s, %s, 'USAGE')", (owner, schema)
+                )
+                if not cur.fetchone()[0]:
+                    unreachable.append(f"{owner} -> {schema}")
+    finally:
+        conn.close()
+
+    assert owners, "no SECURITY DEFINER owners found — the query is wrong"
+    assert schemas, "no application schemas found — the query is wrong"
+    assert not unreachable, (
+        "SECURITY DEFINER owners cannot reach schemas their functions run "
+        f"against: {unreachable}. The schema was applied by an identity other "
+        "than the one the definer functions are owned by."
+    )
+
+
 def test_every_user_derived_table_in_every_schema_has_forced_rls():
     """Catalogue-driven across ALL user-data schemas, so a table added to any of
     them later is covered without editing this test."""

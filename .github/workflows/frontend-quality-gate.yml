@@ -151,16 +151,28 @@ jobs:
     # The journeys drive a REAL backend against a REAL database. They are the
     # only thing that proves the figure on screen is the figure the engine
     # produced, so they are blocking rather than nightly.
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: onyx_e2e
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 5s
-          --health-timeout 5s --health-retries 20
+    #
+    # NO `services:` CONTAINER HERE, AND THAT IS THE POINT. This job used to
+    # start a pgvector service container and apply the schema as its `postgres`
+    # superuser. The schema applied cleanly and the suite then died on the first
+    # registration with
+    #
+    #   ERROR: permission denied for schema identity
+    #   QUERY: v_subject_key := identity.subject_key_for(v_subject_user)
+    #   CONTEXT: PL/pgSQL function audit.log_change() line 65 at assignment
+    #
+    # because `identity.subject_key_for` is SECURITY DEFINER owned by
+    # `onyx_migrator`, `00_extensions_roles.sql` creates that role as a plain
+    # NOLOGIN role, and nothing grants it USAGE on `identity` — the design
+    # relies on the migrator also OWNING the schema, which is only true when the
+    # migrator is the identity that ran the DDL.
+    #
+    # `ci_provision_postgres.sh` is the provisioning path the backend gate
+    # already uses and the one the runbooks describe: `onyx_migrator` applies
+    # the schema, the application connects as a member of `onyx_app_rw`. Using
+    # it here means one provisioning path for both gates instead of two that can
+    # disagree — and the invariant is now asserted directly by
+    # tests/security/test_privilege_invariants.py rather than left to CI shape.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -172,6 +184,10 @@ jobs:
         with:
           python-version: "3.11.15"
 
+      - name: Provision PostgreSQL 16 + pgvector
+        working-directory: backend
+        run: ./scripts/ci_provision_postgres.sh
+
       - name: Install backend from the lock only
         working-directory: backend
         run: |
@@ -179,29 +195,44 @@ jobs:
           pip install --require-hashes -r requirements.lock.txt
           pip install --no-deps -e .
 
-      - name: Apply the schema
+      - name: Create the database and apply the schema as the migrator
         working-directory: backend
         env:
-          PGPASSWORD: postgres
-          DATABASE_URL: postgresql://postgres@localhost:5432/onyx_e2e
-        run: ./scripts/apply_schema.sh
+          DATABASE_URL: postgresql://onyx_migrator@127.0.0.1:5432/onyx_e2e
+        run: |
+          psql "postgresql://onyx_migrator@127.0.0.1:5432/postgres" \
+            -v ON_ERROR_STOP=1 -q \
+            -c "DROP DATABASE IF EXISTS onyx_e2e;" -c "CREATE DATABASE onyx_e2e;"
+          ./scripts/apply_schema.sh
 
       - name: Create the unprivileged runtime login
         # THE APPLICATION MUST NOT CONNECT AS A SUPERUSER. A superuser BYPASSES
         # ROW LEVEL SECURITY, so the journeys would pass while proving nothing
         # about tenant isolation — the cross-tenant assertions would be checking
         # a database that had stopped enforcing the thing they test.
-        env:
-          PGPASSWORD: postgres
         run: |
-          psql "postgresql://postgres@localhost:5432/onyx_e2e" -v ON_ERROR_STOP=1 <<'SQL'
+          psql "postgresql://onyx_migrator@127.0.0.1:5432/onyx_e2e" -v ON_ERROR_STOP=1 <<'SQL'
           DO $$
           BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_e2e_app') THEN
-              CREATE ROLE onyx_e2e_app LOGIN PASSWORD 'e2e' IN ROLE onyx_app_rw;
+              CREATE ROLE onyx_e2e_app LOGIN IN ROLE onyx_app_rw;
             END IF;
           END $$;
+          GRANT onyx_app_rw TO onyx_e2e_app;
           SQL
+
+      - name: Prove the runtime login does not bypass RLS
+        # A one-line control on the assumption the whole job rests on. If this
+        # role ever gained BYPASSRLS or superuser, every cross-tenant assertion
+        # below would pass for the wrong reason.
+        run: |
+          psql "postgresql://onyx_migrator@127.0.0.1:5432/onyx_e2e" -v ON_ERROR_STOP=1 -tAc "
+            SELECT CASE WHEN rolsuper OR rolbypassrls
+                        THEN 'FAIL' ELSE 'ok' END
+              FROM pg_roles WHERE rolname = 'onyx_e2e_app'" | grep -qx ok || {
+            echo "::error::onyx_e2e_app can bypass row level security"
+            exit 1
+          }
 
       - name: Install frontend from the lockfile only
         run: npm ci
@@ -213,7 +244,7 @@ jobs:
 
       - name: Journeys, parity and accessibility
         env:
-          ONYX_DATABASE_URL: postgresql+asyncpg://onyx_e2e_app:e2e@localhost:5432/onyx_e2e
+          ONYX_DATABASE_URL: postgresql+asyncpg://onyx_e2e_app@127.0.0.1:5432/onyx_e2e
         run: ./scripts/e2e.sh --workers=1
 
       - name: Keep the report when it fails
@@ -222,4 +253,15 @@ jobs:
         with:
           name: playwright-report
           path: frontend/playwright-report
+          retention-days: 7
+
+      - name: Keep the API log when it fails
+        # The suite failing tells you a journey broke; the backend's own log
+        # tells you why. Without this the interesting half is discarded with the
+        # runner.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-api-log
+          path: /tmp/onyx_e2e_api.log
           retention-days: 7

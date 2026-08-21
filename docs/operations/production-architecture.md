@@ -97,6 +97,26 @@ RDS PostgreSQL 16 with the `vector` extension, Multi-AZ.
 - Automated backups with **point-in-time recovery**, 35-day window.
 - Deletion protection on, so a console mistake cannot remove it.
 
+**The migrator must be the identity that applies the DDL, and this is not a
+style preference.** `identity.subject_key_for` is SECURITY DEFINER owned by
+`onyx_migrator`, and `audit.log_change` calls it on every write. Nothing in
+`db/sql` grants `onyx_migrator` USAGE on `identity` — the design relies on that
+role also *owning* the schema, which holds only when the migrator ran
+`CREATE SCHEMA`. Apply the same schema as some other identity (an RDS master
+user, a provisioning superuser, a CI service container) and `onyx_migrator` is
+created by `00_extensions_roles.sql` as a plain NOLOGIN role that can reach
+nothing. The schema still applies cleanly. The first customer registration then
+fails inside the audit trigger with `permission denied for schema identity`, and
+nothing before it does.
+
+So: create `onyx_migrator` first, with enough privilege to create extensions,
+then apply the schema **as** `onyx_migrator`. That ordering is what
+`backend/scripts/ci_provision_postgres.sh` does, it is what both quality gates
+do, and `tests/security/test_privilege_invariants.py` asserts the resulting
+invariant directly — every SECURITY DEFINER owner can reach every application
+schema — so a database provisioned the wrong way fails a test rather than a
+customer.
+
 **The runtime is not the owner.** Migrations run as the migrator identity from
 the deployment pipeline, never from the API container. The application connects
 as `onyx_app_rw`, which is not a superuser, not the owner, does not hold

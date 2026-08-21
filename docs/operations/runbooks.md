@@ -40,7 +40,14 @@ included a migration:
 
 ## Database migration
 
-- Run as `onyx_migrator`, never from the API container.
+- Run as `onyx_migrator`, never from the API container. On a **new** database
+  this is load-bearing rather than tidy: create `onyx_migrator` first, then let
+  it apply the schema, so it ends up owning it. A schema applied by any other
+  identity leaves the migrator unable to reach `identity`, and every write then
+  dies inside the audit trigger — the schema applies clean and the first
+  registration fails. `tests/security/test_privilege_invariants.py` asserts the
+  invariant; run it against a freshly provisioned database before pointing an
+  application at it.
 - One migration step, before the new revision starts.
 - Long-running index builds use `CREATE INDEX CONCURRENTLY` in a migration of
   their own; inside a transaction it will lock the table and take the site down.
