@@ -3,15 +3,17 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user_id, db_authed
 from app.core.exceptions import NotFound
 from app.database.models import AiConversation, AiMessage
+from app.schemas.explanation import ExplanationEnvelopeOut, ExplanationType
 from app.services.admission import OperationClass, admission_guard
 from app.services.admission.guard import user_scope
+from app.services.ai.explanation import ExplanationService
 from app.services.ai.service import AiService
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -91,3 +93,58 @@ async def list_messages(
         .order_by(AiMessage.created_at)
     )
     return [{"role": m.role, "content": m.content, "confidence": m.confidence_score} for m in rows]
+
+
+class ExplanationRequest(BaseModel):
+    """What to explain. No tax facts can be supplied here — the assembler
+    loads the authenticated user's authoritative subject through the owning
+    tenant-isolated services, and the renderer sees only what they return."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    explanation_type: ExplanationType
+    subject_id: str | None = Field(
+        None, max_length=200,
+        description="The authoritative subject: analysis id (TAX_POSITION), "
+                    "opportunity source id or code (OPPORTUNITY), optimization "
+                    "run id (PORTFOLIO), scenario id (SCENARIO, COMPARISON), "
+                    "decision-journal id (EVIDENCE_READINESS). Unused for "
+                    "WHAT_CHANGED.")
+    tax_year: int | None = Field(
+        None, ge=2000, le=2100,
+        description="Required for OPPORTUNITY and WHAT_CHANGED.")
+
+
+@router.post(
+    "/explanations",
+    response_model=ExplanationEnvelopeOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate a validated explanation of a governed result",
+    description=(
+        "Renders the caller's own sealed/governed result as a customer-safe "
+        "explanation. The renderer holds no authority: every number, verdict, "
+        "citation, deadline and assumption comes from the assembled governed "
+        "input, and generated output survives only if the deterministic "
+        "validators accept it — otherwise the deterministic template renderer "
+        "answers. No internal hashes are exposed."
+    ),
+)
+async def create_explanation(
+    body: ExplanationRequest,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> ExplanationEnvelopeOut:
+    async with admission_guard(
+        OperationClass.AI_EXPLAIN, scope_id=user_scope(user_id)
+    ):
+        output, mode, assembled = await ExplanationService(session, user_id).explain(
+            body.explanation_type,
+            subject_id=body.subject_id,
+            tax_year=body.tax_year,
+        )
+        return ExplanationEnvelopeOut(
+            explanation=output,
+            explanation_type=assembled.explanation_type,
+            renderer_mode=mode,
+            as_of=assembled.as_of,
+        )
