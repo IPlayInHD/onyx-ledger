@@ -172,31 +172,46 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _identity_secret_is_real_in_production(self) -> Settings:
-        """The dev default must not reach production.
+    def _production_secrets_are_real(self) -> Settings:
+        """The dev defaults must not reach production.
+
+        Two independent secrets share this guard because they share the failure
+        mode: a compiled-in default that is public in the source, silently
+        shipped because an env var was left unset. Checked HERE, at startup,
+        rather than trusted to a deployment checklist — a checklist failure is
+        silent and this one is loud.
+
+        `jwt_secret` signs and verifies every access token and, through the
+        admin scope, every admin-plane token. Left at the compiled default it is
+        a source-public HMAC key, so anyone can forge a token for any `sub` and
+        mint `scope:"admin"` tokens — total authentication bypass and privilege
+        escalation. It is the highest-value secret in the system and MUST carry
+        at least the same production guard as the lower-blast-radius digest key
+        below.
 
         `admission_identity_secret` is what stops `admission.rate_counter` from
         being a searchable list of the email addresses people tried to log in
-        with. Left at the compiled-in default it is public, so the digests are
-        reversible by anyone with the source — which is everyone. Checked HERE,
-        at startup, rather than trusted to a deployment checklist: a checklist
-        failure is silent and this one is loud.
+        with. Left at the default it is public, so the digests are reversible by
+        anyone with the source.
 
-        Development and test keep the default on purpose; a required secret in
+        Development and test keep the defaults on purpose; a required secret in
         every local shell buys nothing and gets pasted into a repository.
         """
         if self.environment == "production":
-            if self.admission_identity_secret == "dev-insecure-change-me":
-                raise ValueError(
-                    "ONYX_ADMISSION_IDENTITY_SECRET is still the development "
-                    "default in production; set it to a generated secret"
-                )
-            if len(self.admission_identity_secret) < 32:
-                raise ValueError(
-                    "ONYX_ADMISSION_IDENTITY_SECRET must be at least 32 "
-                    "characters; a short key is brute-forceable against a "
-                    "known email address"
-                )
+            for value, env_var in (
+                (self.jwt_secret, "ONYX_JWT_SECRET"),
+                (self.admission_identity_secret, "ONYX_ADMISSION_IDENTITY_SECRET"),
+            ):
+                if value == "dev-insecure-change-me":
+                    raise ValueError(
+                        f"{env_var} is still the development default in "
+                        "production; set it to a generated secret"
+                    )
+                if len(value) < 32:
+                    raise ValueError(
+                        f"{env_var} must be at least 32 characters; a short key "
+                        "is brute-forceable"
+                    )
         return self
 
     @property

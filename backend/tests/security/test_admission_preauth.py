@@ -193,9 +193,44 @@ async def test_the_production_secret_default_is_refused_at_startup():
         Settings(environment="production", admission_identity_secret="too-short")
 
     # A real secret is accepted, so the test is not passing because every
-    # production Settings raises.
+    # production Settings raises. Both production-guarded secrets must be real
+    # now — jwt_secret is guarded too (see test_jwt_secret_production_guard).
     Settings(environment="production",
+             jwt_secret="j" * 48,
              admission_identity_secret="x" * 48)
+
+
+@pytest.mark.asyncio
+async def test_jwt_secret_production_guard():
+    """SEC-H1: the JWT signing key — the master auth secret — must not reach
+    production at its source-public compiled default, exactly as the digest key
+    below it must not. Without this guard, an unset ONYX_JWT_SECRET ships an
+    HS256 key that is public in the source, and anyone can forge a token for any
+    `sub` (total impersonation) or mint a `scope:"admin"` token (privilege
+    escalation).
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
+    from app.core.config import Settings
+
+    # EXPLOIT precondition, refused: the dev default in production.
+    with pytest.raises(PydanticValidationError, match="ONYX_JWT_SECRET"):
+        Settings(environment="production",
+                 jwt_secret="dev-insecure-change-me",
+                 admission_identity_secret="x" * 48)
+    # A short key is also refused (a 22-byte key is below HS256's floor).
+    with pytest.raises(PydanticValidationError, match="ONYX_JWT_SECRET"):
+        Settings(environment="production",
+                 jwt_secret="too-short",
+                 admission_identity_secret="x" * 48)
+
+    # Non-vacuous: a real jwt_secret is accepted in production.
+    Settings(environment="production",
+             jwt_secret="j" * 48,
+             admission_identity_secret="x" * 48)
+
+    # And development keeps the default on purpose — the guard is production-only.
+    Settings(environment="development")
 
 
 @pytest.mark.asyncio
