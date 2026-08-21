@@ -210,12 +210,36 @@ async function seedPersona(
   return { email, analysis: await analysis.json() }
 }
 
+/**
+ * Sign in through the real form, waiting out the throttle if it fires.
+ *
+ * Register, login AND refresh all draw on one per-source-address auth budget,
+ * so a persona suite signing in from a single host will legitimately be paced.
+ * Retrying after the stated wait is what a real client does; trimming the
+ * persona set to dodge the limit would buy a green run by testing less.
+ */
 async function signIn(page: Page, email: string) {
-  await page.goto('/sign-in')
-  await page.getByLabel(/email/i).fill(email)
-  await page.getByLabel(/password/i).fill(PASSWORD)
-  await page.getByRole('button', { name: /sign in/i }).click()
-  await page.waitForURL(/\/app/, { timeout: 20_000 })
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await page.goto('/sign-in')
+    await page.getByLabel(/email/i).fill(email)
+    await page.getByLabel(/password/i).fill(PASSWORD)
+    await page.getByRole('button', { name: /sign in/i }).click()
+
+    const landed = await page
+      .waitForURL(/\/app/, { timeout: 15_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (landed) return
+
+    // Not signed in: either we were paced, or something is genuinely wrong.
+    const message = (await page.locator('body').innerText()).toLowerCase()
+    const throttled = /pacing|too many|try again in|rate/.test(message)
+    if (!throttled) {
+      throw new Error(`sign-in did not reach the product: ${message.slice(0, 300)}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20_000))
+  }
+  throw new Error('sign-in never completed: still paced after five attempts')
 }
 
 test.describe('value parity: the screen shows the engine figure', () => {
