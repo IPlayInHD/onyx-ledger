@@ -8,7 +8,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationError
-from app.database.models import ExpenseCategory, ExpenseRecord, IncomeSource, IncomeType
+from app.database.models import (
+    Asset,
+    AssetCategory,
+    ExpenseCategory,
+    ExpenseRecord,
+    IncomeSource,
+    IncomeType,
+    RegisteredAccountDetail,
+)
 from app.services.ioe.freshness_producers import on_financial_data_changed
 
 
@@ -127,3 +135,58 @@ class FinancialService:
         await on_financial_data_changed(
             self.s, user_id, tax_year, change_token=f"expense-deleted:{expense_id}")
         return True
+
+    async def add_registered_account(
+        self, user_id: uuid.UUID, tax_year: int, registered_type: str,
+        contributions_ytd: Decimal, contribution_room: Decimal | None = None,
+        label: str | None = None,
+    ) -> RegisteredAccountDetail:
+        """Record an ACTUAL registered-account contribution fact.
+
+        The typed representation already exists — `wealth.asset` plus
+        `wealth.registered_account_detail` — so this creates no new fact
+        vocabulary; it gives the existing one its customer entry path. One
+        detail row per (account, tax year); the amounts are facts about money
+        already contributed, which the analysis baseline reads. Hypothetical
+        contributions stay where they belong: scenario levers.
+        """
+        if registered_type not in ("RRSP", "FHSA"):
+            raise ValidationError(
+                f"Unsupported registered account type '{registered_type}'; "
+                "supported: RRSP, FHSA"
+            )
+        category = await self.s.scalar(
+            select(AssetCategory).where(AssetCategory.code == registered_type.lower()))
+        if not category:
+            raise ValidationError(
+                f"Asset category '{registered_type}' is not seeded")
+        asset = Asset(
+            user_id=user_id, asset_category_id=category.id,
+            label=label or f"{registered_type} ({tax_year})",
+        )
+        self.s.add(asset)
+        await self.s.flush()
+        detail = RegisteredAccountDetail(
+            asset_id=asset.id, registered_type=registered_type,
+            tax_year=tax_year, contribution_room=contribution_room,
+            contributions_ytd=contributions_ytd,
+        )
+        self.s.add(detail)
+        await self.s.flush()
+        await on_financial_data_changed(
+            self.s, user_id, tax_year,
+            change_token=f"registered-account:{asset.id}")
+        return detail
+
+    async def list_registered_accounts(
+        self, user_id: uuid.UUID, tax_year: int
+    ) -> list[RegisteredAccountDetail]:
+        rows = await self.s.scalars(
+            select(RegisteredAccountDetail)
+            .join(Asset, Asset.id == RegisteredAccountDetail.asset_id)
+            .where(
+                Asset.user_id == user_id, Asset.deleted_at.is_(None),
+                RegisteredAccountDetail.tax_year == tax_year,
+            )
+        )
+        return list(rows)

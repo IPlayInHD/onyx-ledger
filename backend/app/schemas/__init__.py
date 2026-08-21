@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -68,6 +69,33 @@ class IncomeOut(ORMModel):
     income_type_id: uuid.UUID
     amount: Decimal
     source_name: str | None
+
+
+class RegisteredAccountIn(BaseModel):
+    """An ACTUAL registered-account contribution record — a taxpayer fact.
+
+    Distinct from a scenario lever: this states money already contributed in
+    the tax year, and it enters the baseline analysis. A lever models a
+    contribution not yet made. Only the deduction-bearing account types the
+    engine computes today are accepted.
+    """
+
+    tax_year: int = Field(ge=1900, le=2200)
+    registered_type: Literal["RRSP", "FHSA"]
+    contributions_ytd: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+    contribution_room: Decimal | None = Field(
+        None, ge=0, max_digits=14, decimal_places=2,
+        description="Known available room, when the taxpayer has it to state.")
+    label: str | None = Field(None, max_length=200)
+
+
+class RegisteredAccountOut(ORMModel):
+    asset_id: uuid.UUID
+    registered_type: str
+    tax_year: int
+    contribution_room: Decimal | None
+    contributions_ytd: Decimal
+    withdrawals_ytd: Decimal
 
 
 class ExpenseIn(BaseModel):

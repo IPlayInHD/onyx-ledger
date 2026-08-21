@@ -275,6 +275,43 @@ class AppliedChangeOut(BaseModel):
     new_value: str | None
 
 
+class OptimizationRequest(BaseModel):
+    """Start an optimization run over a completed analysis.
+
+    `resource_capacities` is the existing typed user-constraint contract the
+    orchestrator seals into the spec hash: shared-pool capacities the taxpayer
+    declares (e.g. FHSA_ROOM carry-forward). Nothing here can name an engine
+    input or supply a computation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_id: uuid.UUID
+    resource_capacities: dict[str, Decimal] | None = Field(
+        None,
+        description="Declared shared-pool capacities by resource code; "
+                    "omitted pools use governed defaults where product rules "
+                    "define one.",
+    )
+
+
+class OptimizationRunOut(BaseModel):
+    """The orchestrator's structured outcome, verbatim."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: uuid.UUID
+    spec_hash: str
+    result_hash: str | None
+    workflow_status: str
+    replayed: bool
+    candidate_count: int
+    relationship_count: int
+    portfolio_member_count: int
+    error_code: str | None
+    warnings: list[str]
+
+
 class ScenarioDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -484,6 +521,8 @@ class ProjectionResponse(BaseModel):
 
 __all__ = [
     "CURRENCY_CAD",
+    "OptimizationRequest",
+    "OptimizationRunOut",
     "ProjectionResponse",
     "AppliedChangeOut",
     "AssumptionInput",

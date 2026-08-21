@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user_id, db_authed
-from app.schemas import ExpenseIn, IncomeIn, IncomeOut
+from app.schemas import (
+    ExpenseIn,
+    IncomeIn,
+    IncomeOut,
+    RegisteredAccountIn,
+    RegisteredAccountOut,
+)
 from app.services.admission import OperationClass, admission_guard
 from app.services.admission.guard import user_scope
 from app.services.financial.service import FinancialService
@@ -34,6 +40,36 @@ async def add_income(
             user_id, body.tax_year, body.income_type_code, body.amount, body.source_name
         )
         return IncomeOut.model_validate(row)
+
+
+@router.post("/registered-accounts", response_model=RegisteredAccountOut,
+             status_code=status.HTTP_201_CREATED)
+async def add_registered_account(
+    body: RegisteredAccountIn,
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> RegisteredAccountOut:
+    """Record an actual RRSP/FHSA contribution for a tax year — a fact the
+    baseline analysis reads, as opposed to a scenario lever, which models a
+    contribution not yet made."""
+    async with admission_guard(
+        OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
+    ):
+        row = await FinancialService(session).add_registered_account(
+            user_id, body.tax_year, body.registered_type,
+            body.contributions_ytd, body.contribution_room, body.label,
+        )
+        return RegisteredAccountOut.model_validate(row)
+
+
+@router.get("/registered-accounts", response_model=list[RegisteredAccountOut])
+async def list_registered_accounts(
+    tax_year: int = Query(..., ge=1900, le=2200),
+    user_id: uuid.UUID = Depends(current_user_id),
+    session: AsyncSession = Depends(db_authed),
+) -> list[RegisteredAccountOut]:
+    rows = await FinancialService(session).list_registered_accounts(user_id, tax_year)
+    return [RegisteredAccountOut.model_validate(r) for r in rows]
 
 
 @router.get("/income", response_model=list[IncomeOut])

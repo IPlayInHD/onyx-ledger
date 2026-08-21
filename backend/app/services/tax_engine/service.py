@@ -11,10 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
+    Asset,
     ExpenseCategory,
     ExpenseRecord,
     IncomeSource,
     IncomeType,
+    RegisteredAccountDetail,
     TaxProfile,
 )
 from app.services.tax_engine.core.data import TaxDataset
@@ -102,6 +104,24 @@ class TaxEngineService:
             if expense_field:
                 setattr(inp, expense_field,
                         getattr(inp, expense_field) + expense.amount)
+
+        # ACTUAL registered-account contributions — recorded facts, not
+        # hypothetical levers. `wealth.registered_account_detail` is the typed
+        # representation of contributions already made this tax year; a
+        # scenario lever models one that has NOT been made. Only the two
+        # deduction-bearing account types the engine computes today are read.
+        for detail in await self.s.scalars(
+            select(RegisteredAccountDetail)
+            .join(Asset, Asset.id == RegisteredAccountDetail.asset_id)
+            .where(
+                Asset.user_id == user_id, Asset.deleted_at.is_(None),
+                RegisteredAccountDetail.tax_year == tax_year,
+                RegisteredAccountDetail.registered_type.in_(("RRSP", "FHSA")),
+            )
+        ):
+            field = ("rrsp_deduction" if detail.registered_type == "RRSP"
+                     else "fhsa_deduction")
+            setattr(inp, field, getattr(inp, field) + detail.contributions_ytd)
         return inp
 
     async def resolve_dataset(self, tax_year: int) -> TaxDataset:

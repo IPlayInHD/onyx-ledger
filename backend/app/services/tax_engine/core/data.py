@@ -19,6 +19,20 @@ from decimal import Decimal
 #
 # Additive and inert: no calculation reads this constant.
 #
+# 2025.4.0 — two calculation behaviours changed to match registered authority:
+#   1. Ontario's charitable-donation credit is now computed. ON428 (5006-C,
+#      2025) lines 47-48 state it verbatim: Schedule 9 line 13 (first $200)
+#      x 5.05% plus Schedule 9 line 14 (the remainder) x 11.16%, entering the
+#      Ontario non-refundable credits at line 49/50 — BEFORE the surtax, which
+#      Part C computes on the net. Ontario donors previously had provincial
+#      tax overstated by the whole credit. `donation_low_rate` and
+#      `donation_high_rate` were added to ProvincialData; they default to 0 so
+#      a province without registered donation authority keeps its prior
+#      (no-credit) behaviour rather than inheriting Ontario's rates.
+#   2. An unsupported province/territory code no longer falls back silently to
+#      Ontario tax law: `compute` raises UnsupportedJurisdiction instead of
+#      substituting another jurisdiction's math.
+#
 # 2025.3.0 — three calculation behaviours changed to match registered
 # authority, so results differ for affected filers and sealed runs from
 # earlier versions must report DRIFTED rather than silently replaying:
@@ -43,7 +57,7 @@ from decimal import Decimal
 # answer for those filers, which is exactly the condition this constant exists
 # to signal: a run sealed under 2025.1.0 now reports DRIFTED on verification
 # rather than quietly replaying to a different number.
-REFERENCE_DATA_VERSION = "2025.3.0"
+REFERENCE_DATA_VERSION = "2025.4.0"
 
 
 def D(x: int | str | Decimal) -> Decimal:
@@ -71,6 +85,12 @@ class ProvincialData:
     surtax: list[tuple[Decimal, Decimal]] = field(default_factory=list)  # (over, rate)
     # The final band is open-ended: `None` upper bound means 'and above'.
     health_premium: list[tuple[Decimal | None, Decimal]] = field(default_factory=list)  # (up_to, amount)
+    #: Provincial charitable-donation credit rates on the federal Schedule 9
+    #: partition (first $200 / remainder). Zero means the province's donation
+    #: authority is not registered and no provincial credit is computed —
+    #: which was every province's behaviour before 2025.4.0.
+    donation_low_rate: Decimal = D(0)
+    donation_high_rate: Decimal = D(0)
 
 
 @dataclass(frozen=True)
@@ -146,6 +166,10 @@ PROVINCES_2025: dict[str, ProvincialData] = {
             Bracket(None, D("0.1316")),
         ],
         bpa=D(12747), credit_rate=D("0.0505"),
+        # ON428 (5006-C, 2025) lines 47-48, registered capture
+        # RAW_BYTES_SHA256 be18f03a…: Schedule 9 line 13 x 5.05%,
+        # Schedule 9 line 14 x 11.16%.
+        donation_low_rate=D("0.0505"), donation_high_rate=D("0.1116"),
         surtax=[(D(5710), D("0.20")), (D(7307), D("0.36"))],
         health_premium=[
             (D(20000), D(0)), (D(36000), D(300)), (D(48000), D(450)),

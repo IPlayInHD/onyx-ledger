@@ -29,6 +29,8 @@ from app.schemas.decision_journal import (
 from app.schemas.ioe import (
     IntegrityCheckOut,
     IntegrityOut,
+    OptimizationRequest,
+    OptimizationRunOut,
     ProjectionResponse,
     ScenarioComparisonOut,
     ScenarioCreateRequest,
@@ -71,6 +73,37 @@ router = APIRouter(prefix="/ioe", tags=["ioe"])
 
 
 # ---------------------------------------------------------------- scenarios --
+@router.post(
+    "/optimizations",
+    response_model=OptimizationRunOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Run optimization over a completed analysis",
+    description=(
+        "Invokes the certified optimization orchestrator for the caller's own "
+        "analysis. Admission control, idempotent spec-hash resolution, sealing "
+        "and replay identity all live in the orchestrator — this route adds "
+        "authentication and the typed constraint contract, nothing else."
+    ),
+)
+async def create_optimization(
+    body: OptimizationRequest,
+    user_id: uuid.UUID = Depends(current_user_id),
+    _active: None = Depends(assert_account_active),
+) -> OptimizationRunOut:
+    from app.services.ioe.orchestrator import OptimizationOrchestrator
+
+    constraints = (
+        {"resource_capacities": {
+            code: str(amount)
+            for code, amount in body.resource_capacities.items()}}
+        if body.resource_capacities else None
+    )
+    outcome = await OptimizationOrchestrator(user_id).generate(
+        body.analysis_id, user_constraints=constraints,
+    )
+    return OptimizationRunOut.model_validate(outcome)
+
+
 @router.post(
     "/scenarios",
     response_model=ScenarioDetailOut,

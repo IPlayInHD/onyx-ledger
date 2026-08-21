@@ -75,7 +75,14 @@ class ScenarioQueryService:
         except ScenarioSpecError as exc:
             raise Conflict(f"invalid_scenario_specification: {exc}") from exc
 
-        outcome = await ScenarioService(self.user_id).simulate(body.analysis_id, spec)
+        try:
+            outcome = await ScenarioService(self.user_id).simulate(
+                body.analysis_id, spec)
+        except ScenarioSpecError as exc:
+            # The contribution-room policy runs inside the service, where the
+            # governed dataset lives; its refusal is the same class of
+            # specification error and gets the same machine-readable 409.
+            raise Conflict(f"invalid_scenario_specification: {exc}") from exc
         return await self.detail(outcome.scenario_id)
 
     async def detail(self, scenario_id: uuid.UUID) -> ScenarioDetailOut:

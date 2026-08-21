@@ -22,6 +22,15 @@ from app.services.tax_engine.core.data import (
 Q = Decimal("0.01")
 
 
+class UnsupportedJurisdiction(ValueError):
+    """The dataset carries no tax law for the requested province/territory.
+
+    A ValueError on purpose: the engine core is pure and imports no
+    application exception types. The service boundary translates this into
+    its machine-readable validation error before anything is persisted.
+    """
+
+
 def _r(x: Decimal) -> Decimal:
     return Decimal(x).quantize(Q, rounding=ROUND_HALF_UP)
 
@@ -147,7 +156,16 @@ def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
     """
     data = dataset if dataset is not None else bootstrap_dataset(inp.year)
     f = data.federal
-    p = data.provinces.get(inp.province, data.provinces["ON"])
+    p = data.provinces.get(inp.province)
+    if p is None:
+        # Fail closed: computing another jurisdiction's tax and presenting it
+        # as this one's is a wrong answer, not a fallback. The service layer
+        # rejects unsupported codes before anything is persisted; this raise is
+        # the engine's own guarantee for any caller that skipped that check.
+        raise UnsupportedJurisdiction(
+            f"jurisdiction '{inp.province}' is not supported; supported: "
+            f"{sorted(data.provinces)}"
+        )
 
     # ---- Income ----
     taxable_cap_gains = inp.capital_gains * f.capital_gains_inclusion
@@ -239,7 +257,8 @@ def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
     # ---- Provincial tax ----
     prov_before = _bracket_tax(taxable_income, p.brackets)
     prov_credit_base = p.bpa + cpp + ei + inp.tuition + (min(spousal, p.bpa) if spousal > 0 else Decimal(0)) + medical_eligible
-    prov_nonref = p.credit_rate * prov_credit_base
+    prov_nonref = (p.credit_rate * prov_credit_base
+                   + _provincial_donation_credit(inp.donations, p))
     provincial_tax = _pos(prov_before - prov_nonref)
     surtax = _surtax(provincial_tax, p.surtax)
     provincial_tax += surtax
@@ -278,6 +297,19 @@ def compute(inp: TaxInput, dataset: TaxDataset | None = None) -> TaxResult:
         is_refund=refund_or_balance >= 0, marginal_rate=marginal, average_rate=average,
         line_items=line_items,
     )
+
+
+def _provincial_donation_credit(donations: Decimal, p: ProvincialData) -> Decimal:
+    """ON428 (5006-C) lines 47-49: the provincial credit on the federal
+    Schedule 9 partition — line 13 (first $200) at the low rate, line 14 (the
+    remainder) at the high rate. Provinces without registered donation
+    authority carry zero rates and get no credit, exactly as before.
+    """
+    if donations <= 0 or (p.donation_low_rate == 0 and p.donation_high_rate == 0):
+        return Decimal(0)
+    first = min(donations, Decimal(200)) * p.donation_low_rate
+    over = _pos(donations - Decimal(200))
+    return first + over * p.donation_high_rate
 
 
 def _donation_credit(donations: Decimal, taxable_income: Decimal,

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -73,8 +73,10 @@ from app.services.ioe.domain.scenario import (
     DERIVED_STATE_BEARING_VERSIONS,
     SCENARIO_SPEC_VERSION,
     SUPPORTED_SCENARIO_RESULT_SCHEMA_VERSIONS,
+    AssumptionRequest,
     FreshnessStatus,
     ScenarioSpec,
+    ScenarioSpecError,
     StaleReason,
     UnsupportedResultSchemaVersion,
     canonical_scenario_result,
@@ -99,6 +101,7 @@ from app.services.tax_engine.contracts import CONTRACT_VERSION
 from app.services.tax_engine.core import data as engine_data
 from app.services.tax_engine.core.data import TaxDataset
 from app.services.tax_engine.core.engine import compute
+from app.services.tax_engine.core.provider import TaxDataProvider
 from app.services.tax_engine.rules_service import RulesEvaluatorService
 from app.services.tax_engine.service import ENGINE_VERSION, TaxEngineService
 
@@ -224,6 +227,99 @@ class ScenarioService:
         self.user_id = user_id
 
     # ---------------------------------------------------------------- TX-1 ---
+    #: Shared-resource codes that mean REGISTERED-ACCOUNT contribution room —
+    #: the semantic CONTRIBUTION_ROOM_AVAILABLE states. Deliberately not every
+    #: shared_resource_code: DONATION_POOL and MEDICAL_POOL are annual claim
+    #: pools, not room a taxpayer holds.
+    _CONTRIBUTION_ROOM_RESOURCES = frozenset({"RRSP_ROOM", "FHSA_ROOM"})
+    _ROOM_ASSUMPTION_CODE = "CONTRIBUTION_ROOM_AVAILABLE"
+
+    async def _apply_contribution_room_policy(
+        self,
+        session: AsyncSession,
+        analysis_id: uuid.UUID,
+        spec: ScenarioSpec,
+    ) -> ScenarioSpec:
+        """Make contribution room an EXPLICIT sealed assumption, and refuse a
+        lever that exceeds it.
+
+        Room is never invented here. It comes from, in order:
+        1. an explicit CONTRIBUTION_ROOM_AVAILABLE assumption on the request —
+           the user's own statement;
+        2. for FHSA_ROOM only, the governed annual participation room from the
+           run's resolved dataset — the one default product rules define
+           (undeclared FHSA room defaults to the annual amount, exactly as the
+           optimization ledger already does);
+        3. otherwise the requested amount itself, attached as a
+           platform-default assumption — the scenario then SAYS it assumes
+           that much room exists instead of implying nothing.
+
+        A request above the resolved room is refused with the same
+        machine-readable specification error an unknown lever gets, because an
+        over-room scenario sealed as attainable is a wrong answer, not a
+        what-if.
+        """
+        requested: dict[str, Decimal] = {}
+        for lever in spec.levers:
+            lever_spec = lever_registry.get(lever.lever_code)
+            resource = lever_spec.shared_resource_code
+            if resource not in self._CONTRIBUTION_ROOM_RESOURCES:
+                continue
+            raw_amount = lever.parameters.get("amount")
+            if raw_amount is None:
+                continue
+            amount = Decimal(str(raw_amount))
+            requested[resource] = requested.get(resource, Decimal(0)) + amount
+        if not requested:
+            return spec
+
+        explicit = next(
+            (a for a in spec.assumptions
+             if a.assumption_code == self._ROOM_ASSUMPTION_CODE), None)
+
+        if explicit is not None and explicit.value_number is not None:
+            room_by_resource = dict.fromkeys(requested, explicit.value_number)
+            attach: AssumptionRequest | None = None
+        else:
+            # The FHSA governed default comes from the analysis' resolved
+            # dataset, so the assumption states the same annual room the
+            # optimization ledger would default to for this run's tax year.
+            analysis = await session.get(AnalysisRun, analysis_id)
+            if analysis is None or analysis.user_id != self.user_id:
+                raise NotFound("Analysis not found")
+            dataset = await TaxDataProvider(session).resolve(analysis.tax_year)
+            room_by_resource = {}
+            for resource, amount in requested.items():
+                if resource == "FHSA_ROOM":
+                    room_by_resource[resource] = dataset.federal.fhsa_annual
+                else:
+                    room_by_resource[resource] = amount
+            # One code, one assumption (the registry refuses duplicates): the
+            # sealed value is the binding room this policy actually used.
+            attach = AssumptionRequest(
+                assumption_code=self._ROOM_ASSUMPTION_CODE,
+                value_number=min(room_by_resource.values()),
+                materiality="high",
+                source="platform",
+                certainty=("statutory_known"
+                           if set(room_by_resource) == {"FHSA_ROOM"}
+                           else "platform_default"),
+                affects_eligibility=True,
+            )
+
+        for resource, amount in requested.items():
+            room = room_by_resource[resource]
+            if amount > room:
+                raise ScenarioSpecError(
+                    f"contribution lever requests {amount} against available "
+                    f"{resource} of {room}; declare "
+                    f"{self._ROOM_ASSUMPTION_CODE} if more room exists"
+                )
+
+        if attach is None:
+            return spec
+        return replace(spec, assumptions=spec.assumptions + (attach,))
+
     async def _pin_specification(
         self,
         session: AsyncSession,
@@ -506,6 +602,14 @@ class ScenarioService:
 
         # ---- TX-1: pin, resolve idempotency, create the header ----
         async with unit_of_work(user_id=self.user_id, actor_type="user") as session:
+            # Material-assumption policy BEFORE pinning: any contribution
+            # lever's available room becomes an explicit, sealed
+            # CONTRIBUTION_ROOM_AVAILABLE assumption, and a lever exceeding
+            # that room is refused rather than sealed as attainable. The spec
+            # hash covers assumptions, so the room this decision used is part
+            # of the scenario's identity.
+            spec = await self._apply_contribution_room_policy(
+                session, analysis_id, spec)
             try:
                 pinned = await self._pin_specification(
                     session, analysis_id, spec,

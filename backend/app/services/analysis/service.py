@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ValidationError
 from app.database.models import (
     AnalysisInputSnapshot,
     AnalysisLineItem,
@@ -35,6 +36,15 @@ class AnalysisService:
     async def run(self, user_id: uuid.UUID, tax_year: int) -> AnalysisRun:
         inp = await self.engine.build_input_from_live_sources(user_id, tax_year)
         dataset = await self.engine.resolve_dataset(tax_year)
+        if inp.province not in dataset.provinces:
+            # Fail closed BEFORE any row exists: no run, no snapshot, no sealed
+            # result may be produced under another jurisdiction's tax law. The
+            # supported set is read from the resolved dataset, not hardcoded.
+            raise ValidationError(
+                "unsupported_jurisdiction: tax calculation for province "
+                f"'{inp.province}' is not supported; supported jurisdictions: "
+                f"{', '.join(sorted(dataset.provinces))}"
+            )
         result = self.engine.run(inp, dataset)
         facts = self.engine.facts(inp, result)
 
