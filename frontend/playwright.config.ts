@@ -4,6 +4,12 @@ import { defineConfig, devices } from '@playwright/test'
    environment; `executablePath` is left to Playwright's own resolution. */
 export default defineConfig({
   testDir: './e2e',
+  /* Longer than Playwright's 30s default, on purpose. Authentication draws on
+     a per-source-address budget, and a persona suite signing in from one host
+     WILL be paced by it — that is the backend protecting itself, not a fault.
+     A test that waits out a throttle needs room to do so; at 30s the retry
+     logic could not survive even one pacing round and timed out instead. */
+  timeout: 90_000,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

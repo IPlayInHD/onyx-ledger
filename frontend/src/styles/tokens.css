@@ -117,10 +117,16 @@
   --c-surface-sunken: #f4f2ee; /* wells, table headers, code */
   --c-surface-inset: #efece6;
 
+  /* The text ladder is bounded by CONTRAST, not by taste. Every tier here
+     clears WCAG AA (4.5:1) against the DARKEST surface it can land on
+     (--c-surface-inset), because these tokens are used at 11–12px where AA
+     applies in full. An earlier, prettier set of greys measured 2.41–3.97:1
+     on sunken panels — quiet to a designer, unreadable to a real reader.
+     Hierarchy below is carried by weight, size and spacing instead. */
   --c-ink: #14171a;         /* primary text — near-black, not pure black */
-  --c-ink-secondary: #4a5157;
-  --c-ink-muted: #6d757c;
-  --c-ink-faint: #939aa1;
+  --c-ink-secondary: #4a5157;  /* 6.84:1 worst case */
+  --c-ink-muted: #585f64;      /* 5.50:1 worst case */
+  --c-ink-faint: #64696e;      /* 4.62:1 worst case — the quietest legal tier */
   --c-ink-inverse: #f7f6f3;
 
   --c-rule: #e2ded6;        /* hairline */
@@ -168,7 +174,9 @@
   --viz-4: #5b3a86;
   --viz-5: #1d5f66;
   --viz-grid: #e2ded6;
-  --viz-axis: #939aa1;
+  /* An axis is a meaningful graphical object, so it answers to 1.4.11 (3:1),
+     not to the text threshold. */
+  --viz-axis: #81878e;
 
   --skeleton-base: #eeebe5;
   --skeleton-sheen: #f7f5f1;
@@ -188,8 +196,8 @@
 
     --c-ink: #eceef0;
     --c-ink-secondary: #b6bcc2;
-    --c-ink-muted: #8d959c;
-    --c-ink-faint: #6b7378;
+    --c-ink-muted: #99a1a7;   /* 5.80:1 worst case */
+    --c-ink-faint: #899094;   /* 4.70:1 worst case */
     --c-ink-inverse: #14171a;
 
     --c-rule: #2a2f34;
@@ -247,8 +255,8 @@
   --c-surface-inset: #22262a;
   --c-ink: #eceef0;
   --c-ink-secondary: #b6bcc2;
-  --c-ink-muted: #8d959c;
-  --c-ink-faint: #6b7378;
+  --c-ink-muted: #99a1a7;   /* 5.80:1 worst case */
+  --c-ink-faint: #899094;   /* 4.70:1 worst case */
   --c-ink-inverse: #14171a;
   --c-rule: #2a2f34;
   --c-rule-strong: #3d444b;

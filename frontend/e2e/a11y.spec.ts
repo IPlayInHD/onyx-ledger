@@ -85,8 +85,17 @@ test('authenticated surfaces have no detectable accessibility violations', async
       .analyze()
 
     for (const violation of results.violations) {
+      // Name the elements, not just the rule. A failure that says "contrast is
+      // wrong somewhere on eight screens" costs an investigation; one that
+      // prints the selector and the measured ratio is a fix.
+      const nodes = violation.nodes
+        .map((node) => {
+          const summary = (node.failureSummary ?? '').replace(/\s+/g, ' ').trim()
+          return `      ${node.target.join(' ')} — ${summary}`
+        })
+        .join('\n')
       failures.push(
-        `${screen.name} (${screen.path}) — ${violation.id}: ${violation.help} [${violation.nodes.length} node(s)]`,
+        `${screen.name} (${screen.path}) — ${violation.id}: ${violation.help} [${violation.nodes.length} node(s)]\n${nodes}`,
       )
     }
   }

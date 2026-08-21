@@ -211,35 +211,64 @@ async function seedPersona(
 }
 
 /**
- * Sign in through the real form, waiting out the throttle if it fires.
+ * Drive a real auth form to the product, waiting out the throttle if it fires.
  *
  * Register, login AND refresh all draw on one per-source-address auth budget,
- * so a persona suite signing in from a single host will legitimately be paced.
+ * so a persona suite working from a single host will legitimately be paced.
  * Retrying after the stated wait is what a real client does; trimming the
  * persona set to dodge the limit would buy a green run by testing less.
+ *
+ * Sign-in and sign-up share this because they share the budget — the new-user
+ * journey was failing for exactly the reason the persona runs were, and one
+ * flow tolerating pacing while its twin did not was the bug, not the design.
  */
-async function signIn(page: Page, email: string) {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    await page.goto('/sign-in')
+async function submitAuthForm(
+  page: Page,
+  { path, email, button }: { path: string; email: string; button: RegExp },
+) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto(path)
     await page.getByLabel(/email/i).fill(email)
     await page.getByLabel(/password/i).fill(PASSWORD)
-    await page.getByRole('button', { name: /sign in/i }).click()
+    await page.getByRole('button', { name: button }).click()
 
-    const landed = await page
-      .waitForURL(/\/app/, { timeout: 15_000 })
-      .then(() => true)
-      .catch(() => false)
+    // Race the two real outcomes instead of waiting out the full navigation
+    // budget before looking. A refusal renders an alert within a moment, so
+    // sitting on a long URL wait spent the test's whole timeout learning
+    // something the page had already said. Each branch resolves rather than
+    // rejects, so the loser cannot surface as an unhandled rejection after the
+    // race has already settled.
+    const landed = await Promise.race([
+      page
+        .waitForURL(/\/app/, { timeout: 25_000 })
+        .then(() => true)
+        .catch(() => false),
+      page
+        .getByRole('alert')
+        .waitFor({ state: 'visible', timeout: 25_000 })
+        .then(() => false)
+        .catch(() => false),
+    ])
     if (landed) return
 
-    // Not signed in: either we were paced, or something is genuinely wrong.
+    // Not in: either we were paced, or something is genuinely wrong.
     const message = (await page.locator('body').innerText()).toLowerCase()
-    const throttled = /pacing|too many|try again in|rate/.test(message)
+    const throttled = /pacing|too many|try again in|rate limit/.test(message)
     if (!throttled) {
-      throw new Error(`sign-in did not reach the product: ${message.slice(0, 300)}`)
+      throw new Error(`${path} did not reach the product: ${message.slice(0, 300)}`)
     }
-    await new Promise((resolve) => setTimeout(resolve, 20_000))
+    // The pacing message states its own wait ("try again in about N seconds").
+    // Honouring what the service asked for is what a real client does, and it
+    // is usually far shorter than a fixed guess.
+    const stated = /try again in about (\d+) seconds?/.exec(message)?.[1]
+    const waitSeconds = Math.min(Number(stated ?? 20) + 2, 45)
+    await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1_000))
   }
-  throw new Error('sign-in never completed: still paced after five attempts')
+  throw new Error(`${path} never completed: still paced after three attempts`)
+}
+
+function signIn(page: Page, email: string) {
+  return submitAuthForm(page, { path: '/sign-in', email, button: /sign in/i })
 }
 
 test.describe('value parity: the screen shows the engine figure', () => {
@@ -284,14 +313,13 @@ test.describe('new user journey', () => {
   test('register, land in the product, and reach the trust surfaces', async ({ page }) => {
     const email = `e2e_new_${Date.now()}@test.ca`
 
-    await page.goto('/sign-up')
-    await page.getByLabel(/email/i).fill(email)
-    await page.getByLabel(/password/i).fill(PASSWORD)
-    await page.getByRole('button', { name: /create|sign up/i }).click()
-
     // Registration lands in onboarding, because a new account has no facts yet
     // and an empty position would be a meaningless first impression.
-    await page.waitForURL(/\/app/, { timeout: 20_000 })
+    await submitAuthForm(page, {
+      path: '/sign-up',
+      email,
+      button: /create|sign up/i,
+    })
     expect(page.url()).toMatch(/\/app/)
 
     await page.goto('/trust')
