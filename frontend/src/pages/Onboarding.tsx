@@ -54,13 +54,23 @@ interface Option {
   label: string
 }
 
-/** The provinces the tax engine has bracket and credit data for. Deliberately
- *  four, not thirteen. */
+/** The provinces Onyx will answer for.
+ *
+ * NOT simply "the provinces with a bracket table". The engine also carries
+ * Quebec brackets, and offering them would have been wrong: Quebec residents
+ * pay QPP rather than CPP and pay QPIP premiums, and the engine implements
+ * neither — a Quebec customer would have been shown a confident figure computed
+ * with the wrong payroll contributions entirely.
+ *
+ * Of the three below, only Ontario is backed by GOVERNED PUBLISHED brackets;
+ * Alberta and British Columbia are computed from the engine's own resident
+ * constants. That difference is recorded for the launch-scope decision rather
+ * than hidden behind a longer list.
+ */
 const PROVINCES: readonly Option[] = [
   { value: 'AB', label: 'Alberta' },
   { value: 'BC', label: 'British Columbia' },
   { value: 'ON', label: 'Ontario' },
-  { value: 'QC', label: 'Quebec' },
 ]
 
 const MARITAL_STATUSES: readonly Option[] = [
@@ -834,7 +844,7 @@ export default function Onboarding() {
                 </p>
 
                 <SelectField
-                  hint="Onyx supports Alberta, British Columbia, Ontario and Quebec today. The other provinces and the territories are not supported yet, so they are not offered rather than accepted and then failed."
+                  hint="Onyx supports Alberta, British Columbia and Ontario today. Quebec files a separate provincial return with its own pension and parental-insurance contributions, which Onyx does not calculate yet, so it is not offered rather than accepted and answered with a wrong figure."
                   id="province"
                   label="Province you file in"
                   onChange={(value) =>

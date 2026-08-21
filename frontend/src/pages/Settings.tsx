@@ -60,7 +60,6 @@ const PROVINCES: readonly Option[] = [
   { value: 'AB', label: 'Alberta' },
   { value: 'BC', label: 'British Columbia' },
   { value: 'ON', label: 'Ontario' },
-  { value: 'QC', label: 'Quebec' },
 ]
 
 const MARITAL_STATUSES: readonly Option[] = [
@@ -549,7 +548,7 @@ function TaxProfileSection() {
           ) : null}
 
           <SelectField
-            hint="Onyx supports Alberta, British Columbia, Ontario and Quebec today. The other provinces and the territories are not offered, rather than accepted and then refused."
+            hint="Onyx supports Alberta, British Columbia and Ontario today. Quebec files a separate provincial return with its own pension and parental-insurance contributions, which Onyx does not calculate yet, so it is not offered rather than accepted and answered with a wrong figure."
             id="province"
             label="Province you file in"
             onChange={(value) => change({ provinceCode: value })}
