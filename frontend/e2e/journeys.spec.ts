@@ -90,6 +90,37 @@ const PERSONAS: Persona[] = [
   },
 ]
 
+/**
+ * Post, honouring the backend's admission control.
+ *
+ * Authentication is deliberately rate-limited per identity AND per source
+ * address, and a whole persona suite signing up from one host is exactly the
+ * burst that limit exists to slow down. The harness therefore WAITS when it is
+ * told to rather than working around the control — a test that disabled the
+ * throttle would be testing a system nobody ships.
+ */
+async function postPaced(
+  api: APIRequestContext,
+  url: string,
+  options: { data: unknown; headers?: Record<string, string> },
+): Promise<import('@playwright/test').APIResponse> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const response = await api.post(url, options)
+    if (response.status() !== 429) return response
+    let waitSeconds = 2
+    try {
+      const body = (await response.json()) as { retry_after_seconds?: number }
+      if (typeof body.retry_after_seconds === 'number') {
+        waitSeconds = Math.min(body.retry_after_seconds, 20)
+      }
+    } catch {
+      /* no structured body: fall back to the default pause */
+    }
+    await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000))
+  }
+  return api.post(url, options)
+}
+
 interface SeededPersona {
   email: string
   analysis: {
@@ -120,12 +151,12 @@ async function seedPersona(
 ): Promise<SeededPersona> {
   const email = `e2e_${persona.key}_${Date.now()}_${Math.floor(Math.random() * 1e6)}@test.ca`
 
-  const registered = await api.post(`${API}/api/v1/auth/register`, {
+  const registered = await postPaced(api, `${API}/api/v1/auth/register`, {
     data: { email, password: PASSWORD },
   })
   expect(registered.status(), 'register').toBe(201)
 
-  const loggedIn = await api.post(`${API}/api/v1/auth/login`, {
+  const loggedIn = await postPaced(api, `${API}/api/v1/auth/login`, {
     data: { email, password: PASSWORD },
   })
   expect(loggedIn.status(), 'login').toBe(200)
@@ -189,7 +220,11 @@ async function signIn(page: Page, email: string) {
 
 test.describe('value parity: the screen shows the engine figure', () => {
   for (const persona of PERSONAS) {
-    test(`${persona.key} — ${persona.description}`, async ({ page, request }) => {
+    test(`${persona.key} — ${persona.description}`, async ({ page, request }, testInfo) => {
+      // One viewport: a figure does not change width-dependently, and the
+      // mobile project already proves the layout holds. Running the whole
+      // persona set twice would only spend the auth budget twice.
+      test.skip(testInfo.project.name !== 'desktop', 'desktop project only')
       const seeded = await seedPersona(request, persona)
 
       // The engine must have produced a figure for this to mean anything.
@@ -206,11 +241,16 @@ test.describe('value parity: the screen shows the engine figure', () => {
         timeout: 20_000,
       })
 
+      // A hard navigation reloads the SPA, which re-exchanges the refresh token
+      // before any protected screen renders. Auto-waiting assertions are
+      // required here: reading textContent immediately captures the deliberate
+      // "restoring your session" state instead of the page.
       await page.goto('/app/position')
-      const positionBody = (await page.textContent('body')) ?? ''
-      expect(positionBody, 'estimated tax on the position screen').toContain(expectedTax)
+      await expect(page.locator('body'), 'estimated tax on the position screen')
+        .toContainText(expectedTax, { timeout: 20_000 })
       if (seeded.analysis.taxable_income !== null) {
-        expect(positionBody, 'taxable income on the position screen').toContain(expectedTaxable)
+        await expect(page.locator('body'), 'taxable income on the position screen')
+          .toContainText(expectedTaxable, { timeout: 20_000 })
       }
     })
   }
@@ -244,19 +284,15 @@ test.describe('new user journey', () => {
     await page.getByLabel(/email/i).fill(seeded.email)
     await page.getByLabel(/password/i).fill('definitely-not-the-password')
     await page.getByRole('button', { name: /sign in/i }).click()
-    const realAccountMessage = await page
-      .locator('body')
-      .innerText()
-      .then((t) => t.toLowerCase())
+    await expect(page.getByRole('alert')).toBeVisible({ timeout: 20_000 })
+    const realAccountMessage = (await page.locator('body').innerText()).toLowerCase()
 
     await page.goto('/sign-in')
     await page.getByLabel(/email/i).fill(`nobody_${Date.now()}@test.ca`)
     await page.getByLabel(/password/i).fill('definitely-not-the-password')
     await page.getByRole('button', { name: /sign in/i }).click()
-    const unknownAccountMessage = await page
-      .locator('body')
-      .innerText()
-      .then((t) => t.toLowerCase())
+    await expect(page.getByRole('alert')).toBeVisible({ timeout: 20_000 })
+    const unknownAccountMessage = (await page.locator('body').innerText()).toLowerCase()
 
     // Neither response may hint that one address is registered and the other
     // is not: that difference is an account-enumeration oracle.

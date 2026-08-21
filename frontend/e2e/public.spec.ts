@@ -28,6 +28,16 @@ const FORBIDDEN_CLAIMS = [
   'maximize your refund',
 ]
 
+/** Read the page text only AFTER the route has actually rendered.
+ *
+ *  Routes are code-split, so a bare `textContent('body')` immediately after
+ *  `goto` can capture the Suspense fallback rather than the page. Waiting on the
+ *  route's own h1 is the signal that the chunk arrived and rendered. */
+async function settledBody(page: import('@playwright/test').Page): Promise<string> {
+  await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })
+  return (await page.textContent('body')) ?? ''
+}
+
 async function expectNoForbiddenClaims(text: string) {
   const lower = text.toLowerCase()
   for (const claim of FORBIDDEN_CLAIMS) {
@@ -41,7 +51,7 @@ test.describe('landing', () => {
     await expect(
       page.getByRole('heading', { name: /know where you stand before tax time/i }),
     ).toBeVisible()
-    await expectNoForbiddenClaims((await page.textContent('body')) ?? '')
+    await expectNoForbiddenClaims(await settledBody(page))
   })
 
   test('offers a way in and a way to read the terms first', async ({ page }) => {
@@ -64,6 +74,7 @@ test.describe('landing', () => {
   test('does not scroll horizontally on a small phone', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile', 'mobile viewport only')
     await page.goto('/')
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })
     const overflows = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
     )
@@ -93,7 +104,7 @@ test.describe('legal centre', () => {
       await page.goto(`/legal/${id}`)
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
-      const body = (await page.textContent('body')) ?? ''
+      const body = await settledBody(page)
       // Every document is a draft that has not had Canadian legal review, and
       // it must say so rather than looking finished.
       expect(body.toLowerCase()).toContain('draft')
@@ -105,7 +116,7 @@ test.describe('legal centre', () => {
 
   test('AI transparency states that AI does not determine tax results', async ({ page }) => {
     await page.goto('/legal/ai-transparency')
-    const body = ((await page.textContent('body')) ?? '').toLowerCase()
+    const body = (await settledBody(page)).toLowerCase()
     expect(body).toContain('does not determine')
     // The disclosure must not invent a legal obligation that nobody confirmed.
     expect(body).not.toMatch(/law requires|legally required to disclose|required by law/)
@@ -113,13 +124,14 @@ test.describe('legal centre', () => {
 
   test('tax disclaimer disclaims CRA affiliation and professional advice', async ({ page }) => {
     await page.goto('/legal/tax-disclaimer')
-    const body = ((await page.textContent('body')) ?? '').toLowerCase()
+    const body = (await settledBody(page)).toLowerCase()
     expect(body).toMatch(/not affiliated|not endorsed/)
     expect(body).toMatch(/not a substitute for/)
   })
 
   test('an unknown document does not crash', async ({ page }) => {
     await page.goto('/legal/does-not-exist')
+    // An auto-waiting assertion: the route chunk still has to arrive.
     await expect(page.locator('body')).toContainText(/not found|could not find|no such/i)
   })
 })
@@ -127,7 +139,7 @@ test.describe('legal centre', () => {
 test.describe('trust centre', () => {
   test('explains the authority separation in plain language', async ({ page }) => {
     await page.goto('/trust')
-    const body = ((await page.textContent('body')) ?? '').toLowerCase()
+    const body = (await settledBody(page)).toLowerCase()
     expect(body).toMatch(/deterministic/)
     expect(body).toMatch(/does not (calculate|determine)/)
     // Freshness and integrity are different questions and the Trust Centre is
@@ -157,6 +169,7 @@ test.describe('not found', () => {
 test.describe('security posture of the delivered bundle', () => {
   test('ships no source maps and no obvious secret material', async ({ page, request }) => {
     await page.goto('/')
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })
     const scripts = await page.evaluate(() =>
       Array.from(document.querySelectorAll('script[src]')).map(
         (s) => (s as HTMLScriptElement).src,

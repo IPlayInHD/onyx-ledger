@@ -6,3 +6,6 @@ playwright-report/
 test-results/
 *.local
 .vite/
+
+# TypeScript incremental build state — a local artifact, not source.
+*.tsbuildinfo
