@@ -18,7 +18,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ApiError, auth, request } from '@/api/client'
+import { ApiError, NetworkError, auth, request } from '@/api/client'
 import { authApi, type TokenPair } from '@/api/endpoints'
 
 export interface SessionUser {
@@ -74,20 +74,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setStatus('anonymous')
         return
       }
-      try {
-        const tokens = await request<TokenPair>('/auth/refresh', {
-          method: 'POST',
-          body: { refresh_token: refreshToken },
-          anonymous: true,
-          skipAuthRefresh: true,
-        })
-        adopt(tokens)
-        const me = await authApi.me()
-        if (cancelled) return
-        setUser(me)
-        setStatus('authenticated')
-      } catch {
-        if (!cancelled) drop()
+
+      // Two attempts, because `/auth/refresh` shares the platform's
+      // authentication budget: reloading the page while that budget is spent
+      // answers 429, and a customer must not be signed out because the service
+      // asked them to wait a moment.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const tokens = await request<TokenPair>('/auth/refresh', {
+            method: 'POST',
+            body: { refresh_token: auth.getRefreshToken() ?? refreshToken },
+            anonymous: true,
+            skipAuthRefresh: true,
+          })
+          adopt(tokens)
+          const me = await authApi.me()
+          if (cancelled) return
+          setUser(me)
+          setStatus('authenticated')
+          return
+        } catch (error) {
+          const transient =
+            error instanceof NetworkError ||
+            (error instanceof ApiError && (error.isThrottled || error.status >= 500))
+
+          if (!transient) {
+            // The credential itself was refused. This session is over.
+            if (!cancelled) drop()
+            return
+          }
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 2_000))
+            continue
+          }
+          // Still could not reach a verdict. Go to the signed-out view WITHOUT
+          // destroying the refresh token: nothing has told us it is invalid,
+          // and keeping it lets the next attempt succeed.
+          if (!cancelled) {
+            setUser(null)
+            setStatus('anonymous')
+          }
+        }
       }
     }
 

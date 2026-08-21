@@ -186,6 +186,61 @@ describe('session refresh', () => {
     expect(auth.getRefreshToken()).toBeNull()
   })
 
+  it('keeps the session when the refresh is THROTTLED rather than rejected', async () => {
+    // The regression this pins: /auth/refresh shares the platform's auth
+    // budget, so reloading during a burst answers 429. Treating that as a
+    // revoked session destroyed a perfectly good credential and signed the
+    // customer out because of their own traffic — found by an E2E persona run.
+    auth.setAccessToken('expired')
+    auth.setRefreshToken('still-valid')
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+        // both refresh attempts are paced
+        .mockResolvedValue(jsonResponse({ detail: 'slow down' }, 429)),
+    )
+
+    await expect(request('/users/me')).rejects.toBeInstanceOf(ApiError)
+    expect(auth.getRefreshToken()).toBe('still-valid')
+  })
+
+  it('keeps the session when the refresh hits a server error', async () => {
+    auth.setAccessToken('expired')
+    auth.setRefreshToken('still-valid')
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+        .mockResolvedValue(jsonResponse({ detail: 'boom' }, 503)),
+    )
+
+    await expect(request('/users/me')).rejects.toBeInstanceOf(ApiError)
+    expect(auth.getRefreshToken()).toBe('still-valid')
+  })
+
+  it('still ends the session when the refresh token is genuinely refused', async () => {
+    // The negative control: the fix must not make an invalid credential
+    // immortal. A 401 on refresh is a real verdict and ends the session.
+    auth.setAccessToken('expired')
+    auth.setRefreshToken('revoked')
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+        .mockResolvedValueOnce(jsonResponse({ detail: 'revoked' }, 401)),
+    )
+
+    await expect(request('/users/me')).rejects.toBeInstanceOf(ApiError)
+    expect(auth.getRefreshToken()).toBeNull()
+  })
+
   it('does not attempt a refresh when there is no refresh token', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ detail: 'nope' }, 401))
     vi.stubGlobal('fetch', fetchMock)

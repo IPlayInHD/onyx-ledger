@@ -193,49 +193,77 @@ async function parseError(response: Response): Promise<ApiError> {
   })
 }
 
-let refreshInFlight: Promise<boolean> | null = null
+let refreshInFlight: Promise<RefreshOutcome> | null = null
+
+/** What a refresh attempt actually established.
+ *
+ *  `rejected` and `unavailable` are deliberately different outcomes. Only a
+ *  rejection means the credential is finished; everything else means we simply
+ *  do not know yet, and discarding a good refresh token because the server was
+ *  busy would sign a customer out for no reason. */
+export type RefreshOutcome = 'refreshed' | 'rejected' | 'unavailable'
 
 /** Exchange the refresh token for a new access token. Concurrent callers share
  *  one in-flight attempt: a page that fires six queries at once must not spend
  *  six single-use refresh tokens and invalidate its own session (the backend
  *  treats refresh-token reuse as an attack and revokes the family). */
-async function refreshSession(): Promise<boolean> {
+async function refreshSession(): Promise<RefreshOutcome> {
   if (refreshInFlight) return refreshInFlight
   const token = auth.getRefreshToken()
-  if (!token) return false
+  if (!token) return 'rejected'
 
-  refreshInFlight = (async () => {
+  refreshInFlight = (async (): Promise<RefreshOutcome> => {
     try {
       const response = await fetch(buildUrl('/auth/refresh'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ refresh_token: token }),
       })
+
       if (!response.ok) {
+        // A THROTTLE IS NOT A REJECTION. `/auth/refresh` shares the platform's
+        // authentication budget, so a customer who reloads while that budget is
+        // spent gets a 429 here — and treating it like a revoked session would
+        // destroy a perfectly good credential and sign them out over a burst of
+        // their own traffic. The same reasoning covers a 5xx and a dropped
+        // connection: we learned nothing about the token, so we keep it.
+        if (response.status === 429 || response.status >= 500) return 'unavailable'
         auth.clear()
-        return false
+        return 'rejected'
       }
+
       const payload = (await response.json()) as {
         access_token?: string
         refresh_token?: string
       }
       if (!payload.access_token) {
         auth.clear()
-        return false
+        return 'rejected'
       }
       auth.setAccessToken(payload.access_token)
       // Rotation: the backend issues a NEW refresh token and single-uses the
       // old one. Storing the new one is what keeps the next refresh working.
       if (payload.refresh_token) auth.setRefreshToken(payload.refresh_token)
-      return true
+      return 'refreshed'
     } catch {
-      return false
+      // Transport failure: the request may never have reached the server.
+      return 'unavailable'
     } finally {
       refreshInFlight = null
     }
   })()
 
   return refreshInFlight
+}
+
+/** Refresh once, and if the server was merely busy, wait the stated pause and
+ *  try again. Two attempts, because the point is to survive a brief throttle,
+ *  not to hammer a limiter that is asking for quiet. */
+export async function refreshSessionWithBackoff(): Promise<RefreshOutcome> {
+  const first = await refreshSession()
+  if (first !== 'unavailable') return first
+  await new Promise((resolve) => setTimeout(resolve, 2_000))
+  return refreshSession()
 }
 
 export async function request<T>(
@@ -270,12 +298,18 @@ export async function request<T>(
   }
 
   if (response.status === 401 && !skipAuthRefresh && !anonymous) {
-    const refreshed = await refreshSession()
-    if (refreshed) {
+    const outcome = await refreshSessionWithBackoff()
+    if (outcome === 'refreshed') {
       return request<T>(path, { ...options, skipAuthRefresh: true })
     }
-    auth.clear()
-    onUnauthenticated?.()
+    // Only a REJECTED credential ends the session. If the refresh could not be
+    // completed — throttled, server error, connection dropped — the customer
+    // keeps their session and sees an ordinary retryable failure instead of
+    // being silently signed out by someone else's traffic spike.
+    if (outcome === 'rejected') {
+      auth.clear()
+      onUnauthenticated?.()
+    }
     throw await parseError(response)
   }
 
