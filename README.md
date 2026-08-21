@@ -1,116 +1,93 @@
 # Onyx Ledger
 
-**An AI-assisted Canadian tax audit platform.** Onyx Ledger reads a taxpayer's
-documents, computes their full federal + provincial position, scores their **Tax
-Health**, and shows them — in plain language, with statute citations — how to
-legally pay less. *Powered by ONYX Intelligence.*
+**See your tax position. See what matters. See what changes if you act.**
+
+Onyx Ledger is a Canadian tax intelligence product: it computes a taxpayer's
+federal and provincial position from facts they provide, shows what the governed
+rules found, and models what a single decision would change — with the
+provenance of every figure on screen.
 
 > Educational estimates only. Onyx Ledger does not file returns and is not
 > affiliated with or endorsed by the Canada Revenue Agency.
 
----
+## One authority
 
-## What's in this repo
+Every customer-facing figure comes from the **certified Python/FastAPI backend**
+in `backend/`. Its calculations are deterministic, versioned, replayable and
+gated; results are sealed and can be re-derived. The frontend displays those
+figures and never computes a tax number of its own.
+
+That constraint is the product. Two engines cannot both be right, and nothing
+reconciles them.
+
+## Repository layout
 
 ```
 onyx-ledger/
-├── netlify.toml            Netlify deploy config (serverless API + static frontend)
-├── NETLIFY.md              Step-by-step deployment guide
-├── static-site/            Zero-backend build — the whole app runs in the browser
-│                           (drag-and-drop upload to any static host)
-└── server/                 The Node app: tax engine + API + frontend
-    ├── engine/             The tax engine (pure, tested)
-    │   ├── taxData.js       2024 + 2025 federal & provincial constants (data)
-    │   ├── taxEngine.js     T1-style computation (tax, credits, brackets, cash-flow)
-    │   ├── extract.js       Document scanner (T4/T5/T2202/… + OCR-text)
-    │   ├── scoring.js       0–100 Tax Health score
-    │   ├── advisory.js      Opportunity rules engine (cited strategies)
-    │   ├── checklist.js     Personalized "documents to add"
-    │   ├── planner.js       RRSP optimizer, benefit estimates, tax calendar
-    │   └── index.js         runAudit() + simulate() orchestrators
-    ├── public/             Frontend: landing, auth, dashboard, document guide
-    ├── scripts/            Reproducible static-site build
-    ├── test/               Engine test suite (139 assertions)
-    ├── server.js           Express API (accounts, docs, audit, simulate, export)
-    └── store.js            Persistence (JSON file locally / Netlify Blobs in prod)
+├── backend/     The certified FastAPI application — THE tax authority
+│   ├── app/         api → services → domain, with database/integration adapters
+│   ├── workers/     Celery workers and the Beat schedule
+│   ├── db/          Validated schema, RLS policies, roles
+│   └── scripts/     release_gate.sh and the other gates CI mirrors
+├── frontend/    The certified React/TypeScript customer application
+│   ├── src/         Screens, the one API client, the design system
+│   └── e2e/         Browser journeys against a real backend
+├── docs/        Architecture, operations and privacy specifications
+└── legacy/      ARCHIVED prototypes — never deployed. See legacy/README.md
 ```
 
-## Two ways to run it
+## Launch scope
 
-**1. Static (no backend)** — the engine is pure JavaScript, so `static-site/`
-runs the entire product in the browser, with accounts and audits saved in
-`localStorage`. Upload those files to any static host, or open `index.html`
-locally. Rebuild with:
+**Federal + Ontario.** Those are the jurisdictions with governed published
+brackets behind them. Alberta and British Columbia are computed from constants
+resident in the engine rather than published knowledge, and Quebec needs QPP and
+QPIP handling the engine does not implement — so neither is offered to
+customers. The backend owns that list; the frontend asks it rather than keeping
+its own.
+
+## Running it
+
+**Backend** — Python 3.11 only, installed from the hash-pinned lock:
 
 ```bash
-cd server && npm run build:static
+cd backend
+python -m venv .venv && . .venv/bin/activate
+pip install --require-hashes -r requirements-dev.lock.txt
+pip install --no-deps -e .
+PYTHONPATH=. uvicorn app.main:app --reload
 ```
 
-**2. Full server** — real accounts (JWT + bcrypt), an Express API, and
-persistence (Netlify Blobs in production, a JSON file locally).
+**Frontend** — Node 20, installed from the lockfile:
 
 ```bash
-cd server
-npm install
-npm test        # 139 engine assertions
-npm start       # http://localhost:4000
+cd frontend
+npm ci
+npm run dev
 ```
 
-Deploy the full version to Netlify — see **[NETLIFY.md](NETLIFY.md)**.
+**Everything at once**, including PostgreSQL, Redis and object storage:
 
-## Features
+```bash
+cd backend/deploy && docker compose up
+```
 
-- **Tax engine** — 2024 & 2025 tax years, federal + all 13 provinces/territories
-  (brackets, credits, CPP/EI, dividends, capital gains, Ontario surtax + health
-  premium, Quebec abatement).
-- **Document scanner** — reads structured entries or OCR/PDF text for T4, T4A,
-  T5, T3, T2202, RRSP, FHSA, donations, medical, T5008, T4E, child-care, with a
-  pluggable OCR provider interface.
-- **Tax Health score** and a personalized **document checklist**.
-- **Advisory engine** — legal tax-reduction opportunities, each with an estimated
-  dollar impact and a statute citation.
-- **Live What-if planner** — sliders that recompute refund/marginal/bracket in
-  real time. **RRSP optimizer** that solves the contribution to erase owing or
-  drop a bracket. **Estimated benefits** (GST/HST, Canada Carbon Rebate, CCB).
-  **Tax calendar** with live deadline countdowns.
-- **Trust & control** — "how this was calculated" transparency, encryption-forward
-  Security Centre, a full CRA document guide, and data controls (export / delete).
+## Gates
 
-## Accuracy & scope
+Nothing is certified by local tests alone.
 
-Tax constants live in `engine/taxData.js`, separate from the calculation logic,
-and are legislated **annually** — verify them against CRA and provincial sources.
-2025 **federal** figures are final; 2025 **provincial** figures are indexed
-estimates pending verification. The engine models the mainstream T1 calculation
-and documents its simplifications in-source. It is an **auditor-grade estimate**,
-not a filed return. Image OCR requires wiring an OCR provider into
-`engine/extract.js`.
+```bash
+cd backend && ./scripts/release_gate.sh --full   # the full gate (hours)
+cd frontend && npm run lint && npm run typecheck && npx vitest run && npm run build
+cd frontend && ./scripts/e2e.sh                  # browser journeys, real backend
+```
 
-## Verification & assurance
+CI runs the backend quality gate and the frontend quality gate on every push,
+and both are blocking.
 
-Trust is built through transparency and repeatable checks, not claims:
+## Deployment
 
-- **Reference backtests** (`test/reference.test.js`) validate the engine against
-  hand-derived expected federal/provincial/total tax (Ontario $60k, Alberta $50k,
-  BC $100k) — the arithmetic is documented in the public **Methodology** page.
-- **`GET /api/verify`** re-runs those reference cases live, so anyone can confirm
-  the deployed engine still matches. The dashboard shows the result as a badge
-  ("✓ engine v1.0.0 · 9/9 reference checks pass") and the methodology page lists
-  each check.
-- Every audit is stamped with the **engine version + data status** (2024 verified;
-  2025 provincial preliminary), shown in "How this was calculated".
-- **`/methodology.html`** documents the full calculation, the source of every
-  constant, and the honest limitations.
+- `docs/operations/production-architecture.md` — the production design
+- `NETLIFY.md` — how the static frontend is published
 
-> **Not CRA-certified.** Software that *files* returns must pass the CRA's NETFILE
-> certification. This engine produces educational estimates; the verification
-> layer proves it is transparent, consistent, and drift-free — not that it is a
-> substitute for certified filing software or a professional.
-
-## Testing
-
-`npm test` runs 139 assertions: hand-computed reference cases, the Quebec
-abatement, RRSP marginal savings, the full document + audit pipeline, 2025 tax
-year, simulate/optimizer/benefits/calendar, and property tests (monotonicity,
-marginal ≥ average, no negative tax) across provinces and income levels. The
-frontend is verified end-to-end in a headless browser.
+The archived prototype under `legacy/` must never be deployed; a test in
+`backend/tests/security/test_legacy_engine_not_deployable.py` enforces it.

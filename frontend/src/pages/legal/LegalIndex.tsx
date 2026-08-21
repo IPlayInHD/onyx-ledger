@@ -34,7 +34,7 @@ function DocumentEntry({ doc }: { doc: LegalDoc }) {
         <Link to={`/legal/${doc.id}`}>{doc.title}</Link>
       </h3>
       <p className="feature__body">{doc.summary}</p>
-      <p className="text-xs text-muted" style={{ marginTop: 'var(--space-3)' }}>
+      <p className="text-xs text-muted mt-3">
         Version {doc.version} · Last updated {isoDate(doc.lastUpdated)}
       </p>
     </div>
@@ -88,8 +88,7 @@ export default function LegalIndex() {
 
           <section aria-labelledby="documents-heading">
             <div
-              className="stack stack-2"
-              style={{ marginBottom: 'var(--space-6)' }}
+              className="stack stack-2 mb-6"
             >
               <span className="eyebrow">Published documents</span>
               <h2 className="section-title" id="documents-heading">
@@ -105,9 +104,8 @@ export default function LegalIndex() {
           </section>
 
           <section
-            className="panel panel--sunken"
+            className="panel panel--sunken mt-9"
             aria-labelledby="versioning-heading"
-            style={{ marginTop: 'var(--space-9)' }}
           >
             <div className="panel__header">
               <h2 className="section-title" id="versioning-heading">

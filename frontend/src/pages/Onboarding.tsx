@@ -234,12 +234,12 @@ function StepErrorSummary({
   if (problems.length === 0 && !described) return null
   return (
     <div className="error-summary" ref={summaryRef} role="alert" tabIndex={-1}>
-      <h3 className="text-sm" style={{ marginBottom: 'var(--space-2)' }}>
+      <h3 className="text-sm mb-2">
         {described ? described.title : 'Check what you entered'}
       </h3>
       {described ? <p className="text-sm text-secondary">{described.body}</p> : null}
       {problems.length > 0 ? (
-        <ul style={{ paddingLeft: 'var(--space-4)' }}>
+        <ul className="pl-4">
           {problems.map((problem) => (
             <li className="text-sm" key={problem.field}>
               <a href={`#${problem.field}`}>{problem.message}</a>
@@ -411,21 +411,15 @@ function CheckboxRow({
 }) {
   return (
     <label
-      className="row row-3"
+      className="row row-3 py-3 items-start"
       htmlFor={id}
-      style={{ padding: 'var(--space-3) 0', alignItems: 'flex-start' }}
     >
       <input
         aria-describedby={hint ? `${id}-hint` : undefined}
         checked={checked}
+        className="field__check"
         id={id}
         onChange={(event) => onChange(event.target.checked)}
-        style={{
-          width: 'var(--space-5)',
-          height: 'var(--space-5)',
-          flexShrink: 0,
-          marginTop: 'var(--space-1)',
-        }}
         type="checkbox"
       />
       <span className="stack stack-2">
@@ -446,7 +440,7 @@ function StatedByYouNote() {
   return (
     <div className="row row-3 wrap">
       <Provenance kind="user" />
-      <span className="text-xs text-muted" style={{ maxWidth: '60ch' }}>
+      <span className="text-xs text-muted measure-60">
         Onyx records this exactly as you state it. Nothing here is checked
         against the CRA, and you can change it later.
       </span>
@@ -838,7 +832,7 @@ export default function Onboarding() {
             {/* ============================================ 1. situation == */}
             {step === 0 ? (
               <form className="stack stack-5" noValidate onSubmit={submitSituation}>
-                <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+                <p className="text-sm text-secondary measure-62">
                   Where you file and who you file as decide which brackets,
                   credits and provincial rules apply to everything that follows.
                 </p>
@@ -897,7 +891,7 @@ export default function Onboarding() {
                     including the disability one, only widen or narrow which
                     rules are examined.
                   </p>
-                  <p style={{ marginTop: 'var(--space-2)' }}>
+                  <p className="mt-2">
                     All of it stays in your Onyx account, is used to produce your
                     own results, and is never sold or used to advertise to you.
                   </p>
@@ -919,7 +913,7 @@ export default function Onboarding() {
             {step === 1 ? (
               <div className="stack stack-6">
                 <form className="stack stack-5" noValidate onSubmit={submitIncome}>
-                  <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+                  <p className="text-sm text-secondary measure-62">
                     Add each source of income you had in {taxYear}. Add as many
                     as you need — one row per slip or source keeps the later
                     breakdown readable.
@@ -964,7 +958,7 @@ export default function Onboarding() {
                       the marginal rate and every credit that phases out are
                       decided by it. Without it Onyx has nothing to calculate.
                     </p>
-                    <p style={{ marginTop: 'var(--space-2)' }}>
+                    <p className="mt-2">
                       Amounts stay in your account and are used to produce your
                       own position. Onyx does not file anything on your behalf.
                     </p>
@@ -1027,7 +1021,7 @@ export default function Onboarding() {
             {step === 2 ? (
               <div className="stack stack-6">
                 <form className="stack stack-5" noValidate onSubmit={submitRegistered}>
-                  <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+                  <p className="text-sm text-secondary measure-62">
                     This step is optional. Record contributions you have{' '}
                     <strong>already made</strong> in {taxYear} — money that is in
                     the account now. Contributions you are only thinking about
@@ -1078,7 +1072,7 @@ export default function Onboarding() {
                       CRA account: if you do not state it, no verified room
                       figure exists.
                     </p>
-                    <p style={{ marginTop: 'var(--space-2)' }}>
+                    <p className="mt-2">
                       These figures stay in your Onyx account and are not shared
                       with your financial institution or the CRA.
                     </p>
@@ -1163,7 +1157,7 @@ export default function Onboarding() {
             {step === 3 ? (
               <div className="stack stack-6">
                 <form className="stack stack-5" noValidate onSubmit={submitClaim}>
-                  <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+                  <p className="text-sm text-secondary measure-62">
                     This step is optional. Record amounts you paid in {taxYear}{' '}
                     that may reduce what you owe. Add one row per kind; you can
                     add several.
@@ -1210,7 +1204,7 @@ export default function Onboarding() {
                       is governed by its own rules and thresholds. Onyx needs
                       the amounts before those rules can be applied to you.
                     </p>
-                    <p style={{ marginTop: 'var(--space-2)' }}>
+                    <p className="mt-2">
                       Medical amounts are health-related information. They stay
                       in your Onyx account, are used only for your own tax
                       results, and are never sold or used to advertise to you.
@@ -1273,7 +1267,7 @@ export default function Onboarding() {
             {/* =============================================== 5. review == */}
             {step === 4 ? (
               <div className="stack stack-6">
-                <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+                <p className="text-sm text-secondary measure-62">
                   This is what Onyx has on file for {taxYear}. Running the
                   analysis produces your estimated position from these facts and
                   the governed tax data for the year. Nothing is filed, and you
@@ -1287,19 +1281,19 @@ export default function Onboarding() {
                       <dl className="figrow figrow--3">
                         <div className="figrow__cell">
                           <dt className="figrow__label">Province</dt>
-                          <dd className="figure figure--sm" style={{ margin: 0 }}>
+                          <dd className="figure figure--sm m-0">
                             {labelFor(PROVINCES, record.province_code)}
                           </dd>
                         </div>
                         <div className="figrow__cell">
                           <dt className="figrow__label">Marital status</dt>
-                          <dd className="figure figure--sm" style={{ margin: 0 }}>
+                          <dd className="figure figure--sm m-0">
                             {labelFor(MARITAL_STATUSES, record.marital_status)}
                           </dd>
                         </div>
                         <div className="figrow__cell">
                           <dt className="figrow__label">Also recorded</dt>
-                          <dd className="text-sm text-secondary" style={{ margin: 0 }}>
+                          <dd className="text-sm text-secondary m-0">
                             {[
                               record.is_self_employed ? 'Self-employed' : null,
                               record.is_student ? 'Student' : null,

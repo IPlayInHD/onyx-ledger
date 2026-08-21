@@ -100,9 +100,8 @@ function OtherDocuments({ currentId }: { currentId: string }) {
 
   return (
     <nav
-      className="no-print"
+      className="no-print mt-9 measure"
       aria-label="Other policy documents"
-      style={{ marginTop: 'var(--space-9)', maxWidth: 'var(--measure)' }}
     >
       <div className="stack stack-3">
         <span className="eyebrow">Other policy documents</span>
@@ -132,7 +131,7 @@ function DocumentNotFound() {
         document Onyx Ledger publishes, each with its version and the date it
         last changed.
       </p>
-      <p style={{ marginTop: 'var(--space-5)' }}>
+      <p className="mt-5">
         <Link className="btn btn--primary" to="/legal">
           See all policy documents
         </Link>

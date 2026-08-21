@@ -144,7 +144,7 @@ export function SiteFooter() {
         <div className="sitefooter__grid">
           <div className="stack stack-3">
             <Wordmark />
-            <p className="text-sm text-secondary" style={{ maxWidth: '38ch' }}>
+            <p className="text-sm text-secondary measure-38">
               Understand your tax position, see what a decision would change, and
               keep the evidence behind it organised.
             </p>

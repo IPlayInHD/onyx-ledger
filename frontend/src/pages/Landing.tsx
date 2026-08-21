@@ -129,7 +129,7 @@ function FeatureBlock({ feature }: { feature: Feature }) {
       <h3 className="feature__title">{feature.title}</h3>
       <p className="feature__body">{feature.body}</p>
       {feature.link ? (
-        <p className="feature__body" style={{ marginTop: 'var(--space-3)' }}>
+        <p className="feature__body mt-3">
           <Link to={feature.link.to}>{feature.link.label}</Link>
         </p>
       ) : null}
@@ -147,7 +147,7 @@ function SectionHead({
   id: string
 }) {
   return (
-    <div className="stack stack-2" style={{ marginBottom: 'var(--space-6)' }}>
+    <div className="stack stack-2 mb-6">
       <span className="eyebrow">{eyebrow}</span>
       <h2 className="section-title" id={id}>
         {title}
@@ -203,8 +203,7 @@ export default function Landing() {
             {/* The boundary of the product, stated where it cannot be missed
                 rather than left to the footer. */}
             <p
-              className="text-sm text-muted"
-              style={{ marginTop: 'var(--space-6)', maxWidth: '64ch' }}
+              className="text-sm text-muted mt-6 measure-64"
             >
               Onyx Ledger estimates and explains Canadian federal and supported
               provincial tax for the {years} tax years. It does not file
@@ -213,7 +212,7 @@ export default function Landing() {
             </p>
           </section>
 
-          <div className="stack" style={{ gap: 'var(--space-9)' }}>
+          <div className="stack gap-9">
             {/* -------------------------------------------- what it does */}
             <section aria-labelledby="surfaces-heading">
               <SectionHead
@@ -250,7 +249,7 @@ export default function Landing() {
                 </h2>
               </div>
               <div className="panel__body stack stack-5">
-                <p className="text-sm text-secondary" style={{ maxWidth: '64ch' }}>
+                <p className="text-sm text-secondary measure-64">
                   Onyx marks each statement with its origin, using the same five
                   labels on every screen. The distinction between a calculation,
                   a published rule and an assumption nobody has confirmed is the
@@ -299,7 +298,7 @@ export default function Landing() {
                 <h2 className="section-title" id="start-heading">
                   Start with the year in front of you
                 </h2>
-                <p className="text-secondary" style={{ maxWidth: '62ch' }}>
+                <p className="text-secondary measure-62">
                   Create an account, tell Onyx what it needs for {years}, and
                   read your position. If you would rather look before you
                   decide, the Trust Centre and the policies are open without an

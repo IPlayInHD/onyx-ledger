@@ -304,6 +304,12 @@ th.numeric {
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* -------------------------------------------------------------- skeleton -- */
+/* The three shapes a loading placeholder takes. Sized here rather than by an
+   inline style attribute — see Skeleton in components/states.tsx. */
+.skeleton--title      { display: block; width: 45%; height: 1.75rem; }
+.skeleton--line       { display: block; width: 80%; height: 1rem; }
+.skeleton--line-short { display: block; width: 65%; height: 1rem; }
+
 .skeleton {
   background: linear-gradient(
     90deg,
@@ -352,4 +358,81 @@ th.numeric {
   .print-only { display: block; }
   body { background: #fff; color: #000; }
   .panel { border-color: #999; }
+}
+
+/* =========================================================================
+   LAYOUT UTILITIES — the reason this app needs no inline styles
+   =========================================================================
+   Every one of these replaced a `style={{ ... }}` attribute. That is not a
+   tidiness preference: a Content-Security-Policy cannot forbid inline styles
+   while the application itself depends on them, and `style-src 'unsafe-inline'`
+   is the half of CSP most often surrendered without argument. Surrendering it
+   is what makes CSS-based exfiltration and injected-style defacement possible.
+
+   With these classes the shipped policy is `style-src 'self'` — no
+   'unsafe-inline', no hashes, no nonces to manage. A test asserts the source
+   stays free of inline styles so the policy cannot quietly become a lie.
+
+   Values come from the space scale and the reading measure, never from
+   arbitrary numbers.
+   ========================================================================= */
+
+/* ---- reading measure: how long a line may get before it is tiring ---- */
+.measure    { max-width: var(--measure); }   /* 68ch — the default */
+.measure-62 { max-width: 62ch; }
+.measure-64 { max-width: 64ch; }
+.measure-60 { max-width: 60ch; }
+.measure-58 { max-width: 58ch; }
+.measure-46 { max-width: 46ch; }
+.measure-38 { max-width: 38ch; }
+.measure-sm { max-width: 24rem; }            /* a form column, not prose */
+
+/* ---- margin ---- */
+.mt-1 { margin-top: var(--space-1); }
+.mt-2 { margin-top: var(--space-2); }
+.mt-3 { margin-top: var(--space-3); }
+.mt-4 { margin-top: var(--space-4); }
+.mt-5 { margin-top: var(--space-5); }
+.mt-6 { margin-top: var(--space-6); }
+.mt-9 { margin-top: var(--space-9); }
+.mb-2 { margin-bottom: var(--space-2); }
+.mb-5 { margin-bottom: var(--space-5); }
+.mb-6 { margin-bottom: var(--space-6); }
+.m-0  { margin: 0; }
+.mx-auto { margin-inline: auto; }
+
+/* ---- padding ---- */
+.pl-4 { padding-left: var(--space-4); }
+.pl-5 { padding-left: var(--space-5); }
+.pr-3 { padding-right: var(--space-3); }
+.py-3 { padding-block: var(--space-3); }
+.py-9 { padding-block: var(--space-9); }
+
+/* ---- flex alignment ---- */
+.items-start { align-items: flex-start; }
+.items-end   { align-items: flex-end; }
+.gap-9       { gap: var(--space-9); }
+
+/* ---- a touch target that stays 44px even when its content is short ---- */
+.min-h-touch { min-height: 2.75rem; }
+
+/* A fixed square, used for the small step markers in onboarding and settings. */
+.w-5 { width: var(--space-5); }
+.h-5 { height: var(--space-5); }
+
+/* A checkbox that keeps its size in a flex row and aligns with the first line
+   of its label. Was four inline declarations repeated in two files. */
+.field__check {
+  width: var(--space-5);
+  height: var(--space-5);
+  flex-shrink: 0;
+  margin-top: var(--space-1);
+}
+
+/* The same fixed control size without the first-line offset, for a radio whose
+   label is a single line. */
+.field__control {
+  width: var(--space-5);
+  height: var(--space-5);
+  flex-shrink: 0;
 }

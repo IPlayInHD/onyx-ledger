@@ -97,12 +97,12 @@ function ErrorSummary({
   if (problems.length === 0 && !described) return null
   return (
     <div className="error-summary" ref={summaryRef} role="alert" tabIndex={-1}>
-      <h3 className="text-sm" style={{ marginBottom: 'var(--space-2)' }}>
+      <h3 className="text-sm mb-2">
         {described ? described.title : title}
       </h3>
       {described ? <p className="text-sm text-secondary">{described.body}</p> : null}
       {problems.length > 0 ? (
-        <ul style={{ paddingLeft: 'var(--space-4)' }}>
+        <ul className="pl-4">
           {problems.map((problem) => (
             <li className="text-sm" key={problem.field}>
               <a href={`#${problem.field}`}>{problem.message}</a>
@@ -198,10 +198,9 @@ function YesNoRow({
     <div
       aria-describedby={describedBy || undefined}
       aria-labelledby={`${id}-label`}
-      className="stack stack-2"
+      className="stack stack-2 py-3"
       id={id}
       role="radiogroup"
-      style={{ padding: 'var(--space-3) var(--space-0)' }}
       tabIndex={-1}
     >
       <span className="field__label" id={`${id}-label`}>
@@ -218,10 +217,9 @@ function YesNoRow({
           { option: 'no' as const, text: 'No' },
         ].map(({ option, text }) => (
           <label
-            className="row row-2"
+            className="row row-2 min-h-touch pr-3"
             htmlFor={`${id}-${option}`}
             key={option}
-            style={{ minHeight: '2.75rem', paddingRight: 'var(--space-3)' }}
           >
             <input
               aria-invalid={problem ? true : undefined}
@@ -229,11 +227,7 @@ function YesNoRow({
               id={`${id}-${option}`}
               name={id}
               onChange={() => onChange(option)}
-              style={{
-                width: 'var(--space-5)',
-                height: 'var(--space-5)',
-                flexShrink: 0,
-              }}
+              className="field__control"
               type="radio"
               value={option}
             />
@@ -271,7 +265,7 @@ function Section({
             {title}
           </h2>
           {lede ? (
-            <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+            <p className="text-sm text-muted mt-1">
               {lede}
             </p>
           ) : null}
@@ -519,7 +513,7 @@ function TaxProfileSection() {
       title="Tax profile"
       lede="The facts the engine cannot work without, and the situations that decide which rules it examines."
       footer={
-        <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+        <p className="text-xs text-muted measure">
           Changing a fact the tax engine reads can mark results produced before
           the change as out of date. Onyx says so on the screens that show them
           rather than quietly recalculating behind you.
@@ -540,7 +534,7 @@ function TaxProfileSection() {
           />
 
           {notYetSet ? (
-            <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+            <p className="text-sm text-secondary measure-62">
               You have not set a tax profile yet. Filling this in gives the
               engine the province and status it needs before it can produce a
               position.
@@ -570,7 +564,7 @@ function TaxProfileSection() {
 
           <div className="stack stack-2">
             <span className="eyebrow">Your situation</span>
-            <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+            <p className="text-sm text-secondary measure-62">
               Each answer only widens or narrows which published rules Onyx
               examines. Nothing here is checked against an outside source —
               Onyx records what you state.
@@ -592,7 +586,7 @@ function TaxProfileSection() {
           </div>
 
           <div className="stack stack-3">
-            <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+            <p className="text-sm text-secondary measure-62">
               The four questions below start blank every time. Onyx stores your
               answers but does not send them back to this screen, so it cannot
               show you what you last said — and saving records exactly what is
@@ -640,7 +634,7 @@ function PrivacySection() {
       title="Privacy"
       lede="What Onyx keeps, and why it keeps it."
     >
-      <div className="stack stack-4" style={{ maxWidth: '68ch' }}>
+      <div className="stack stack-4 measure">
         <p className="text-sm text-secondary">
           Onyx stores the facts you give it — your province and status, your
           income and account entries, the documents you have supplied — and the
@@ -759,7 +753,7 @@ function DataControlsSection() {
       title="Data controls"
       lede="Deleting your account is the one data control Onyx can carry out today."
       footer={
-        <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+        <p className="text-xs text-muted measure">
           There is no export, download or correction button here because there
           is no endpoint behind one. A control that cannot be honoured is a
           false promise, and this screen would rather be short than misleading.
@@ -783,7 +777,7 @@ function DataControlsSection() {
                   </span>
                 ) : null}
               </div>
-              <p className="text-sm text-secondary" style={{ maxWidth: '62ch' }}>
+              <p className="text-sm text-secondary measure-62">
                 {copy.body}
               </p>
             </div>
@@ -796,12 +790,12 @@ function DataControlsSection() {
             while a request is already running. */}
         {deletion.isPending || deletion.isError || inProgress ? null : (
           <div className="stack stack-4">
-            <div className="stack stack-3" style={{ maxWidth: '62ch' }}>
+            <div className="stack stack-3 measure-62">
               <h3 className="text-sm">Delete this account</h3>
               <p className="text-sm text-secondary">
                 Requesting deletion is irreversible. This is what happens:
               </p>
-              <ul className="stack stack-2" style={{ paddingLeft: 'var(--space-5)' }}>
+              <ul className="stack stack-2 pl-5">
                 <li className="text-sm text-secondary">
                   Your access ends straight away. Onyx will refuse everything
                   except a check on the state of the deletion itself.
@@ -838,7 +832,7 @@ function DataControlsSection() {
               <form className="stack stack-4" noValidate onSubmit={submit}>
                 {request.isError ? <ErrorState error={request.error} /> : null}
 
-                <div className="field" style={{ maxWidth: '24rem' }}>
+                <div className="field measure-sm">
                   <label className="field__label" htmlFor="confirm-delete">
                     Type DELETE to confirm
                   </label>
@@ -926,7 +920,7 @@ function AppearanceSection() {
       title="Appearance"
       lede="Light, dark, or whatever this device is already set to."
       footer={
-        <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+        <p className="text-xs text-muted measure">
           This preference is kept in this browser only. It is a display setting,
           so it never reaches Onyx and is not part of your account.
         </p>
@@ -943,14 +937,9 @@ function AppearanceSection() {
         </span>
         {THEME_OPTIONS.map((option) => (
           <label
-            className="row row-3"
+            className="row row-3 py-3 min-h-touch items-start"
             htmlFor={`theme-${option.value}`}
             key={option.value}
-            style={{
-              padding: 'var(--space-3) var(--space-0)',
-              minHeight: '2.75rem',
-              alignItems: 'flex-start',
-            }}
           >
             <input
               aria-describedby={`theme-${option.value}-hint`}
@@ -961,12 +950,7 @@ function AppearanceSection() {
                 setTheme(option.value)
                 storeTheme(option.value)
               }}
-              style={{
-                width: 'var(--space-5)',
-                height: 'var(--space-5)',
-                flexShrink: 0,
-                marginTop: 'var(--space-1)',
-              }}
+              className="field__check"
               type="radio"
               value={option.value}
             />

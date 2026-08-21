@@ -43,6 +43,14 @@ export default [
       }],
     },
   },
+    {
+    // Build-time Node scripts. They run in the deploy pipeline, not the
+    // browser, so they get Node's globals and none of the DOM's.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', URL: 'readonly' },
+    },
+  },
   {
     files: ['**/*.test.{ts,tsx}', 'e2e/**/*.ts', 'vitest.setup.ts'],
     languageOptions: { globals: { describe: 'readonly', it: 'readonly', expect: 'readonly', vi: 'readonly', beforeEach: 'readonly', afterEach: 'readonly', test: 'readonly' } },

@@ -196,7 +196,7 @@ export default function Overview() {
       />
 
       {runAnalysis.isError ? (
-        <div style={{ marginBottom: 'var(--space-5)' }}>
+        <div className="mb-5">
           <ErrorState error={runAnalysis.error} />
         </div>
       ) : null}
@@ -302,7 +302,7 @@ export default function Overview() {
               <h2 className="section-title" id="ledger-heading">
                 Assurance ledger
               </h2>
-              <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+              <p className="text-sm text-muted mt-1">
                 What Onyx can and cannot currently stand behind, family by family.
               </p>
             </div>
@@ -313,7 +313,7 @@ export default function Overview() {
             </AsyncBlock>
           </div>
           <div className="panel__footer">
-            <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+            <p className="text-xs text-muted measure">
               A family shown as <strong>Not established yet</strong> means no
               governing run has produced it — which is different from it being
               empty. Onyx does not report an unanswered question as a clean

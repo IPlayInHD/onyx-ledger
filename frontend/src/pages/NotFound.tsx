@@ -31,7 +31,7 @@ export default function NotFound() {
 
       <main className="shell__main" id="main">
         <div className="shell-container">
-          <div style={{ maxWidth: '62ch' }}>
+          <div className="measure-62">
             <PageHead
               eyebrow="Page not found"
               title="There is nothing at this address."

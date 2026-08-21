@@ -335,13 +335,12 @@ export default function TrustCentre() {
 
             {/* --------------------------------------- table of contents */}
             <nav
-              className="panel panel--sunken no-print"
+              className="panel panel--sunken no-print mt-6"
               aria-label="On this page"
-              style={{ marginTop: 'var(--space-6)' }}
             >
               <div className="panel__body">
                 <span className="eyebrow">On this page</span>
-                <ul style={{ marginTop: 'var(--space-3)' }}>
+                <ul className="mt-3">
                   {SECTIONS.map((section) => (
                     <li key={section.id}>
                       <a href={`#${section.id}`}>{section.title}</a>
@@ -490,15 +489,14 @@ export default function TrustCentre() {
               </p>
 
               <div
-                className="stack stack-5"
-                style={{ marginTop: 'var(--space-5)' }}
+                className="stack stack-5 mt-5"
               >
                 {CERTAINTIES.map((certainty) => (
                   <div className="stack stack-2" key={certainty.kind}>
                     <span>
                       <Provenance kind={certainty.kind} label={certainty.term} />
                     </span>
-                    <h3 style={{ marginTop: 'var(--space-1)' }}>
+                    <h3 className="mt-1">
                       {certainty.heading}
                     </h3>
                     <p>{certainty.body}</p>
@@ -506,7 +504,7 @@ export default function TrustCentre() {
                 ))}
               </div>
 
-              <p style={{ marginTop: 'var(--space-5)' }}>
+              <p className="mt-5">
                 The wording beside each badge is fixed by the kind. A value Onyx
                 assumed is never described as known, confirmed, or something you
                 provided. Where a result leans on an assumption, Onyx also
@@ -583,8 +581,7 @@ export default function TrustCentre() {
               </p>
 
               <div
-                className="panel panel--sunken"
-                style={{ marginTop: 'var(--space-4)' }}
+                className="panel panel--sunken mt-4"
               >
                 <div className="panel__body stack stack-3">
                   <span className="eyebrow">
@@ -595,7 +592,7 @@ export default function TrustCentre() {
                 </div>
               </div>
 
-              <p style={{ marginTop: 'var(--space-5)' }}>
+              <p className="mt-5">
                 Neither answer is a statement that the tax treatment is correct.
                 Reproducing a calculation confirms the calculation — not the law
                 as it applies to your circumstances.

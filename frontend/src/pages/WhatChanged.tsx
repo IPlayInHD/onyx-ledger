@@ -329,7 +329,7 @@ function ChangeCounts({ summary }: { summary: ChangeSummary }) {
             </table>
           </div>
         )}
-        <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+        <p className="text-xs text-muted measure">
           Counts only. Onyx does not put a figure on what a change was worth,
           because no authority here calculated one.
         </p>
@@ -350,7 +350,7 @@ function ChangesExplanation({ taxYear }: { taxYear: number }) {
 
   return (
     <div className="stack stack-4">
-      <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+      <p className="text-sm text-secondary measure">
         Onyx can summarise this list in plain words. The events do not change —
         the wording is written from the same ones shown above.
       </p>
@@ -451,7 +451,7 @@ export default function WhatChanged() {
               <h2 className="section-title" id="changes-heading">
                 Since your last review
               </h2>
-              <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+              <p className="text-sm text-muted mt-1">
                 Band transitions, not countdowns. A deadline moving from 38 days
                 to 37 is not an event; a deadline becoming urgent is.
               </p>
@@ -528,7 +528,7 @@ export default function WhatChanged() {
                     : ''}
                 </p>
 
-                <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+                <p className="text-sm text-secondary measure">
                   Acknowledging records the state you have just read as your new
                   starting point. It changes nothing about your tax position,
                   and it is the only thing that moves the line Onyx measures
@@ -564,7 +564,7 @@ export default function WhatChanged() {
               <h2 className="section-title" id="counts-heading">
                 The counts
               </h2>
-              <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+              <p className="text-sm text-muted mt-1">
                 Transparent totals over the same change set.
               </p>
             </div>
@@ -576,7 +576,7 @@ export default function WhatChanged() {
           </div>
           {changes.data ? (
             <div className="panel__footer">
-              <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+              <p className="text-xs text-muted measure">
                 Change set format {changes.data.schema_version}
               </p>
             </div>

@@ -43,7 +43,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   // product forgetting them.
   if (status === 'restoring') {
     return (
-      <div className="shell-container" style={{ padding: 'var(--space-9) 0' }}>
+      <div className="shell-container py-9">
         <LoadingBlock label="Restoring your session" />
       </div>
     )
@@ -56,7 +56,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function Fallback() {
   return (
-    <div className="shell-container" style={{ padding: 'var(--space-9) 0' }}>
+    <div className="shell-container py-9">
       <LoadingBlock />
     </div>
   )

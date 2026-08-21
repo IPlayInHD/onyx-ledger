@@ -1,69 +1,65 @@
-# Deploying Onyx Ledger to Netlify
+# Deploying the Onyx frontend to Netlify
 
-This repo is already configured for Netlify. The root **`netlify.toml`**:
+Netlify hosts **only the static frontend**. It is a CDN for `frontend/dist` and
+nothing else. The tax engine, the accounts and the data live in the certified
+FastAPI backend, which is deployed separately and is the single authority for
+every figure a customer sees.
 
-- builds from `server/` (`npm install`),
-- publishes the app frontend from `server/public/`,
-- runs the Express tax-audit API as a serverless function (`server/netlify/functions/api.js`),
-- routes `/api/*` to that function,
-- and persists accounts/audits in **Netlify Blobs** (auto-provisioned — no database to set up).
+> **This file used to say something different.** It described deploying
+> `server/` — a second, independent JavaScript tax engine with its own accounts
+> and its own storage — and routing every `/api/*` request to it. That tree is
+> archived under `legacy/` and can no longer be built or served. See
+> `legacy/README.md`.
 
-You just need to connect the repo to your Netlify account. Two ways:
+## What the build does
 
----
+`netlify.toml` builds from `frontend/`:
 
-## Option A — Connect the Git repo (recommended, continuous deploy)
-
-1. Go to **app.netlify.com → Add new site → Import an existing project**.
-2. Choose **GitHub** and pick **`IPlayInHD/onyx-ledger`** (authorize Netlify if prompted).
-3. Netlify reads `netlify.toml` automatically — leave the build settings as detected:
-   - Base directory: `server`
-   - Build command: `npm install`
-   - Publish directory: `server/public` (shown as `public` relative to base)
-   - Functions directory: `server/netlify/functions`
-4. Pick the branch to deploy. This work is on **`claude/zen-hypatia-8cxiza`** — either
-   set that as the production branch, or merge it into `main` first and deploy `main`.
-5. Click **Deploy**. When it finishes you'll get a `*.netlify.app` URL. Open it, create an
-   account, add the sample slips, and run an audit.
-
-After the first deploy, every push to that branch redeploys automatically.
-
-## Option B — Netlify CLI
-
-```bash
-npm install -g netlify-cli
-netlify login                 # opens your browser to authorize
-cd /path/to/onyx-ledger
-netlify init                  # link this repo to a new or existing site
-netlify deploy --build --prod # build + deploy to production
+```
+npm ci && npm run build && node scripts/netlify-redirects.mjs
 ```
 
----
+- `npm ci` installs from the lockfile, so a deploy resolves the same dependency
+  tree the quality gate tested.
+- `npm run build` typechecks and emits `dist/`.
+- `scripts/netlify-redirects.mjs` writes `_redirects` and `_headers` for this
+  particular deploy, because both depend on which backend it talks to.
 
-## Recommended: set a stable JWT secret
+## Required configuration
 
-Sign-in tokens are signed with a secret. If you don't provide one, the app generates a
-random secret and stores it in Netlify Blobs (fine, but it can rotate on a fresh Blobs
-store). For stable sessions, set your own:
+| Variable | Example | Why |
+|---|---|---|
+| `ONYX_API_ORIGIN` | `https://api.onyxledger.ca` | The certified backend this deploy proxies `/api/*` to, and the only origin its CSP allows it to contact |
 
-- **Site settings → Environment variables → Add** `JWT_SECRET` = *(a long random string)*
-- or `netlify env:set JWT_SECRET "$(openssl rand -hex 32)"`
+**The build fails if `ONYX_API_ORIGIN` is unset, or if it is not `https://`.**
+That is deliberate. A frontend published without an API still renders, still
+shows a sign-in form, and cannot authenticate anyone — it looks deployed and is
+not. A plain-text origin would put bearer tokens and tax figures on the wire in
+the clear.
 
-## Netlify Blobs
+Set it per context (production, deploy previews, branch deploys) so a preview
+build cannot point at the production backend.
 
-No setup required — Blobs is automatically available to your functions. The store
-(`server/store.js`) detects the serverless runtime and uses Blobs there; locally
-(`npm start`) it uses a JSON file. Accounts, documents, and audits are namespaced under
-the `onyx-ledger` blob store.
+## What ships with it
 
-## Good to know
+Set in `netlify.toml`: `X-Content-Type-Options`, `Referrer-Policy`,
+`X-Frame-Options`, `Permissions-Policy`, the cross-origin isolation headers, and
+HSTS (two years, subdomains; **preload is deliberately not enabled** until the
+domain is settled, because preload is very hard to undo).
 
-- **Local dev** is unchanged: `cd server && npm start` → http://localhost:4000.
-- **One complete site.** The publish directory `server/public` now contains everything:
-  the marketing landing (`/`), the interactive demos (`/app.html`, `/copilot.html`,
-  `/tax-health-score.html`), and the real product (`/signup.html`, `/login.html`,
-  `/dashboard.html`). The homepage's "Start free" / plan CTAs funnel into the real
-  signup → dashboard → audit flow.
-- **Scanned-image OCR** still needs an OCR provider wired into the `ocrProvider` interface
-  in `server/engine/extract.js`; today it scans structured entries and text/PDF-text slips.
-- **This does not file taxes** and is not affiliated with the CRA — it's educational.
+Generated per-deploy: the `Content-Security-Policy`, whose `connect-src` names
+the backend origin above. It is strict on both halves —
+
+```
+script-src 'self'; style-src 'self'
+```
+
+— with no `'unsafe-inline'` anywhere. The frontend carries no inline styles and
+no inline scripts, and a unit test keeps it that way.
+
+## What is NOT decided here
+
+Netlify is the frontend host. It is not the backend host, not the database, not
+the queue, and not the secret manager. Those belong to the production
+architecture, and until that is provisioned this deploy has nothing to talk to.
+See `docs/operations/production-architecture.md`.

@@ -120,8 +120,8 @@ export default function SignUp() {
 
       <main className="shell__main" id="main">
         <div className="shell-container">
-          <div style={{ maxWidth: '46ch', margin: '0 auto' }}>
-            <div style={{ marginBottom: 'var(--space-6)' }}>
+          <div className="measure-46 mx-auto">
+            <div className="mb-6">
               <Wordmark to="/" />
             </div>
 
@@ -145,14 +145,14 @@ export default function SignUp() {
                       role="alert"
                       tabIndex={-1}
                     >
-                      <h2 className="text-sm" style={{ marginBottom: 'var(--space-2)' }}>
+                      <h2 className="text-sm mb-2">
                         {formError ? formError.title : 'Check what you entered'}
                       </h2>
                       {formError ? (
                         <p className="text-sm text-secondary">{formError.body}</p>
                       ) : null}
                       {listedProblems.length > 0 ? (
-                        <ul style={{ paddingLeft: 'var(--space-4)' }}>
+                        <ul className="pl-4">
                           {listedProblems.map((name) => (
                             <li className="text-sm" key={name}>
                               <a href={`#${name}`}>{fieldErrors[name]}</a>

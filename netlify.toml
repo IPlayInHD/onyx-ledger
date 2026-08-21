@@ -1,26 +1,56 @@
-# Netlify deployment config for Onyx Ledger
-# Publishes the app frontend (server/public) and runs the Express tax-audit
-# API as a serverless function, with persistence on Netlify Blobs.
+# Netlify configuration — the CERTIFIED frontend only.
+#
+# This file used to deploy `server/`: a second, independent JavaScript tax
+# engine with its own accounts and its own storage, with every `/api/*` request
+# routed to it. That tree is now archived under `legacy/` and can no longer be
+# built or served from here. Onyx has exactly one customer tax authority — the
+# certified FastAPI backend — and this configuration cannot reach any other.
+#
+# What deploys: the static frontend in `frontend/`. Nothing else in this
+# repository is a web root.
 
 [build]
-  base = "server"
-  command = "npm install"
-  publish = "public"
-  functions = "netlify/functions"
+  base = "frontend"
+  # `npm ci` installs from the lockfile — a deploy must not silently resolve a
+  # different dependency tree than the one the quality gate tested.
+  #
+  # The redirect generator runs LAST and FAILS THE BUILD when no backend origin
+  # is configured. That is deliberate: a frontend published without an API to
+  # talk to looks fine, serves a sign-in form, and cannot authenticate anyone.
+  # Failing loudly at build time is better than shipping a shell.
+  command = "npm ci && npm run build && node scripts/netlify-redirects.mjs"
+  publish = "dist"
 
-[functions]
-  node_bundler = "esbuild"
+[build.environment]
+  NODE_VERSION = "20"
 
-# Route all API traffic to the Express function.
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api/:splat"
-  status = 200
-  force = true
+# Security headers. The CSP is generated per-deploy alongside the redirects,
+# because its connect-src has to name the same backend origin the proxy uses.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+    # HSTS is set here rather than at the app: it must be sent on every
+    # response from the apex, including ones the app never sees. Two years,
+    # subdomains included. Do not enable preload until the domain is settled —
+    # preload is very hard to undo.
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains"
 
-# Everything else is served as static files from the publish directory;
-# unknown paths fall back to the app's landing page.
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Immutable assets: Vite fingerprints every file it emits, so a hashed name can
+# never mean two different bytes.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# The HTML shell must never be cached hard, or a customer keeps loading an old
+# bundle that points at assets a later deploy removed.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

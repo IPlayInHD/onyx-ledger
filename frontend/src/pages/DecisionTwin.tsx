@@ -309,10 +309,10 @@ function Bench({
     <form className="stack stack-5" noValidate onSubmit={onSubmit}>
       {problems.length > 0 ? (
         <div className="error-summary" ref={summaryRef} role="alert" tabIndex={-1}>
-          <h3 className="text-sm" style={{ marginBottom: 'var(--space-2)' }}>
+          <h3 className="text-sm mb-2">
             Check what you entered
           </h3>
-          <ul style={{ paddingLeft: 'var(--space-4)' }}>
+          <ul className="pl-4">
             {problems.map((problem) => (
               <li className="text-sm" key={problem.field}>
                 <a href={`#${problem.field}`}>{problem.message}</a>
@@ -395,9 +395,8 @@ function Bench({
           {/* Padding rather than a bare checkbox row: the whole line is the
               target, which is what makes it usable on a phone. */}
           <label
-            className="row row-2"
+            className="row row-2 py-3"
             htmlFor="twin-declare-room"
-            style={{ padding: 'var(--space-3) 0' }}
           >
             <input
               checked={declareRoom}
@@ -474,14 +473,14 @@ function Refusal({ error, lever }: { error: ApiError; lever: LeverOption }) {
     <div className="panel panel--sunken" role="alert">
       <div className="panel__body stack stack-3">
         <h3 className="state-block__title">{described.title}</h3>
-        <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+        <p className="text-sm text-secondary measure">
           Onyx would not model this. It refuses to seal a figure it cannot stand
           behind, so nothing was calculated and nothing was saved.
         </p>
-        <p className="text-sm" style={{ maxWidth: '68ch' }}>
+        <p className="text-sm measure">
           {described.body}
         </p>
-        <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+        <p className="text-sm text-secondary measure">
           {lever.declaresRoom
             ? 'Two ways forward: lower the amount, or tell Onyx how much room you actually have using the declaration above. A declared figure is recorded as your own statement, and the model then says so.'
             : 'Adjust the amount and try again.'}
@@ -503,7 +502,7 @@ function Twin({ ready }: { ready: ReadyScenario }) {
         <div className="twin__side">
           <span className="twin__label">Current state</span>
           <span className="figure figure--lg tabular">{money(baseline.amount)}</span>
-          <p className="text-xs text-muted" style={{ marginTop: 'var(--space-2)' }}>
+          <p className="text-xs text-muted mt-2">
             Estimated tax as things stand
           </p>
         </div>
@@ -530,7 +529,7 @@ function Twin({ ready }: { ready: ReadyScenario }) {
           >
             {money(modelled.amount)}
           </span>
-          <p className="text-xs text-muted" style={{ marginTop: 'var(--space-2)' }}>
+          <p className="text-xs text-muted mt-2">
             Estimated tax if you did this
           </p>
         </div>
@@ -542,7 +541,7 @@ function Twin({ ready }: { ready: ReadyScenario }) {
         <span className="text-xs text-muted">{humanize(delta.calculation_basis)}</span>
       </div>
 
-      <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+      <p className="text-sm text-secondary measure">
         Both figures and the difference between them come from the Onyx tax
         engine, calculated against the same pinned inputs. This screen puts them
         beside each other; it does not work any of them out.
@@ -609,7 +608,7 @@ function ModelBasis({ scenario }: { scenario: ScenarioDetailOut }) {
             />
           ))
         )}
-        <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+        <p className="text-xs text-muted measure">
           An assumption is not a fact Onyx has checked. Where a figure above is
           marked as assumed, confirm your real number before acting on this
           model.
@@ -647,7 +646,7 @@ function ModelBasis({ scenario }: { scenario: ScenarioDetailOut }) {
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+          <p className="text-xs text-muted measure">
             These are the only inputs the levers were allowed to touch. Nothing
             else about your position was altered.
           </p>
@@ -700,7 +699,7 @@ function ScenarioExplanation({
       </div>
       <div className="panel__body">
         {!asked ? (
-          <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+          <p className="text-sm text-secondary measure">
             Onyx can put this model into plain language, written from the
             figures it has already calculated. It is produced when you ask for
             it rather than in advance, and it does not decide any amount.
@@ -841,7 +840,7 @@ export default function DecisionTwin() {
             )}
           </div>
           <div className="panel__footer">
-            <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+            <p className="text-xs text-muted measure">
               If a lever asks for more than the contribution room Onyx can see,
               it refuses to model it rather than showing you a figure you could
               not act on. That refusal explains itself and tells you what to do
@@ -858,7 +857,7 @@ export default function DecisionTwin() {
                 Current state against modelled state
               </h2>
               {ready?.scenario.label ? (
-                <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+                <p className="text-sm text-muted mt-1">
                   {ready.scenario.label} · modelled {isoDate(ready.scenario.created_at)}
                 </p>
               ) : null}
@@ -925,7 +924,7 @@ export default function DecisionTwin() {
                 <h2 className="section-title" id="twin-basis-heading">
                   What this model rests on
                 </h2>
-                <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+                <p className="text-sm text-muted mt-1">
                   Everything below was sealed with the result and is shown exactly
                   as Onyx recorded it.
                 </p>
@@ -937,7 +936,7 @@ export default function DecisionTwin() {
             <div className="panel__footer">
               <div className="stack stack-4">
                 <SupportSignal support={scenario.data.support} />
-                <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+                <p className="text-xs text-muted measure">
                   {scenario.data.disclaimer}
                 </p>
               </div>

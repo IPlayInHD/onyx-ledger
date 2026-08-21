@@ -13,19 +13,25 @@
 import type { ReactNode } from 'react'
 import { ApiError, NetworkError } from '@/api/client'
 
+/**
+ * A loading placeholder, sized by VARIANT rather than by inline dimensions.
+ *
+ * It took arbitrary width/height strings and wrote them into a style
+ * attribute. Three callers passed three fixed pairs, so the flexibility was
+ * never used — and it was the last thing in the application forcing
+ * `style-src 'unsafe-inline'` into the Content-Security-Policy. Naming the
+ * shapes costs nothing and buys the stricter policy.
+ */
 export function Skeleton({
-  width = '100%',
-  height = '1rem',
+  variant = 'line',
   className,
 }: {
-  width?: string
-  height?: string
+  variant?: 'title' | 'line' | 'line-short'
   className?: string
 }) {
   return (
     <span
-      className={`skeleton${className ? ` ${className}` : ''}`}
-      style={{ display: 'block', width, height }}
+      className={`skeleton skeleton--${variant}${className ? ` ${className}` : ''}`}
       aria-hidden="true"
     />
   )
@@ -37,9 +43,9 @@ export function LoadingBlock({ label = 'Loading' }: { label?: string }) {
   return (
     <div className="stack stack-3" role="status" aria-live="polite">
       <span className="sr-only">{label}…</span>
-      <Skeleton height="1.75rem" width="45%" />
-      <Skeleton height="1rem" width="80%" />
-      <Skeleton height="1rem" width="65%" />
+      <Skeleton variant="title" />
+      <Skeleton variant="line" />
+      <Skeleton variant="line-short" />
     </div>
   )
 }

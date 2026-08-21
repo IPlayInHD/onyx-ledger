@@ -171,7 +171,7 @@ function PositionExplanation({ analysisId }: { analysisId: string }) {
 
   return (
     <div className="stack stack-4">
-      <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+      <p className="text-sm text-secondary measure">
         Onyx can put this position into words: what drives the estimate and what
         it depends on. The figures do not change — the wording is written from
         the same ones shown above.
@@ -255,7 +255,7 @@ export default function Position() {
           </div>
           {analysis ? (
             <div className="panel__footer">
-              <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+              <p className="text-xs text-muted measure">
                 An estimate produced on {isoDate(analysis.created_at)}. It is
                 information about your position, not tax advice, and it is not a
                 return.
@@ -293,8 +293,7 @@ export default function Position() {
                     Where did this come from?
                   </h2>
                   <p
-                    className="text-sm text-muted"
-                    style={{ marginTop: 'var(--space-1)' }}
+                    className="text-sm text-muted mt-1"
                   >
                     Three kinds of authority stand behind the estimate. They are
                     not interchangeable, so Onyx keeps them apart.

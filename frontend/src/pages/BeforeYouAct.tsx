@@ -277,7 +277,7 @@ function ComparisonFrame({
               <span className="figure figure--lg tabular">
                 {money(baseline.amount)}
               </span>
-              <p className="text-xs text-muted" style={{ marginTop: 'var(--space-2)' }}>
+              <p className="text-xs text-muted mt-2">
                 Estimated tax as things stand
               </p>
             </>
@@ -324,7 +324,7 @@ function ComparisonFrame({
               <span className="figure figure--lg tabular">
                 {money(modelled.amount)}
               </span>
-              <p className="text-xs text-muted" style={{ marginTop: 'var(--space-2)' }}>
+              <p className="text-xs text-muted mt-2">
                 Estimated tax if you did this
               </p>
             </>
@@ -335,7 +335,7 @@ function ComparisonFrame({
             </p>
           )}
           {delta ? (
-            <p className="text-xs text-muted" style={{ marginTop: 'var(--space-2)' }}>
+            <p className="text-xs text-muted mt-2">
               Difference sealed with the result:{' '}
               <span className="tabular">{money(delta.amount, { signed: true })}</span>{' '}
               ({humanize(delta.effect_type)})
@@ -361,7 +361,7 @@ function ComparisonFrame({
         ) : null}
       </div>
 
-      <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+      <p className="text-sm text-secondary measure">
         {comparison.direction === 'BASELINE_TO_COUNTERFACTUAL'
           ? 'Everything below reads in one direction: from the position you are in now to the one this decision would produce. Both sides were sealed by the Onyx engine, and this screen only reports the difference between them.'
           : `Direction of this comparison: ${humanize(comparison.direction)}.`}
@@ -451,7 +451,7 @@ function ComparisonCounts({ comparison }: { comparison: BeforeYouActComparisonOu
         )}
       </div>
 
-      <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+      <p className="text-xs text-muted measure">
         These counts describe the whole comparison. The sections below show{' '}
         {comparison.includes_unchanged
           ? 'every record, including the ones that did not move'
@@ -559,13 +559,13 @@ function FamilySection({
           <span className={`status status--${copy.tone}`}>{copy.label}</span>
         </div>
         <div className="panel__body">
-          <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+          <p className="text-sm text-secondary measure">
             {copy.compared
               ? 'Onyx compares this family, but this screen does not receive its records, so there is nothing here to read.'
               : copy.note}
           </p>
           {applicability ? (
-            <p className="text-xs text-muted" style={{ marginTop: 'var(--space-3)' }}>
+            <p className="text-xs text-muted mt-3">
               Recorded reason: {humanize(applicability.reason_code)}
             </p>
           ) : null}
@@ -581,7 +581,7 @@ function FamilySection({
           <h2 className="section-title" id={headingId}>
             {label}
           </h2>
-          <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+          <p className="text-sm text-muted mt-1">
             {records.length === 0
               ? 'Compared, nothing differs'
               : `${plainNumber(records.length)} ${
@@ -612,7 +612,7 @@ function FamilySection({
 
       {applicability ? (
         <div className="panel__footer">
-          <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+          <p className="text-xs text-muted measure">
             Comparable because: {humanize(applicability.reason_code)}.
           </p>
         </div>
@@ -633,7 +633,7 @@ function ComparisonExplanation({ scenarioId }: { scenarioId: string }) {
 
   return (
     <div className="stack stack-4">
-      <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+      <p className="text-sm text-secondary measure">
         Onyx can put this comparison into words: what moved, what it depends on,
         and what it does not tell you. The records above do not change — the
         wording is written from the same ones.
@@ -758,8 +758,7 @@ export default function BeforeYouAct() {
                         How much moved
                       </h2>
                       <p
-                        className="text-sm text-muted"
-                        style={{ marginTop: 'var(--space-1)' }}
+                        className="text-sm text-muted mt-1"
                       >
                         Counts the engine produced over the full comparison.
                       </p>
@@ -803,7 +802,7 @@ export default function BeforeYouAct() {
                     </h2>
                   </div>
                   <div className="panel__body">
-                    <div className="stack stack-3" style={{ maxWidth: '68ch' }}>
+                    <div className="stack stack-3 measure">
                       <p className="text-sm text-secondary">
                         This is a description of a difference, not a
                         recommendation. Onyx does not rank this decision, score

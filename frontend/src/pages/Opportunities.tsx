@@ -158,7 +158,7 @@ function Facet({ label, children }: { label: string; children: ReactNode }) {
 function ReasonList({ codes }: { codes: string[] }) {
   if (codes.length === 0) return null
   return (
-    <ul className="stack stack-2" style={{ paddingLeft: 'var(--space-5)' }}>
+    <ul className="stack stack-2 pl-5">
       {codes.map((code) => (
         <li className="text-sm text-secondary" key={code}>
           {humanize(code)}
@@ -202,7 +202,7 @@ function Impediments({
             <span className="text-sm text-secondary">{humanize(blocked)}</span>
           </div>
           {explain ? (
-            <p className="text-sm text-muted" style={{ maxWidth: '68ch' }}>
+            <p className="text-sm text-muted measure">
               A governed exclusion applies, so this cannot be acted on as things
               stand. It is shown rather than removed, because knowing something
               was considered and ruled out is a result.
@@ -220,7 +220,7 @@ function Impediments({
             </span>
           </div>
           {explain ? (
-            <p className="text-sm text-muted" style={{ maxWidth: '68ch' }}>
+            <p className="text-sm text-muted measure">
               Something changed after this verdict was produced. Re-run your
               analysis to get a statement about today.
             </p>
@@ -408,7 +408,7 @@ function EstimatedEffect({ item }: { item: Opportunity }) {
         </div>
       </div>
       <Provenance kind="calculated" />
-      <p className="text-xs text-muted" style={{ maxWidth: '58ch' }}>
+      <p className="text-xs text-muted measure-58">
         Sealed by the run that produced this opportunity. The first figure is
         this item on its own; the second is what it adds once the rest of your
         plan is already counted. They measure different things, so Onyx does
@@ -689,7 +689,7 @@ function LifecycleAxes({ item }: { item: LifecycleItem }) {
         </p>
       ) : null}
 
-      <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+      <p className="text-xs text-muted measure">
         These axes are kept apart on purpose. An opportunity can be urgent and
         already acted on, or expired and still worth recording, and a single
         combined status could not say either. The remaining two axes — whether
@@ -731,7 +731,7 @@ function OpportunityExplanation({
 
   return (
     <div className="stack stack-4">
-      <p className="text-sm text-secondary" style={{ maxWidth: '68ch' }}>
+      <p className="text-sm text-secondary measure">
         Onyx can put this record into words: why it may apply, what it would
         take, and what it depends on. Nothing about the figures changes — the
         wording is written from the same ones shown above.
@@ -784,7 +784,7 @@ function ExplanationLists({
       {steps.length > 0 ? (
         <div className="ai-block__section">
           <div className="ai-block__heading">What you can do</div>
-          <ul className="stack stack-2" style={{ paddingLeft: 'var(--space-5)' }}>
+          <ul className="stack stack-2 pl-5">
             {steps.map((step) => (
               <li key={step.action_ref}>{step.description}</li>
             ))}
@@ -795,7 +795,7 @@ function ExplanationLists({
       {needs.length > 0 ? (
         <div className="ai-block__section">
           <div className="ai-block__heading">What you need</div>
-          <ul className="stack stack-2" style={{ paddingLeft: 'var(--space-5)' }}>
+          <ul className="stack stack-2 pl-5">
             {needs.map((need) => (
               <li key={need}>{need}</li>
             ))}
@@ -827,7 +827,7 @@ function OpportunityQueue({ taxYear }: { taxYear: number }) {
             <h2 className="section-title" id="queue-heading">
               In review order
             </h2>
-            <p className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+            <p className="text-sm text-muted mt-1">
               Onyx lists these in the order it suggests reviewing them: time
               pressure first, then gaps you can close. That is a reading order,
               not a ranking by value.
@@ -841,7 +841,7 @@ function OpportunityQueue({ taxYear }: { taxYear: number }) {
         </div>
         {assurance.data ? (
           <div className="panel__footer">
-            <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+            <p className="text-xs text-muted measure">
               {assurance.data.summary.opportunity_count}{' '}
               {assurance.data.summary.opportunity_count === 1
                 ? 'opportunity was'
@@ -951,7 +951,7 @@ function OpportunityRecord({
                 ) : (
                   <div className="stack stack-4">
                     <SupportSignal support={item.support} />
-                    <p className="text-xs text-muted" style={{ maxWidth: '68ch' }}>
+                    <p className="text-xs text-muted measure">
                       {item.support.disclaimer}
                     </p>
                   </div>
@@ -967,8 +967,7 @@ function OpportunityRecord({
                     Where this stands
                   </h2>
                   <p
-                    className="text-sm text-muted"
-                    style={{ marginTop: 'var(--space-1)' }}
+                    className="text-sm text-muted mt-1"
                   >
                     Seven independent axes, none of them derived from another.
                     Five are below; freshness and integrity sit with the record
