@@ -193,7 +193,7 @@ async function parseError(response: Response): Promise<ApiError> {
   })
 }
 
-let refreshInFlight: Promise<RefreshOutcome> | null = null
+let refreshInFlight: Promise<RefreshResult> | null = null
 
 /** What a refresh attempt actually established.
  *
@@ -203,16 +203,23 @@ let refreshInFlight: Promise<RefreshOutcome> | null = null
  *  busy would sign a customer out for no reason. */
 export type RefreshOutcome = 'refreshed' | 'rejected' | 'unavailable'
 
+export interface RefreshResult {
+  outcome: RefreshOutcome
+  /** What the service asked us to wait, when it said. Guessing a shorter pause
+   *  than the limiter stated just spends another attempt being refused. */
+  retryAfterSeconds: number | null
+}
+
 /** Exchange the refresh token for a new access token. Concurrent callers share
  *  one in-flight attempt: a page that fires six queries at once must not spend
  *  six single-use refresh tokens and invalidate its own session (the backend
  *  treats refresh-token reuse as an attack and revokes the family). */
-async function refreshSession(): Promise<RefreshOutcome> {
+export async function refreshSession(): Promise<RefreshResult> {
   if (refreshInFlight) return refreshInFlight
   const token = auth.getRefreshToken()
-  if (!token) return 'rejected'
+  if (!token) return { outcome: 'rejected', retryAfterSeconds: null }
 
-  refreshInFlight = (async (): Promise<RefreshOutcome> => {
+  refreshInFlight = (async (): Promise<RefreshResult> => {
     try {
       const response = await fetch(buildUrl('/auth/refresh'), {
         method: 'POST',
@@ -227,9 +234,12 @@ async function refreshSession(): Promise<RefreshOutcome> {
         // destroy a perfectly good credential and sign them out over a burst of
         // their own traffic. The same reasoning covers a 5xx and a dropped
         // connection: we learned nothing about the token, so we keep it.
-        if (response.status === 429 || response.status >= 500) return 'unavailable'
+        if (response.status === 429 || response.status >= 500) {
+          const error = await parseError(response)
+          return { outcome: 'unavailable', retryAfterSeconds: error.retryAfterSeconds }
+        }
         auth.clear()
-        return 'rejected'
+        return { outcome: 'rejected', retryAfterSeconds: null }
       }
 
       const payload = (await response.json()) as {
@@ -238,16 +248,16 @@ async function refreshSession(): Promise<RefreshOutcome> {
       }
       if (!payload.access_token) {
         auth.clear()
-        return 'rejected'
+        return { outcome: 'rejected', retryAfterSeconds: null }
       }
       auth.setAccessToken(payload.access_token)
       // Rotation: the backend issues a NEW refresh token and single-uses the
       // old one. Storing the new one is what keeps the next refresh working.
       if (payload.refresh_token) auth.setRefreshToken(payload.refresh_token)
-      return 'refreshed'
+      return { outcome: 'refreshed', retryAfterSeconds: null }
     } catch {
       // Transport failure: the request may never have reached the server.
-      return 'unavailable'
+      return { outcome: 'unavailable', retryAfterSeconds: null }
     } finally {
       refreshInFlight = null
     }
@@ -256,14 +266,34 @@ async function refreshSession(): Promise<RefreshOutcome> {
   return refreshInFlight
 }
 
-/** Refresh once, and if the server was merely busy, wait the stated pause and
- *  try again. Two attempts, because the point is to survive a brief throttle,
- *  not to hammer a limiter that is asking for quiet. */
+/** How long to honour a stated pause before deciding the caller has waited
+ *  enough. An in-flight API call cannot sit for a minute; the session-restore
+ *  path uses its own, longer bound, because the alternative there is bouncing a
+ *  signed-in customer to the sign-in screen. */
+const REQUEST_REFRESH_MAX_WAIT_MS = 5_000
+
+export function pauseFor(
+  retryAfterSeconds: number | null,
+  maxWaitMs: number,
+): number {
+  if (retryAfterSeconds === null || !Number.isFinite(retryAfterSeconds)) {
+    return Math.min(2_000, maxWaitMs)
+  }
+  // One extra second: coming back the instant the window opens tends to land
+  // on the boundary and be refused again.
+  return Math.min(Math.max(retryAfterSeconds, 0) * 1_000 + 1_000, maxWaitMs)
+}
+
+/** Refresh once, and if the server was merely busy, wait THE PAUSE IT ASKED FOR
+ *  and try again. Two attempts, because the point is to survive a brief
+ *  throttle, not to hammer a limiter that is asking for quiet. */
 export async function refreshSessionWithBackoff(): Promise<RefreshOutcome> {
   const first = await refreshSession()
-  if (first !== 'unavailable') return first
-  await new Promise((resolve) => setTimeout(resolve, 2_000))
-  return refreshSession()
+  if (first.outcome !== 'unavailable') return first.outcome
+  await new Promise((resolve) =>
+    setTimeout(resolve, pauseFor(first.retryAfterSeconds, REQUEST_REFRESH_MAX_WAIT_MS)),
+  )
+  return (await refreshSession()).outcome
 }
 
 export async function request<T>(

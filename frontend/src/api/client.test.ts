@@ -6,7 +6,7 @@
    of these is a security regression, not a UX one.
    ========================================================================= */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, NetworkError, auth, request, shouldRetry } from './client'
+import { ApiError, NetworkError, auth, pauseFor, request, shouldRetry } from './client'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -247,6 +247,31 @@ describe('session refresh', () => {
 
     await expect(request('/users/me')).rejects.toBeInstanceOf(ApiError)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('honouring a stated pause', () => {
+  // The regression: the restore path waited a flat two seconds, which is far
+  // shorter than the auth window takes to refill. Every attempt was refused
+  // and a customer holding a valid token was shown the sign-in screen anyway.
+  it('waits the pause the service asked for, plus a moment', () => {
+    // Returning the instant the window opens tends to land on the boundary.
+    expect(pauseFor(20, 30_000)).toBe(21_000)
+  })
+
+  it('never waits longer than the caller can afford', () => {
+    // An in-flight API call cannot sit for a minute just because a limiter
+    // suggested it.
+    expect(pauseFor(120, 5_000)).toBe(5_000)
+  })
+
+  it('falls back to a short pause when the service did not say', () => {
+    expect(pauseFor(null, 30_000)).toBe(2_000)
+    expect(pauseFor(Number.NaN, 30_000)).toBe(2_000)
+  })
+
+  it('does not turn a nonsense negative pause into time travel', () => {
+    expect(pauseFor(-5, 30_000)).toBe(1_000)
   })
 })
 

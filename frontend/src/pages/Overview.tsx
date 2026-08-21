@@ -178,8 +178,11 @@ export default function Overview() {
     <>
       <PageHead
         eyebrow={`Tax year ${taxYear}`}
-        title="Your tax position"
-        lede="Where you stand today, what Onyx is confident about, and what is waiting on you."
+        /* Not "Your tax position": that is the name of a DIFFERENT destination
+           in the navigation, and heading a screen with the label of the screen
+           beside it leaves a reader unsure which one they are on. */
+        title="Where you stand"
+        lede="What Onyx is confident about today, what it is still assuming, and what is waiting on you."
         actions={
           <button
             type="button"

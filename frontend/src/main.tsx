@@ -6,11 +6,17 @@ import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
 import { TaxYearProvider } from './components/Shell'
 import { shouldRetry } from './api/client'
+import { applyStoredTheme } from './lib/theme'
 import './styles/tokens.css'
 import './styles/base.css'
 import './styles/trust.css'
 import './styles/shell.css'
 import './styles/product.css'
+
+/* A stored appearance choice must be on the document BEFORE the first
+   render, or the customer sees the wrong palette until they happen to open
+   settings. This is the only startup side effect in this file. */
+applyStoredTheme()
 
 /* Retry policy is set ONCE, here, from the client's own rule: reads may be
    retried, writes may not. A component cannot opt a dangerous write back in

@@ -194,7 +194,11 @@ function Impediments({
       {blocked ? (
         <div className="stack stack-2">
           <div className="row row-2 wrap">
-            <span className="status status--blocked">Blocked</span>
+            {/* Both callers already show the status badge, which says
+                "Blocked". Repeating the word here spent a second chip saying
+                nothing new and left five equal-weight labels competing on one
+                card. What the reader still needs is WHY. */}
+            <span className="eyebrow">Why it is blocked</span>
             <span className="text-sm text-secondary">{humanize(blocked)}</span>
           </div>
           {explain ? (

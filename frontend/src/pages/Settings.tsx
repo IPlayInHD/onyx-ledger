@@ -31,6 +31,12 @@ import { PageHead } from '@/components/Shell'
 import { ErrorState, LoadingBlock, describeError } from '@/components/states'
 import { Provenance } from '@/components/trust'
 import { isoDate } from '@/lib/format'
+import {
+  applyTheme,
+  readStoredTheme,
+  storeTheme,
+  type ThemePreference,
+} from '@/lib/theme'
 import { keys, useProfile } from '@/lib/queries'
 import { accountApi, profileApi, type TaxProfileIn } from '@/api/endpoints'
 import { ApiError } from '@/api/client'
@@ -898,10 +904,6 @@ function DataControlsSection() {
    APPEARANCE
    ========================================================================= */
 
-type ThemePreference = 'system' | 'light' | 'dark'
-
-const THEME_STORAGE_KEY = 'onyx.theme'
-
 const THEME_OPTIONS: readonly { value: ThemePreference; label: string; hint: string }[] = [
   {
     value: 'system',
@@ -911,41 +913,6 @@ const THEME_OPTIONS: readonly { value: ThemePreference; label: string; hint: str
   { value: 'light', label: 'Light', hint: 'Always the light palette.' },
   { value: 'dark', label: 'Dark', hint: 'Always the dark palette.' },
 ]
-
-/* Storage can throw outright — private windows, blocked site data, a locked
-   down browser — so every access is guarded. A display preference is never
-   worth breaking a page over, and it is deliberately the only thing this
-   product keeps in the browser besides the session. */
-function readStoredTheme(): ThemePreference {
-  try {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY)
-    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
-  } catch {
-    /* fall through to the system default */
-  }
-  return 'system'
-}
-
-function storeTheme(preference: ThemePreference) {
-  try {
-    if (preference === 'system') {
-      window.localStorage.removeItem(THEME_STORAGE_KEY)
-    } else {
-      window.localStorage.setItem(THEME_STORAGE_KEY, preference)
-    }
-  } catch {
-    /* The choice still applies to this page; it just will not be remembered. */
-  }
-}
-
-function applyTheme(preference: ThemePreference) {
-  const root = document.documentElement
-  if (preference === 'system') {
-    root.removeAttribute('data-theme')
-  } else {
-    root.dataset.theme = preference
-  }
-}
 
 function AppearanceSection() {
   const [theme, setTheme] = useState<ThemePreference>(readStoredTheme)

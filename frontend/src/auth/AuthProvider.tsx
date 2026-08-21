@@ -18,7 +18,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ApiError, NetworkError, auth, request } from '@/api/client'
+import { ApiError, NetworkError, auth, pauseFor, request } from '@/api/client'
 import { authApi, type TokenPair } from '@/api/endpoints'
 
 export interface SessionUser {
@@ -36,6 +36,12 @@ interface AuthState {
   register: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
 }
+
+/* Restoring a session may wait out a real throttle. The bound is generous
+   because the alternative is showing the sign-in screen to someone who is
+   already signed in and holds a valid token. */
+const ATTEMPTS = 3
+const RESTORE_MAX_WAIT_MS = 30_000
 
 const AuthContext = createContext<AuthState | null>(null)
 
@@ -75,11 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      // Two attempts, because `/auth/refresh` shares the platform's
-      // authentication budget: reloading the page while that budget is spent
-      // answers 429, and a customer must not be signed out because the service
-      // asked them to wait a moment.
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      // `/auth/refresh` shares the platform's authentication budget: reloading
+      // the page while that budget is spent answers 429, and a customer must
+      // not be signed out because the service asked them to wait.
+      //
+      // The pause is THE ONE THE SERVICE STATED, not a guess. A fixed two
+      // seconds was far shorter than the window takes to refill, so both
+      // attempts were refused and a customer holding a perfectly valid token
+      // landed on the sign-in screen anyway.
+      for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
         try {
           const tokens = await request<TokenPair>('/auth/refresh', {
             method: 'POST',
@@ -103,8 +113,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (!cancelled) drop()
             return
           }
-          if (attempt === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 2_000))
+          if (attempt < ATTEMPTS - 1) {
+            const stated = error instanceof ApiError ? error.retryAfterSeconds : null
+            await new Promise((resolve) =>
+              setTimeout(resolve, pauseFor(stated, RESTORE_MAX_WAIT_MS)),
+            )
+            if (cancelled) return
             continue
           }
           // Still could not reach a verdict. Go to the signed-out view WITHOUT

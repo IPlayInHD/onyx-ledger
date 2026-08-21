@@ -30,6 +30,11 @@
   gap: var(--space-3);
   text-decoration: none;
   color: var(--c-ink);
+  /* A wordmark that wraps is not a wordmark. On a narrow phone the brand bar
+     broke "Onyx Ledger" across two lines and shoved the bar's height around;
+     the year picker beside it gives up space first. */
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .wordmark__mark {
   width: 0.85rem;
@@ -113,6 +118,9 @@
   border-radius: var(--radius-md);
   background: var(--c-surface);
   font-size: var(--text-sm);
+  /* "TAX YEAR" is a label, not a paragraph: broken over two lines it read as
+     two separate words stacked in a box. */
+  white-space: nowrap;
 }
 .yearpick select {
   border: 0;

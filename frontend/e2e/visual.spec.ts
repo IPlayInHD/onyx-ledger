@@ -50,6 +50,14 @@ async function seed(request: import('@playwright/test').APIRequestContext) {
     headers,
     data: { tax_year: TAX_YEAR, expense_category_code: 'donation', amount: '3000' },
   })
+  // Medical expenses are, on the currently published rule set, the one input
+  // that makes the optimizer emit an opportunity at all — a BLOCKED one, under
+  // a governed exclusion. Seeding it is what lets the opportunity surface be
+  // reviewed populated instead of empty.
+  await request.post(`${API}/api/v1/financials/expenses`, {
+    headers,
+    data: { tax_year: TAX_YEAR, expense_category_code: 'medical', amount: '6000' },
+  })
   await request.post(`${API}/api/v1/financials/registered-accounts`, {
     headers,
     data: { tax_year: TAX_YEAR, registered_type: 'rrsp', contributions_ytd: '4000' },
@@ -98,8 +106,13 @@ test('capture the product for design review', async ({ page, request }, testInfo
   const theme = process.env.ONYX_VISUAL_THEME ?? 'light'
   const email = await seed(request)
 
-  // Seed the stored preference AND the attribute: the settings screen reads
-  // storage on mount and would otherwise reset the attribute to system.
+  // Seed the stored preference only. The application applies it at startup, so
+  // seeding storage exercises the real path rather than faking the result —
+  // which is how a capture run stays evidence about the product.
+  //
+  // This script runs BEFORE the parser creates <html>, so `documentElement` is
+  // null here. An earlier version assigned to it directly, threw, and silently
+  // produced twelve light screenshots into dark-named files.
   await page.addInitScript(
     ([key, value]) => {
       try {
@@ -107,9 +120,6 @@ test('capture the product for design review', async ({ page, request }, testInfo
         else window.localStorage.setItem(key as string, value as string)
       } catch {
         /* ignore */
-      }
-      if (value !== 'system') {
-        document.documentElement.dataset.theme = value as string
       }
     },
     ['onyx.theme', theme],
@@ -120,6 +130,22 @@ test('capture the product for design review', async ({ page, request }, testInfo
   await page.getByLabel(/password/i).fill(PASSWORD)
   await page.getByRole('button', { name: /sign in/i }).click()
   await page.waitForURL(/\/app/, { timeout: 30_000 })
+
+  // Say which theme actually took effect. A capture run that silently produced
+  // twelve light screenshots into dark-*.png would be worse than no capture,
+  // because it looks like evidence.
+  const applied = await page.evaluate(() => ({
+    attribute: document.documentElement.dataset.theme ?? 'unset',
+    stored: (() => {
+      try {
+        return window.localStorage.getItem('onyx.theme') ?? 'unset'
+      } catch {
+        return 'unreadable'
+      }
+    })(),
+    background: getComputedStyle(document.body).backgroundColor,
+  }))
+  console.log(`theme requested=${theme} ${JSON.stringify(applied)}`)
 
   const project = testInfo.project.name
   const shoot = async (name: string) => {
@@ -138,6 +164,21 @@ test('capture the product for design review', async ({ page, request }, testInfo
     await shoot(name)
   }
 
+  // The opportunity RECORD is where the full treatment lives — what it is, why
+  // it may apply, what it costs, what it needs, what it assumes. The queue is
+  // deliberately terse, so reviewing only the queue would review the wrong
+  // surface.
+  await page.goto('/app/opportunities')
+  // Wait for the route to mount: the screens are lazy, so asking a freshly
+  // navigated page what is visible answers about the Suspense fallback.
+  await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })
+  const record = page.getByRole('link', { name: /open the record/i }).first()
+  if (await record.isVisible().catch(() => false)) {
+    await record.click()
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })
+    await shoot('opportunity-record')
+  }
+
   // The Decision Twin's whole point is the comparison, and an unmodelled bench
   // photographs as an empty panel. Drive it to an actual modelled position so
   // the flagship surface can be reviewed as customers will meet it.
@@ -153,4 +194,16 @@ test('capture the product for design review', async ({ page, request }, testInfo
       /* Captured either way: a refusal is a designed surface too. */
     })
   await shoot('twin-modelled')
+
+  // A viewport-only frame at rest. Full-page capture stitches, and a sticky
+  // navigation bar lands wherever it was at the final scroll offset — which
+  // reads in the stitched image as a nav bar dropped into the middle of the
+  // page. This frame is what the customer actually sees, and is how that
+  // artefact is told apart from a genuine layout fault.
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForTimeout(300)
+  await page.screenshot({
+    path: `${OUT}/${theme}-${project}-twin-viewport.png`,
+    fullPage: false,
+  })
 })
