@@ -1,0 +1,225 @@
+name: frontend quality gate
+
+# Every job here is blocking. There is no `continue-on-error`, no `|| true`, and
+# no warning threshold — the same rule the backend gate follows, for the same
+# reason: a gate that can be satisfied by a number rather than by zero drifts.
+#
+# The frontend had no CI at all. Its gates ran on a developer's machine, which
+# means they ran when somebody remembered.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: frontend
+
+env:
+  # Pinned, not floating: "20" would let a minor bump change the resolver
+  # between two runs of the same commit.
+  NODE_VERSION: "20.18.1"
+
+jobs:
+  static:
+    name: lint + types + unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install from the lockfile only
+        # `npm ci` fails if package.json and the lockfile disagree, and installs
+        # exactly what the lockfile pins. `npm install` would silently resolve
+        # something else and quietly rewrite the lockfile in CI.
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and component tests
+        run: npx vitest run
+
+      - name: Production build
+        run: npm run build
+
+      - name: The build ships no source maps
+        # Source maps republish the original sources, comments included, to
+        # anyone who opens devtools.
+        run: |
+          if ls dist/assets/*.map >/dev/null 2>&1; then
+            echo "::error::the production build emitted source maps"
+            exit 1
+          fi
+
+      - name: The bundle carries no secret-shaped material
+        # A public origin is fine in a bundle. A key is not, and the difference
+        # is worth checking mechanically because it is invisible in review.
+        run: |
+          if grep -rEq "(api[_-]?key|secret|password|private[_-]?key)['\"]?\s*[:=]\s*['\"][A-Za-z0-9_\-]{16,}" dist/assets/*.js; then
+            echo "::error::the bundle contains something shaped like a credential"
+            exit 1
+          fi
+
+  contract:
+    name: generated API contract is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.15"
+
+      - name: Install backend from the lock only
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock.txt
+          pip install --no-deps -e .
+
+      - name: Install frontend from the lockfile only
+        run: npm ci
+
+      - name: Regenerate the contract and require it to match
+        # `src/api/schema.ts` is GENERATED from the backend's OpenAPI document.
+        # A backend change that alters a response shape without regenerating it
+        # leaves the frontend typechecking against a contract the server no
+        # longer serves — which typechecks perfectly and fails at runtime.
+        run: |
+          cd ../backend
+          PYTHONPATH=. python -c "
+          import json
+          from app.main import create_app
+          json.dump(create_app().openapi(), open('openapi.json','w'), indent=2, sort_keys=True)
+          "
+          cd ../frontend
+          npm run gen:api
+          if ! git diff --exit-code -- src/api/schema.ts ../backend/openapi.json; then
+            echo "::error::the committed API contract is stale."
+            echo "::error::Regenerate backend/openapi.json, run 'npm run gen:api', and commit both."
+            exit 1
+          fi
+
+  dependencies:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install from the lockfile only
+        run: npm ci
+
+      - name: Report every advisory
+        # Informational, and printed first so the blocking step below has
+        # context above it in the log rather than a bare exit code.
+        run: npm audit --audit-level=info || true
+
+      - name: Fail on high or critical
+        # A SEVERITY threshold, not an error-count baseline. Low and moderate
+        # advisories in a build-time dependency are noise that would train
+        # people to ignore this job; high and critical are not.
+        run: npm audit --audit-level=high
+
+  browser:
+    name: browser journeys + accessibility
+    runs-on: ubuntu-latest
+    # The journeys drive a REAL backend against a REAL database. They are the
+    # only thing that proves the figure on screen is the figure the engine
+    # produced, so they are blocking rather than nightly.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: onyx_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.15"
+
+      - name: Install backend from the lock only
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements.lock.txt
+          pip install --no-deps -e .
+
+      - name: Apply the schema
+        working-directory: backend
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgresql://postgres@localhost:5432/onyx_e2e
+        run: ./scripts/apply_schema.sh
+
+      - name: Create the unprivileged runtime login
+        # THE APPLICATION MUST NOT CONNECT AS A SUPERUSER. A superuser BYPASSES
+        # ROW LEVEL SECURITY, so the journeys would pass while proving nothing
+        # about tenant isolation — the cross-tenant assertions would be checking
+        # a database that had stopped enforcing the thing they test.
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql "postgresql://postgres@localhost:5432/onyx_e2e" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_e2e_app') THEN
+              CREATE ROLE onyx_e2e_app LOGIN PASSWORD 'e2e' IN ROLE onyx_app_rw;
+            END IF;
+          END $$;
+          SQL
+
+      - name: Install frontend from the lockfile only
+        run: npm ci
+
+      - name: Install the browser
+        # Chromium only: the suite runs a desktop and a mobile profile, both
+        # Chromium, so fetching the others is time spent on nothing.
+        run: npx playwright install --with-deps chromium
+
+      - name: Journeys, parity and accessibility
+        env:
+          ONYX_DATABASE_URL: postgresql+asyncpg://onyx_e2e_app:e2e@localhost:5432/onyx_e2e
+        run: ./scripts/e2e.sh --workers=1
+
+      - name: Keep the report when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
