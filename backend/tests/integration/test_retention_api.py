@@ -348,7 +348,14 @@ async def test_changes_are_relative_to_the_latest_checkpoint(client):
     seen_once = (await client.get(_url(), headers=_auth(uid))).json()
     seen_twice = (await client.get(_url(), headers=_auth(uid))).json()
     assert seen_once == seen_twice
-    assert [c["category"] for c in seen_once["changes"]] == ["DECISION"]
+    # Two changes since C1, both real: the thread's scenario is this user's
+    # FIRST, and since the launch remediation a contribution scenario seals an
+    # explicit room assumption — so the ASSUMPTION assurance family transitions
+    # to READY after the checkpoint, beside the DEFER decision itself. The
+    # second thread below adds no such change: the family is already READY.
+    assert [c["category"] for c in seen_once["changes"]] == [
+        "ASSURANCE", "DECISION"]
+    assert seen_once["changes"][0]["subject"] == "ASSUMPTION"
 
     second = (await _acknowledge(client, uid)).json()
     assert second["supersedes_checkpoint_id"] == first["id"]

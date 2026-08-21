@@ -378,7 +378,17 @@ async def test_authoritative_empty_and_missing_authority_are_distinguishable():
     """
     uid, analysis_id = await _user_with_baseline_analysis()
     await _publish_rule()
-    current = await _seal(uid, analysis_id)
+    # A NON-contribution lever, deliberately: since the launch remediation,
+    # every contribution lever seals an explicit CONTRIBUTION_ROOM_AVAILABLE
+    # assumption, so "sealed with zero assumptions" — the AUTHORITATIVE_EMPTY
+    # this test exists to distinguish — is constructed from a lever the room
+    # policy does not touch.
+    current = await ScenarioService(uid)._simulate(
+        analysis_id,
+        ScenarioSpec.parse(
+            [{"lever_code": "INCREASE_DONATIONS",
+              "parameters": {"amount": Decimal("5000")}}]),
+        result_schema_version=SCENARIO_RESULT_SCHEMA_V3)
     legacy = await _seal(uid, analysis_id, amount="7000",
                          version=SCENARIO_RESULT_SCHEMA_V2)
 
