@@ -679,6 +679,9 @@ class ScenarioReplayService:
                 }
                 for a in assumptions
             ] or None,
+            # Sealed rows the platform wrote: their platform/statutory origins
+            # are the record, not a claim to re-litigate.
+            trusted_provenance=True,
         )
 
 

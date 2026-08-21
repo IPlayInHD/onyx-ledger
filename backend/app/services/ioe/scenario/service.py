@@ -1211,6 +1211,9 @@ class ScenarioService:
             note=scenario.note,
             jurisdiction=scenario.jurisdiction,
             tax_year=scenario.tax_year,
+            # Sealed rows the platform wrote: their platform/statutory origins
+            # are the record, not a claim to re-litigate.
+            trusted_provenance=True,
         )
 
 

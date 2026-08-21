@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -210,7 +211,15 @@ class LeverInput(BaseModel):
 
 
 class AssumptionInput(BaseModel):
-    """A registered assumption code plus exactly one typed value."""
+    """A registered assumption code plus exactly one typed value.
+
+    Origin fields are CLOSED vocabularies. The full sets are expressible here
+    because this model also renders platform-attached assumptions on output
+    surfaces — but on input the domain parser further requires
+    `source="user"` / `certainty="user_asserted"`: an API payload states the
+    caller's own declaration and cannot claim platform or statutory
+    provenance.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -221,9 +230,12 @@ class AssumptionInput(BaseModel):
     value_number: Decimal | None = None
     value_text: str | None = None
     value_boolean: bool | None = None
-    materiality: str = "medium"
-    source: str = "user"
-    certainty: str = "user_asserted"
+    materiality: Literal["high", "medium", "low"] = "medium"
+    source: Literal["user", "platform", "analysis"] = "user"
+    certainty: Literal[
+        "user_asserted", "platform_default", "derived_from_data", "statutory_known"
+    ] = "user_asserted"
+    affects_eligibility: bool = False
 
 
 class ScenarioCreateRequest(BaseModel):

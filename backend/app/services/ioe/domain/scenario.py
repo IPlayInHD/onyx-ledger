@@ -240,6 +240,16 @@ def canonical_scenario_result(
 MAX_LEVERS_PER_SCENARIO = 25
 MAX_ASSUMPTIONS_PER_SCENARIO = 25
 
+# Closed assumption-origin vocabularies. `source` says WHO put the assumption
+# on the scenario and `certainty` says WHY its value is believed; downstream
+# language (sealed records, the explanation renderer) keys off both, so an
+# out-of-vocabulary value is refused rather than stored and interpreted later.
+ASSUMPTION_SOURCES = frozenset({"user", "platform", "analysis"})
+ASSUMPTION_CERTAINTIES = frozenset({
+    "user_asserted", "platform_default", "derived_from_data", "statutory_known",
+})
+ASSUMPTION_MATERIALITIES = frozenset({"high", "medium", "low"})
+
 # Shapes that must never appear in a scenario request. Listed explicitly so the
 # refusal message can name what was rejected instead of failing obscurely.
 _FORBIDDEN_KEYS = frozenset({
@@ -305,7 +315,14 @@ class LeverRequest:
 
 @dataclass(frozen=True)
 class AssumptionRequest:
-    """A registered assumption code plus exactly one typed value."""
+    """A registered assumption code plus exactly one typed value.
+
+    Origin fields are validated against the closed vocabularies on EVERY
+    construction — platform code paths included — because a sealed record
+    carrying an unknown origin would be uninterpretable by everything that
+    renders it. WHO may claim which origin is enforced one level up, at the
+    parser that user payloads cross.
+    """
 
     assumption_code: str
     value_number: Decimal | None = None
@@ -315,6 +332,23 @@ class AssumptionRequest:
     source: str = "user"
     certainty: str = "user_asserted"
     affects_eligibility: bool = False
+
+    def __post_init__(self) -> None:
+        if self.source not in ASSUMPTION_SOURCES:
+            raise ScenarioSpecError(
+                f"assumption '{self.assumption_code}': source must be one of "
+                f"{sorted(ASSUMPTION_SOURCES)}, not {self.source!r}"
+            )
+        if self.certainty not in ASSUMPTION_CERTAINTIES:
+            raise ScenarioSpecError(
+                f"assumption '{self.assumption_code}': certainty must be one of "
+                f"{sorted(ASSUMPTION_CERTAINTIES)}, not {self.certainty!r}"
+            )
+        if self.materiality not in ASSUMPTION_MATERIALITIES:
+            raise ScenarioSpecError(
+                f"assumption '{self.assumption_code}': materiality must be one "
+                f"of {sorted(ASSUMPTION_MATERIALITIES)}, not {self.materiality!r}"
+            )
 
     def as_canonical(self) -> dict:
         return {
@@ -371,6 +405,7 @@ class ScenarioSpec:
         note: str | None = None,
         jurisdiction: str | None = None,
         tax_year: int | None = None,
+        trusted_provenance: bool = False,
     ) -> ScenarioSpec:
         """Build a spec from untrusted input, refusing anything else.
 
@@ -394,7 +429,9 @@ class ScenarioSpec:
                 raw, index, jurisdiction=jurisdiction, tax_year=tax_year
             ))
 
-        parsed_assumptions = cls._parse_assumptions(assumptions)
+        parsed_assumptions = cls._parse_assumptions(
+            assumptions, trusted_provenance=trusted_provenance
+        )
         return cls(
             levers=tuple(parsed),
             assumptions=parsed_assumptions,
@@ -450,7 +487,20 @@ class ScenarioSpec:
         )
 
     @staticmethod
-    def _parse_assumptions(assumptions: Any) -> tuple[AssumptionRequest, ...]:
+    def _parse_assumptions(
+        assumptions: Any, *, trusted_provenance: bool = False
+    ) -> tuple[AssumptionRequest, ...]:
+        """`trusted_provenance` distinguishes the two callers this parser has.
+
+        False — the default — is the UNTRUSTED boundary: an API payload, whose
+        assumptions are by definition the caller's own declarations, so
+        platform/statutory origin labels are refused. True is for rebuilding a
+        spec from SEALED STORED ROWS the platform itself wrote (replay,
+        refresh): those rows legitimately carry the platform-attached origins
+        the room policy sealed, and re-litigating them would make sealed
+        scenarios unreplayable. The closed-vocabulary check in
+        `AssumptionRequest.__post_init__` applies to both.
+        """
         if assumptions is None:
             return ()
         if not isinstance(assumptions, (list, tuple)):
@@ -493,14 +543,46 @@ class ScenarioSpec:
                     f"assumption '{code}': value_number must be a Decimal, "
                     "never a float or a string expression"
                 )
+            materiality = raw.get("materiality", "medium")
+            if materiality not in ASSUMPTION_MATERIALITIES:
+                raise ScenarioSpecError(
+                    f"assumption '{code}': materiality must be one of "
+                    f"{sorted(ASSUMPTION_MATERIALITIES)}"
+                )
+            # Origin integrity: on the untrusted path everything this parser
+            # accepts is BY DEFINITION the caller's own declaration. Platform
+            # and statutory provenance are attached by platform code
+            # constructing AssumptionRequest directly; accepting those labels
+            # from a payload would let it impersonate governed provenance, and
+            # the sealed record would then misstate who said the value and why
+            # it is believed.
+            source = raw.get("source", "user")
+            certainty = raw.get("certainty", "user_asserted")
+            if not trusted_provenance:
+                if source != "user":
+                    raise ScenarioSpecError(
+                        f"assumption '{code}': source must be 'user' — an "
+                        "API-supplied assumption is the caller's own "
+                        "declaration; platform/analysis provenance is attached "
+                        "by the platform, never claimed through a payload"
+                    )
+                if certainty != "user_asserted":
+                    raise ScenarioSpecError(
+                        f"assumption '{code}': certainty must be "
+                        "'user_asserted' — platform_default, derived_from_data "
+                        "and statutory_known cannot be claimed through a "
+                        "payload"
+                    )
+                source = "user"
+                certainty = "user_asserted"
             out.append(AssumptionRequest(
                 assumption_code=code,
                 value_number=Decimal(number) if number is not None else None,
                 value_text=raw.get("value_text"),
                 value_boolean=raw.get("value_boolean"),
-                materiality=raw.get("materiality", "medium"),
-                source=raw.get("source", "user"),
-                certainty=raw.get("certainty", "user_asserted"),
+                materiality=materiality,
+                source=source,
+                certainty=certainty,
                 affects_eligibility=bool(raw.get("affects_eligibility", False)),
             ))
         # Sorted so two requests differing only in assumption order are the same
@@ -532,6 +614,9 @@ def _refuse_executable_shapes(payload: dict, where: str) -> None:
 
 
 __all__ = [
+    "ASSUMPTION_CERTAINTIES",
+    "ASSUMPTION_MATERIALITIES",
+    "ASSUMPTION_SOURCES",
     "CURRENT_SCENARIO_RESULT_SCHEMA_VERSION",
     "DERIVED_STATE_BEARING_VERSIONS",
     "MAX_ASSUMPTIONS_PER_SCENARIO",
