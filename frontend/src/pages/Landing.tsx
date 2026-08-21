@@ -16,15 +16,12 @@
    navigation, neither of which means anything to a signed-out visitor.
    ========================================================================= */
 import { Link } from 'react-router-dom'
-import {
-  SUPPORTED_TAX_YEARS,
-  SiteFooter,
-  Wordmark,
-} from '@/components/Shell'
+import { SiteFooter, Wordmark } from '@/components/Shell'
+import { useLaunchScope } from '@/lib/queries'
 import { Provenance, type ProvenanceKind } from '@/components/trust'
 
-/** "2025 and 2026". Presentation only — the list itself belongs to the shell,
- *  which keeps it in step with the years the engine has governed data for. */
+/** "2025 and 2026". Presentation only — the list itself is the backend's,
+ *  served anonymously so this page can state it without an account. */
 function listYears(years: readonly number[]): string {
   const labels = years.map(String)
   const last = labels.pop()
@@ -157,7 +154,11 @@ function SectionHead({
 }
 
 export default function Landing() {
-  const years = listYears(SUPPORTED_TAX_YEARS)
+  // "supported" is a claim about coverage, so it comes from the backend. Until
+  // it answers the sentence reads "the supported tax years" rather than naming
+  // years this build guessed at.
+  const scope = useLaunchScope()
+  const years = scope.data ? listYears(scope.data.tax_years) : 'supported'
 
   return (
     <div className="shell">

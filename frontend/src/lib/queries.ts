@@ -10,6 +10,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   analysisApi,
+  configApi,
   financialsApi,
   ioeApi,
   profileApi,
@@ -17,6 +18,7 @@ import {
 } from '@/api/endpoints'
 
 export const keys = {
+  launchScope: () => ['config', 'launch-scope'] as const,
   profile: ['profile'] as const,
   analyses: ['analyses'] as const,
   recommendations: (id: string) => ['recommendations', id] as const,
@@ -148,5 +150,20 @@ export function useCreateScenario() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.scenarios })
     },
+  })
+}
+
+/**
+ * The launch scope: which tax years and provinces may be chosen.
+ *
+ * Cached hard. It changes when the product's coverage changes, which is a
+ * deployment, not a user action — and every onboarding step and settings form
+ * asks for it.
+ */
+export function useLaunchScope() {
+  return useQuery({
+    queryKey: keys.launchScope(),
+    queryFn: () => configApi.launchScope(),
+    staleTime: 60 * 60 * 1000,
   })
 }

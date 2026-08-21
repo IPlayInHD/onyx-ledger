@@ -42,6 +42,7 @@ import {
   useProfile,
   useRegisteredAccounts,
   useRunAnalysis,
+  useLaunchScope,
 } from '@/lib/queries'
 
 /* ------------------------------------------------------- closed vocabularies -- */
@@ -54,24 +55,16 @@ interface Option {
   label: string
 }
 
-/** The provinces Onyx will answer for.
+/**
+ * The provinces Onyx will answer for come from the BACKEND.
  *
- * NOT simply "the provinces with a bracket table". The engine also carries
- * Quebec brackets, and offering them would have been wrong: Quebec residents
- * pay QPP rather than CPP and pay QPIP premiums, and the engine implements
- * neither — a Quebec customer would have been shown a confident figure computed
- * with the wrong payroll contributions entirely.
- *
- * Of the three below, only Ontario is backed by GOVERNED PUBLISHED brackets;
- * Alberta and British Columbia are computed from the engine's own resident
- * constants. That difference is recorded for the launch-scope decision rather
- * than hidden behind a longer list.
+ * This file used to carry its own array. It drifted from the engine
+ * immediately and offered Quebec, which has brackets but no QPP or QPIP
+ * handling — a Quebec customer would have been shown a confident figure
+ * computed with the wrong payroll contributions. There is now one list,
+ * `/config/launch-scope`, checked on the backend against the engine's own
+ * resolved dataset.
  */
-const PROVINCES: readonly Option[] = [
-  { value: 'AB', label: 'Alberta' },
-  { value: 'BC', label: 'British Columbia' },
-  { value: 'ON', label: 'Ontario' },
-]
 
 const MARITAL_STATUSES: readonly Option[] = [
   { value: 'single', label: 'Single' },
@@ -451,6 +444,15 @@ function StatedByYouNote() {
 /* ================================================================= page == */
 
 export default function Onboarding() {
+  // The province list is the backend's. While it loads the field offers
+  // nothing: an empty select is honest, and a built-in fallback would be
+  // the parallel registry this contract exists to remove.
+  const provinces = useLaunchScope().data?.provinces ?? []
+  const provinceOptions: readonly Option[] = provinces.map((p) => ({
+    value: p.code,
+    label: p.name,
+  }))
+
   const { taxYear } = useTaxYear()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -838,13 +840,13 @@ export default function Onboarding() {
                 </p>
 
                 <SelectField
-                  hint="Onyx supports Alberta, British Columbia and Ontario today. Quebec files a separate provincial return with its own pension and parental-insurance contributions, which Onyx does not calculate yet, so it is not offered rather than accepted and answered with a wrong figure."
+                  hint="Onyx answers for the provinces offered here. A province Onyx cannot price is not offered, rather than accepted and then answered with a figure computed under the wrong rules."
                   id="province"
                   label="Province you file in"
                   onChange={(value) =>
                     setSituation((previous) => ({ ...previous, provinceCode: value }))
                   }
-                  options={PROVINCES}
+                  options={provinceOptions}
                   placeholder="Select a province"
                   problem={problemFor(problems, 'province')}
                   value={situation.provinceCode}
@@ -1282,7 +1284,7 @@ export default function Onboarding() {
                         <div className="figrow__cell">
                           <dt className="figrow__label">Province</dt>
                           <dd className="figure figure--sm m-0">
-                            {labelFor(PROVINCES, record.province_code)}
+                            {labelFor(provinceOptions, record.province_code)}
                           </dd>
                         </div>
                         <div className="figrow__cell">

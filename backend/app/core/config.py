@@ -38,6 +38,22 @@ class Settings(BaseSettings):
     ioe_integrity_interval_minutes: int = 15
     ioe_integrity_timeout_seconds: float = 60.0
 
+    # --- launch scope ---
+    #
+    # WHAT ONYX OFFERS, which is narrower than what the engine CAN compute.
+    #
+    # These are not a second tax registry. The engine's resolved dataset remains
+    # the authority on what is computable, and a test asserts every pair below
+    # actually resolves there — so this can only ever NARROW the engine, never
+    # claim capability it does not have.
+    #
+    # Federal is implicit in every Canadian return and is not listed. Alberta
+    # and British Columbia are computable but rest partly on constants resident
+    # in the engine rather than governed published brackets; Quebec needs QPP and
+    # QPIP handling that does not exist. None of the three is offered.
+    launch_tax_years: tuple[int, ...] = (2025, 2026)
+    launch_provinces: tuple[str, ...] = ("ON",)
+
     # --- database (async URL for the app; sync URL for Alembic) ---
     database_url: str = "postgresql+asyncpg://onyx_app_rw@localhost:5432/onyx"
     database_url_sync: str = "postgresql+psycopg2://onyx_migrator@localhost:5432/onyx"

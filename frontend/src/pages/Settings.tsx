@@ -37,7 +37,7 @@ import {
   storeTheme,
   type ThemePreference,
 } from '@/lib/theme'
-import { keys, useProfile } from '@/lib/queries'
+import { keys, useLaunchScope, useProfile } from '@/lib/queries'
 import { accountApi, profileApi, type TaxProfileIn } from '@/api/endpoints'
 import { ApiError } from '@/api/client'
 import { useAuth } from '@/auth/AuthProvider'
@@ -56,11 +56,16 @@ interface Option {
  *  Offering a fifth would produce a fail-closed error the customer cannot act
  *  on, so the other provinces are not offered rather than accepted and then
  *  refused. */
-const PROVINCES: readonly Option[] = [
-  { value: 'AB', label: 'Alberta' },
-  { value: 'BC', label: 'British Columbia' },
-  { value: 'ON', label: 'Ontario' },
-]
+/**
+ * The provinces Onyx will answer for come from the BACKEND.
+ *
+ * This file used to carry its own array. It drifted from the engine
+ * immediately and offered Quebec, which has brackets but no QPP or QPIP
+ * handling — a Quebec customer would have been shown a confident figure
+ * computed with the wrong payroll contributions. There is now one list,
+ * `/config/launch-scope`, checked on the backend against the engine's own
+ * resolved dataset.
+ */
 
 const MARITAL_STATUSES: readonly Option[] = [
   { value: 'single', label: 'Single' },
@@ -409,6 +414,11 @@ function fromBoolean(value: boolean): YesNo {
 }
 
 function TaxProfileSection() {
+  // One list, owned by the backend. See the note above the removed constant.
+  const provinceOptions: readonly Option[] = (
+    useLaunchScope().data?.provinces ?? []
+  ).map((p) => ({ value: p.code, label: p.name }))
+
   const profile = useProfile()
   const queryClient = useQueryClient()
 
@@ -542,11 +552,11 @@ function TaxProfileSection() {
           ) : null}
 
           <SelectField
-            hint="Onyx supports Alberta, British Columbia and Ontario today. Quebec files a separate provincial return with its own pension and parental-insurance contributions, which Onyx does not calculate yet, so it is not offered rather than accepted and answered with a wrong figure."
+            hint="Onyx answers for the provinces offered here. A province Onyx cannot price is not offered, rather than accepted and then answered with a figure computed under the wrong rules."
             id="province"
             label="Province you file in"
             onChange={(value) => change({ provinceCode: value })}
-            options={PROVINCES}
+            options={provinceOptions}
             placeholder="Select a province"
             problem={problemFor(problems, 'province')}
             value={form.provinceCode}

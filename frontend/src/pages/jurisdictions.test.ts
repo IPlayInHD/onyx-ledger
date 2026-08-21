@@ -1,50 +1,66 @@
 /* =========================================================================
-   ONYX ONLY OFFERS WHAT IT CAN ANSWER
+   THE FRONTEND KEEPS NO LIST OF ITS OWN
    =========================================================================
-   The onboarding and settings forms once offered Quebec, on the reasoning that
-   the engine carries Quebec brackets. It does — and that was not enough. A
-   Quebec resident pays QPP rather than CPP and pays QPIP premiums, and the tax
-   engine implements neither, so the figure a Quebec customer would have been
-   shown was computed with the wrong payroll contributions and presented with
-   the same confidence as a correct one.
+   Onboarding and settings each carried a hard-coded array of provinces, and
+   the shell carried a hard-coded array of tax years. They drifted from the
+   engine immediately: the copy offered Quebec, which has brackets but no QPP
+   or QPIP handling, so a Quebec customer would have been shown a confident
+   figure computed with the wrong payroll contributions.
 
-   Offering a jurisdiction is a claim that Onyx can answer for it. This test
-   keeps the two province lists identical and keeps Quebec out of both until
-   the engine can actually answer for it.
+   The list now comes from `/config/launch-scope`, and the backend checks it
+   against the engine's own resolved dataset before serving it. This test does
+   not re-check the CONTENT — that is the backend's job and duplicating it here
+   would recreate the very thing being removed. It checks that no copy has crept
+   back in.
    ========================================================================= */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-function offeredProvinces(file: string): string[] {
-  const source = readFileSync(resolve(process.cwd(), file), 'utf8')
-  const block = /const PROVINCES: readonly Option\[\] = \[(.*?)\]/s.exec(source)
-  expect(block?.[1], `${file} must declare a PROVINCES list`).toBeTruthy()
-  return [...block![1]!.matchAll(/value: '([A-Z]{2})'/g)].map((m) => m[1]!)
+const FILES = [
+  'src/pages/Onboarding.tsx',
+  'src/pages/Settings.tsx',
+  'src/components/Shell.tsx',
+  'src/pages/Landing.tsx',
+]
+
+function source(file: string): string {
+  return readFileSync(resolve(process.cwd(), file), 'utf8')
 }
 
-const FORMS = ['src/pages/Onboarding.tsx', 'src/pages/Settings.tsx']
+describe('no parallel jurisdiction registry', () => {
+  for (const file of FILES) {
+    it(`${file} declares no province list`, () => {
+      const text = source(file)
+      // A province array is recognisable by its two-letter codes appearing as
+      // literal values, which is exactly how the old constants were written.
+      const codes = text.match(/value: '(AB|BC|MB|NB|NL|NS|NT|NU|ON|PE|QC|SK|YT)'/g)
+      expect(
+        codes,
+        `${file} hard-codes province codes; use the backend launch scope instead`,
+      ).toBeNull()
+    })
 
-describe('offered jurisdictions', () => {
-  for (const form of FORMS) {
-    it(`${form} does not offer a province the engine cannot answer for`, () => {
-      const offered = offeredProvinces(form)
-      expect(offered.length).toBeGreaterThan(0)
-      // Quebec: no QPP, no QPIP, no governed published brackets, and marked a
-      // deferred jurisdiction by the content-ingestion policy.
-      expect(offered, 'Quebec is not answerable yet').not.toContain('QC')
-      // The territories and the remaining provinces have no bracket data at
-      // all; offering one would be accepting input Onyx cannot price.
-      for (const absent of ['NU', 'NT', 'YT', 'NL', 'PE', 'NS', 'NB', 'MB', 'SK']) {
-        expect(offered, `${absent} has no bracket data`).not.toContain(absent)
-      }
+    it(`${file} declares no tax-year list`, () => {
+      const text = source(file)
+      // Two or more four-digit years in one array literal is a list; a single
+      // starting value (the shell's DEFAULT_TAX_YEAR) is not.
+      const arrays = text.match(/\[\s*20\d\d\s*,\s*20\d\d[\s\S]{0,40}?\]/g)
+      expect(
+        arrays,
+        `${file} hard-codes a tax-year list; use the backend launch scope instead`,
+      ).toBeNull()
     })
   }
 
-  it('offers exactly the same set everywhere it asks', () => {
-    // Two lists that drift let a customer pick a province during onboarding
-    // that they can never change back to in settings, or the reverse.
-    const [onboarding, settings] = FORMS.map(offeredProvinces)
-    expect([...settings!].sort()).toEqual([...onboarding!].sort())
+  it('the forms actually ask the backend', () => {
+    // Non-vacuity. Every assertion above is "this text is absent", which a file
+    // that rendered no province field at all would satisfy perfectly.
+    for (const file of ['src/pages/Onboarding.tsx', 'src/pages/Settings.tsx']) {
+      expect(source(file), `${file} should read the launch scope`).toContain(
+        'useLaunchScope',
+      )
+    }
+    expect(source('src/components/Shell.tsx')).toContain('useLaunchScope')
   })
 })

@@ -4,433 +4,6 @@
  */
 
 export interface paths {
-    "/api/v1/auth/register": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Register
-         * @description Create an account.
-         *
-         *     Throttled on the same class as login. Registration is not a credential test,
-         *     but it is unauthenticated, it writes two rows and computes an Argon2 hash,
-         *     and — because it must say whether an address is already taken — an
-         *     unthrottled version is a fast account-enumeration oracle. The throttle does
-         *     not remove that disclosure; it bounds how quickly it can be harvested.
-         */
-        post: operations["register_api_v1_auth_register_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Login
-         * @description Exchange credentials for a token pair.
-         *
-         *     Admission runs FIRST — before the user lookup and before Argon2 — so a
-         *     refused attempt costs one indexed UPSERT instead of a deliberately expensive
-         *     key derivation. See `app.services.admission.auth`.
-         */
-        post: operations["login_api_v1_auth_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh
-         * @description Rotate a refresh token.
-         *
-         *     Also a credential surface: a stolen or guessed refresh token is presented
-         *     here. The identity scope is keyed on the presented TOKEN rather than on an
-         *     email, because that is the only identity claim the request carries — it
-         *     bounds how fast one token can be hammered, while the address scope bounds
-         *     hammering with a rotating supply of them.
-         */
-        post: operations["refresh_api_v1_auth_refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Logout */
-        post: operations["logout_api_v1_auth_logout_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/users/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Me */
-        get: operations["get_me_api_v1_users_me_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/users/me/tax-profile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Tax Profile */
-        get: operations["get_tax_profile_api_v1_users_me_tax_profile_get"];
-        /** Upsert Tax Profile */
-        put: operations["upsert_tax_profile_api_v1_users_me_tax_profile_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/financials/income": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Income */
-        get: operations["list_income_api_v1_financials_income_get"];
-        put?: never;
-        /**
-         * Add Income
-         * @description Record an income source.
-         *
-         *     NORMAL_WRITE: cheap per call, and an UNBOUNDED row creator. RLS keeps the
-         *     rows inside one tenant, which bounds who can read them and not how many
-         *     there are — a script here fills a tenant's own financial tables and, through
-         *     them, the cost of every later analysis over that year.
-         */
-        post: operations["add_income_api_v1_financials_income_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/financials/registered-accounts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Registered Accounts */
-        get: operations["list_registered_accounts_api_v1_financials_registered_accounts_get"];
-        put?: never;
-        /**
-         * Add Registered Account
-         * @description Record an actual RRSP/FHSA contribution for a tax year — a fact the
-         *     baseline analysis reads, as opposed to a scenario lever, which models a
-         *     contribution not yet made.
-         */
-        post: operations["add_registered_account_api_v1_financials_registered_accounts_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/financials/expenses": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Add Expense */
-        post: operations["add_expense_api_v1_financials_expenses_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/financials/income/{income_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Income
-         * @description Delete one owned income source.
-         *
-         *     The tax year is a required query parameter rather than something the server
-         *     looks up, because the table is partitioned on it and the primary key is
-         *     (id, tax_year). Supplying it prunes to one partition; without it the server
-         *     would have to scan every year to find a row the caller already knows the
-         *     year of.
-         *
-         *     It is NOT authorization — ownership is checked against the row, and a wrong
-         *     year simply finds nothing.
-         *
-         *     NORMAL_WRITE admission: cheap per call, but it is a mutation and an
-         *     unbounded caller should not be able to drive deletions in a loop for free.
-         */
-        delete: operations["delete_income_api_v1_financials_income__income_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/financials/expenses/{expense_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Expense
-         * @description Delete one owned expense. Same contract as `delete_income`.
-         */
-        delete: operations["delete_expense_api_v1_financials_expenses__expense_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tax/rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Published Rules
-         * @description Published tax rules in force for a year (the versioned KB, read-only).
-         */
-        get: operations["list_published_rules_api_v1_tax_rules_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/analysis": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Analyses */
-        get: operations["list_analyses_api_v1_analysis_get"];
-        put?: never;
-        /**
-         * Run Analysis
-         * @description Run a full analysis. Admission-controlled: this is a synchronous engine
-         *     run plus a rules evaluation plus a frozen snapshot, and a double-click has
-         *     nothing to add while the first one is still going.
-         */
-        post: operations["run_analysis_api_v1_analysis_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/recommendations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Recommendations */
-        get: operations["list_recommendations_api_v1_recommendations_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/documents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Documents */
-        get: operations["list_documents_api_v1_documents_get"];
-        put?: never;
-        /**
-         * Create Upload
-         * @description Register a document and hand back a presigned upload URL.
-         *
-         *     TWO size checks, and only the second one is a bound.
-         *
-         *     The bytes never pass through this process — they go straight to object
-         *     storage — so the check here is on the DECLARED size. It is an early, cheap
-         *     refusal that catches an honest client and saves a round trip. It is NOT
-         *     enforcement: a caller that wants to store 30 MB under a 25 MB limit simply
-         *     declares 1 MB.
-         *
-         *     Enforcement is the ceiling attached to the presigned authorization itself,
-         *     which the store applies to the bytes that actually arrive
-         *     (`ObjectStorage.presign_put(..., max_bytes=...)`; in S3 that is a POST
-         *     policy `content-length-range` condition). The declaration is honoured too,
-         *     where it is tighter — a client that says 1 MB and sends 5 MB is refused
-         *     even though 5 MB is under the platform limit.
-         */
-        post: operations["create_upload_api_v1_documents_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/documents/{document_id}/process": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Process
-         * @description Extract fields from an uploaded document.
-         *
-         *     Uploading and PROCESSING are separate costs, and this is the expensive one:
-         *     it is the classic path for turning one cheap request into minutes of CPU.
-         *     Bounded concurrency, and a dedupe key on the document so re-processing the
-         *     same immutable document cannot create unlimited work.
-         */
-        post: operations["process_api_v1_documents__document_id__process_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/documents/{document_id}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Confirm
-         * @description Turn a confirmed extraction into income/expense rows.
-         *
-         *     NORMAL_WRITE rather than DOCUMENT_PROCESS: no extraction runs here, but each
-         *     call writes a row per extracted field plus a provenance link, so repeated
-         *     confirmation of one document is an unbounded row creator.
-         */
-        post: operations["confirm_api_v1_documents__document_id__confirm_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/documents/{document_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Document
-         * @description Delete one owned document: binary, extraction and all.
-         *
-         *     The document is named by ID and the object key is resolved SERVER-SIDE from
-         *     the owned row. A client never supplies a bucket or a key — a caller able to
-         *     name its own key could ask the platform to delete an arbitrary object,
-         *     including another tenant's, and the ownership check would never see it.
-         *
-         *     Synchronous, and deliberately so. The work is one object deletion and two
-         *     bounded statements, all of which comfortably fit inside a request; a 202
-         *     with a background job would add a durable queue, a worker and a state
-         *     machine to defer something that already finished. If object deletion ever
-         *     becomes slow enough to matter — a versioned bucket needing per-version
-         *     deletes — this returns 202 and grows the job then, on evidence.
-         *
-         *     NORMAL_WRITE admission: cheap per call, but it is a mutation and an
-         *     unbounded caller should not be able to drive object-store deletions in a
-         *     loop for free.
-         */
-        delete: operations["delete_document_api_v1_documents__document_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/account/deletion": {
         parameters: {
             query?: never;
@@ -465,6 +38,153 @@ export interface paths {
          *     starting another.
          */
         post: operations["request_account_deletion_api_v1_account_deletion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Login
+         * @description Operator login.
+         *
+         *     Throttled on the same class as user login, and if anything it matters more
+         *     here: the population of valid operator addresses is tiny, which makes this
+         *     the highest-value guessing target in the product.
+         */
+        post: operations["admin_login_api_v1_admin_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Change Requests */
+        get: operations["list_change_requests_api_v1_admin_change_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/change-requests/{change_request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Change Request */
+        post: operations["approve_change_request_api_v1_admin_change_requests__change_request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/ingestion/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Ingestion Job
+         * @description Raw dataset -> Extract -> Validate -> Transform -> DRAFT rule versions +
+         *     a pending four-eyes change request per rule.
+         *
+         *     The same cost class as a TKMS import: it parses a whole dataset and writes a
+         *     draft version plus a change request per rule. Bounded on bytes first, then
+         *     on the acting operator's import allowance.
+         */
+        post: operations["create_ingestion_job_api_v1_admin_ingestion_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Rule Versions */
+        get: operations["list_rule_versions_api_v1_admin_rules_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rules/{version_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Rule
+         * @description Activate an approved rule version.
+         *
+         *     Guarded on the ACTING OPERATOR, and the guard is outside the service call so
+         *     a refusal happens BEFORE activation — no version transitions to published,
+         *     and no freshness event is emitted for a publication that did not occur. A
+         *     guard placed inside the service, after the status change, would bound
+         *     nothing that matters: the invalidation storm is the cost, and it would
+         *     already have been paid.
+         */
+        post: operations["publish_rule_api_v1_admin_rules__version_id__publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask New
+         * @description One-shot: starts a new conversation and answers.
+         */
+        post: operations["ask_new_api_v1_ai_ask_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -522,26 +242,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ai/ask": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ask New
-         * @description One-shot: starts a new conversation and answers.
-         */
-        post: operations["ask_new_api_v1_ai_ask_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/ai/explanations": {
         parameters: {
             query?: never;
@@ -562,7 +262,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/auth/login": {
+    "/api/v1/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Analyses */
+        get: operations["list_analyses_api_v1_analysis_get"];
+        put?: never;
+        /**
+         * Run Analysis
+         * @description Run a full analysis. Admission-controlled: this is a synchronous engine
+         *     run plus a rules evaluation plus a frozen snapshot, and a double-click has
+         *     nothing to add while the first one is still going.
+         */
+        post: operations["run_analysis_api_v1_analysis_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
         parameters: {
             query?: never;
             header?: never;
@@ -572,21 +295,38 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Admin Login
-         * @description Operator login.
+         * Login
+         * @description Exchange credentials for a token pair.
          *
-         *     Throttled on the same class as user login, and if anything it matters more
-         *     here: the population of valid operator addresses is tiny, which makes this
-         *     the highest-value guessing target in the product.
+         *     Admission runs FIRST — before the user lookup and before Argon2 — so a
+         *     refused attempt costs one indexed UPSERT instead of a deliberately expensive
+         *     key derivation. See `app.services.admission.auth`.
          */
-        post: operations["admin_login_api_v1_admin_auth_login_post"];
+        post: operations["login_api_v1_auth_login_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/ingestion/jobs": {
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout */
+        post: operations["logout_api_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
             header?: never;
@@ -596,39 +336,23 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Create Ingestion Job
-         * @description Raw dataset -> Extract -> Validate -> Transform -> DRAFT rule versions +
-         *     a pending four-eyes change request per rule.
+         * Refresh
+         * @description Rotate a refresh token.
          *
-         *     The same cost class as a TKMS import: it parses a whole dataset and writes a
-         *     draft version plus a change request per rule. Bounded on bytes first, then
-         *     on the acting operator's import allowance.
+         *     Also a credential surface: a stolen or guessed refresh token is presented
+         *     here. The identity scope is keyed on the presented TOKEN rather than on an
+         *     email, because that is the only identity claim the request carries — it
+         *     bounds how fast one token can be hammered, while the address scope bounds
+         *     hammering with a rotating supply of them.
          */
-        post: operations["create_ingestion_job_api_v1_admin_ingestion_jobs_post"];
+        post: operations["refresh_api_v1_auth_refresh_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/change-requests/{change_request_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve Change Request */
-        post: operations["approve_change_request_api_v1_admin_change_requests__change_request_id__approve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/rules/{version_id}/publish": {
+    "/api/v1/auth/register": {
         parameters: {
             query?: never;
             header?: never;
@@ -638,32 +362,34 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Publish Rule
-         * @description Activate an approved rule version.
+         * Register
+         * @description Create an account.
          *
-         *     Guarded on the ACTING OPERATOR, and the guard is outside the service call so
-         *     a refusal happens BEFORE activation — no version transitions to published,
-         *     and no freshness event is emitted for a publication that did not occur. A
-         *     guard placed inside the service, after the status change, would bound
-         *     nothing that matters: the invalidation storm is the cost, and it would
-         *     already have been paid.
+         *     Throttled on the same class as login. Registration is not a credential test,
+         *     but it is unauthenticated, it writes two rows and computes an Argon2 hash,
+         *     and — because it must say whether an address is already taken — an
+         *     unthrottled version is a fast account-enumeration oracle. The throttle does
+         *     not remove that disclosure; it bounds how quickly it can be harvested.
          */
-        post: operations["publish_rule_api_v1_admin_rules__version_id__publish_post"];
+        post: operations["register_api_v1_auth_register_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/rules": {
+    "/api/v1/config/launch-scope": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Rule Versions */
-        get: operations["list_rule_versions_api_v1_admin_rules_get"];
+        /**
+         * Launch Scope
+         * @description The tax years and provinces a customer may currently choose.
+         */
+        get: operations["launch_scope_api_v1_config_launch_scope_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -672,58 +398,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/change-requests": {
+    "/api/v1/documents": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Change Requests */
-        get: operations["list_change_requests_api_v1_admin_change_requests_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/imports": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Imports */
-        get: operations["list_imports_api_v1_tkms_imports_get"];
+        /** List Documents */
+        get: operations["list_documents_api_v1_documents_get"];
         put?: never;
         /**
-         * Create Import
-         * @description Ingest a legislation document and run the governed pipeline.
+         * Create Upload
+         * @description Register a document and hand back a presigned upload URL.
          *
-         *     THREE bounds, in the order they cost something:
+         *     TWO size checks, and only the second one is a bound.
          *
-         *       1. the payload's real encoded size, refused before a row is written;
-         *       2. admission on the acting operator, refused before parsing starts;
-         *       3. `MAX_IMPORT_ROWS` inside `ImportService.extract`, which is where the
-         *          staged-row count is actually known — a small document can expand into
-         *          an enormous ruleset, so a byte bound does not imply a row bound.
+         *     The bytes never pass through this process — they go straight to object
+         *     storage — so the check here is on the DECLARED size. It is an early, cheap
+         *     refusal that catches an honest client and saves a round trip. It is NOT
+         *     enforcement: a caller that wants to store 30 MB under a 25 MB limit simply
+         *     declares 1 MB.
          *
-         *     Authorization comes FIRST, before the byte check and before admission: an
-         *     operator without `tkms.import` must not be able to spend an admission
-         *     allowance, and must not learn anything from the difference between "too
-         *     large" and "not permitted".
+         *     Enforcement is the ceiling attached to the presigned authorization itself,
+         *     which the store applies to the bytes that actually arrive
+         *     (`ObjectStorage.presign_put(..., max_bytes=...)`; in S3 that is a POST
+         *     policy `content-length-range` condition). The declaration is honoured too,
+         *     where it is tighter — a client that says 1 MB and sends 5 MB is refused
+         *     even though 5 MB is under the platform limit.
          */
-        post: operations["create_import_api_v1_tkms_imports_post"];
+        post: operations["create_upload_api_v1_documents_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/tkms/imports/{job_id}/reparse": {
+    "/api/v1/documents/{document_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -732,286 +443,34 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        post?: never;
         /**
-         * Reparse Import
-         * @description Re-run the pipeline for an existing job.
+         * Delete Document
+         * @description Delete one owned document: binary, extraction and all.
          *
-         *     The same class as a fresh import, because it costs the same: it discards the
-         *     prior parse and re-executes every stage. Deduped on the job, so a retry
-         *     storm against one job resolves to the run already in flight rather than
-         *     stacking full re-parses of the same document.
-         */
-        post: operations["reparse_import_api_v1_tkms_imports__job_id__reparse_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/imports/{job_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Import */
-        get: operations["get_import_api_v1_tkms_imports__job_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/imports/{job_id}/extracted": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Extracted */
-        get: operations["get_extracted_api_v1_tkms_imports__job_id__extracted_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/imports/{job_id}/validation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Validation */
-        get: operations["get_validation_api_v1_tkms_imports__job_id__validation_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/versions/{version_id}/compare": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Compare */
-        get: operations["get_compare_api_v1_tkms_versions__version_id__compare_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/versions/{version_id}/submit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Submit Version */
-        post: operations["submit_version_api_v1_tkms_versions__version_id__submit_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/versions/{version_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve Version */
-        post: operations["approve_version_api_v1_tkms_versions__version_id__approve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/versions/{version_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject Version */
-        post: operations["reject_version_api_v1_tkms_versions__version_id__reject_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/versions/{version_id}/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Publish Version
-         * @description Publish an approved version and reindex the knowledge base.
+         *     The document is named by ID and the object key is resolved SERVER-SIDE from
+         *     the owned row. A client never supplies a bucket or a key — a caller able to
+         *     name its own key could ask the platform to delete an arbitrary object,
+         *     including another tenant's, and the ownership check would never see it.
          *
-         *     Costlier than the `/admin/rules/{id}/publish` path — it reindexes — and
-         *     guarded on the same class and the same principal. Refused BEFORE the
-         *     publication, so a rejected call leaves no published version, no reindex and
-         *     no freshness event behind.
+         *     Synchronous, and deliberately so. The work is one object deletion and two
+         *     bounded statements, all of which comfortably fit inside a request; a 202
+         *     with a background job would add a durable queue, a worker and a state
+         *     machine to defer something that already finished. If object deletion ever
+         *     becomes slow enough to matter — a versioned bucket needing per-version
+         *     deletes — this returns 202 and grows the job then, on evidence.
+         *
+         *     NORMAL_WRITE admission: cheap per call, but it is a mutation and an
+         *     unbounded caller should not be able to drive object-store deletions in a
+         *     loop for free.
          */
-        post: operations["publish_version_api_v1_tkms_versions__version_id__publish_post"];
-        delete?: never;
+        delete: operations["delete_document_api_v1_documents__document_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/tkms/rules/{rule_id}/rollback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Request Rollback */
-        post: operations["request_rollback_api_v1_tkms_rules__rule_id__rollback_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/rollbacks/{rollback_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve Rollback */
-        post: operations["approve_rollback_api_v1_tkms_rollbacks__rollback_id__approve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/versions/{version_id}/trace": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Trace Version */
-        get: operations["trace_version_api_v1_tkms_versions__version_id__trace_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/rules/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Search Rules */
-        get: operations["search_rules_api_v1_tkms_rules_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/parsers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Parsers */
-        get: operations["list_parsers_api_v1_tkms_parsers_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/dead-letters": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Dead Letters */
-        get: operations["list_dead_letters_api_v1_tkms_dead_letters_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/tkms/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Stats */
-        get: operations["stats_api_v1_tkms_stats_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/ioe/optimizations": {
+    "/api/v1/documents/{document_id}/confirm": {
         parameters: {
             query?: never;
             header?: never;
@@ -1021,62 +480,21 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Run optimization over a completed analysis
-         * @description Invokes the certified optimization orchestrator for the caller's own analysis. Admission control, idempotent spec-hash resolution, sealing and replay identity all live in the orchestrator — this route adds authentication and the typed constraint contract, nothing else.
+         * Confirm
+         * @description Turn a confirmed extraction into income/expense rows.
+         *
+         *     NORMAL_WRITE rather than DOCUMENT_PROCESS: no extraction runs here, but each
+         *     call writes a row per extracted field plus a provenance link, so repeated
+         *     confirmation of one document is an unbounded row creator.
          */
-        post: operations["create_optimization_api_v1_ioe_optimizations_post"];
+        post: operations["confirm_api_v1_documents__document_id__confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/scenarios": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Scenarios */
-        get: operations["list_scenarios_api_v1_ioe_scenarios_get"];
-        put?: never;
-        /**
-         * Run a what-if scenario
-         * @description Accepts typed lever codes and structured assumptions ONLY. There is no field through which an engine input can be named or a computation supplied.
-         */
-        post: operations["create_scenario_api_v1_ioe_scenarios_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/ioe/scenarios/{scenario_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read a scenario, re-evaluating its freshness
-         * @description Freshness is evaluated on this read and any transition is persisted, so a stale result is never returned labelled current. The stored result itself is never modified.
-         */
-        get: operations["get_scenario_api_v1_ioe_scenarios__scenario_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Archive a scenario
-         * @description This is an ARCHIVE, not a deletion. The result, the applied-change trace, the pinned specification and the audit events all survive.
-         */
-        delete: operations["archive_scenario_api_v1_ioe_scenarios__scenario_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/ioe/scenarios/{scenario_id}/refresh": {
+    "/api/v1/documents/{document_id}/process": {
         parameters: {
             query?: never;
             header?: never;
@@ -1086,17 +504,22 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Re-run a scenario against today's world
-         * @description Creates a NEW scenario and marks the original superseded. The historical result keeps its own pinned versions and its own numbers.
+         * Process
+         * @description Extract fields from an uploaded document.
+         *
+         *     Uploading and PROCESSING are separate costs, and this is the expensive one:
+         *     it is the classic path for turning one cheap request into minutes of CPU.
+         *     Bounded concurrency, and a dedupe key on the document so re-processing the
+         *     same immutable document cannot create unlimited work.
          */
-        post: operations["refresh_scenario_api_v1_ioe_scenarios__scenario_id__refresh_post"];
+        post: operations["process_api_v1_documents__document_id__process_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/scenarios/{scenario_id}/unarchive": {
+    "/api/v1/financials/expenses": {
         parameters: {
             query?: never;
             header?: never;
@@ -1105,48 +528,109 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Unarchive Scenario */
-        post: operations["unarchive_scenario_api_v1_ioe_scenarios__scenario_id__unarchive_post"];
+        /** Add Expense */
+        post: operations["add_expense_api_v1_financials_expenses_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/scenarios/{left_id}/compare/{right_id}": {
+    "/api/v1/financials/expenses/{expense_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * Compare two scenarios
-         * @description Refuses the comparison unless both scenarios are owned by the caller, completed, sealed, and compatible on baseline, tax year, jurisdiction, objective policy and result schema. Deltas are kept separate by concept.
-         */
-        get: operations["compare_scenarios_api_v1_ioe_scenarios__left_id__compare__right_id__get"];
+        get?: never;
         put?: never;
         post?: never;
+        /**
+         * Delete Expense
+         * @description Delete one owned expense. Same contract as `delete_income`.
+         */
+        delete: operations["delete_expense_api_v1_financials_expenses__expense_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/financials/income": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Income */
+        get: operations["list_income_api_v1_financials_income_get"];
+        put?: never;
+        /**
+         * Add Income
+         * @description Record an income source.
+         *
+         *     NORMAL_WRITE: cheap per call, and an UNBOUNDED row creator. RLS keeps the
+         *     rows inside one tenant, which bounds who can read them and not how many
+         *     there are — a script here fills a tenant's own financial tables and, through
+         *     them, the cost of every later analysis over that year.
+         */
+        post: operations["add_income_api_v1_financials_income_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/scenarios/{scenario_id}/comparison": {
+    "/api/v1/financials/income/{income_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * What would change if you did this
-         * @description The Before-You-Act comparison: the difference between this scenario's frozen baseline and its sealed counterfactual. Read entirely from sealed rows — no tax is computed, no rule is evaluated, no current document is read. A scenario whose seal cannot answer for a comparison family is refused rather than partially compared. Reports what changed; it does not recommend a course of action.
-         */
-        get: operations["get_before_you_act_comparison_api_v1_ioe_scenarios__scenario_id__comparison_get"];
+        get?: never;
         put?: never;
         post?: never;
+        /**
+         * Delete Income
+         * @description Delete one owned income source.
+         *
+         *     The tax year is a required query parameter rather than something the server
+         *     looks up, because the table is partitioned on it and the primary key is
+         *     (id, tax_year). Supplying it prunes to one partition; without it the server
+         *     would have to scan every year to find a row the caller already knows the
+         *     year of.
+         *
+         *     It is NOT authorization — ownership is checked against the row, and a wrong
+         *     year simply finds nothing.
+         *
+         *     NORMAL_WRITE admission: cheap per call, but it is a mutation and an
+         *     unbounded caller should not be able to drive deletions in a loop for free.
+         */
+        delete: operations["delete_income_api_v1_financials_income__income_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/financials/registered-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Registered Accounts */
+        get: operations["list_registered_accounts_api_v1_financials_registered_accounts_get"];
+        put?: never;
+        /**
+         * Add Registered Account
+         * @description Record an actual RRSP/FHSA contribution for a tax year — a fact the
+         *     baseline analysis reads, as opposed to a scenario lever, which models a
+         *     contribution not yet made.
+         */
+        post: operations["add_registered_account_api_v1_financials_registered_accounts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1167,6 +651,46 @@ export interface paths {
         get: operations["get_tax_assurance_api_v1_ioe_assurance_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What materially changed since the last acknowledged state
+         * @description Compares current governed state against the state the user last explicitly acknowledged. SIDE-EFFECT FREE: reading never advances the baseline, so refreshing shows the same unacknowledged changes until they are acknowledged. Reports band transitions, not countdowns — a deadline moving from 38 to 37 days is not a change; NORMAL becoming APPROACHING is. On first use `baseline_status` is NO_BASELINE and the change list is empty rather than restating current state as arrivals.
+         */
+        get: operations["get_retention_changes_api_v1_ioe_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/changes/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge the reviewed state, establishing a new baseline
+         * @description The ONLY operation that advances the retention baseline. The client echoes the `current_snapshot_hash` it reviewed and the baseline it compared against; if either has moved the request is refused with 409 rather than silently recording that the user reviewed changes they never saw. Retrying with the same `request_id` returns the checkpoint the first attempt created.
+         */
+        post: operations["acknowledge_retention_changes_api_v1_ioe_changes_acknowledge_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1214,6 +738,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ioe/decision-journal/{journal_id}/action-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report that the action was taken
+         * @description Records the user's report that they acted, optionally with the date they say it happened. A self-report: the response continues to label execution USER_REPORTED, and evidence context remains a separate, governed observation.
+         */
+        post: operations["report_decision_action_api_v1_ioe_decision_journal__journal_id__action_report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ioe/decision-journal/{journal_id}/decision": {
         parameters: {
             query?: never;
@@ -1234,7 +778,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/decision-journal/{journal_id}/action-report": {
+    "/api/v1/ioe/opportunity-lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The current lifecycle of every governed opportunity
+         * @description Joins the Tax Assurance Map with the Decision Journal: availability, the user's decision, whether they reported acting, evidence readiness, the governed deadline and its timing band, freshness and integrity — seven axes that never collapse into one another. Expired opportunities stay visible with timing EXPIRED rather than disappearing. Reports state; it computes no tax, evaluates no rule, and ranks nothing the optimizer has not already ranked.
+         */
+        get: operations["get_opportunity_lifecycle_api_v1_ioe_opportunity_lifecycle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/optimizations": {
         parameters: {
             query?: never;
             header?: never;
@@ -1244,10 +808,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Report that the action was taken
-         * @description Records the user's report that they acted, optionally with the date they say it happened. A self-report: the response continues to label execution USER_REPORTED, and evidence context remains a separate, governed observation.
+         * Run optimization over a completed analysis
+         * @description Invokes the certified optimization orchestrator for the caller's own analysis. Admission control, idempotent spec-hash resolution, sealing and replay identity all live in the orchestrator — this route adds authentication and the typed constraint contract, nothing else.
          */
-        post: operations["report_decision_action_api_v1_ioe_decision_journal__journal_id__action_report_post"];
+        post: operations["create_optimization_api_v1_ioe_optimizations_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1294,6 +858,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ioe/scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Scenarios */
+        get: operations["list_scenarios_api_v1_ioe_scenarios_get"];
+        put?: never;
+        /**
+         * Run a what-if scenario
+         * @description Accepts typed lever codes and structured assumptions ONLY. There is no field through which an engine input can be named or a computation supplied.
+         */
+        post: operations["create_scenario_api_v1_ioe_scenarios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/scenarios/{left_id}/compare/{right_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare two scenarios
+         * @description Refuses the comparison unless both scenarios are owned by the caller, completed, sealed, and compatible on baseline, tax year, jurisdiction, objective policy and result schema. Deltas are kept separate by concept.
+         */
+        get: operations["compare_scenarios_api_v1_ioe_scenarios__left_id__compare__right_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/scenarios/{scenario_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a scenario, re-evaluating its freshness
+         * @description Freshness is evaluated on this read and any transition is persisted, so a stale result is never returned labelled current. The stored result itself is never modified.
+         */
+        get: operations["get_scenario_api_v1_ioe_scenarios__scenario_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive a scenario
+         * @description This is an ARCHIVE, not a deletion. The result, the applied-change trace, the pinned specification and the audit events all survive.
+         */
+        delete: operations["archive_scenario_api_v1_ioe_scenarios__scenario_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/scenarios/{scenario_id}/comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What would change if you did this
+         * @description The Before-You-Act comparison: the difference between this scenario's frozen baseline and its sealed counterfactual. Read entirely from sealed rows — no tax is computed, no rule is evaluated, no current document is read. A scenario whose seal cannot answer for a comparison family is refused rather than partially compared. Reports what changed; it does not recommend a course of action.
+         */
+        get: operations["get_before_you_act_comparison_api_v1_ioe_scenarios__scenario_id__comparison_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/scenarios/{scenario_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-run a scenario against today's world
+         * @description Creates a NEW scenario and marks the original superseded. The historical result keeps its own pinned versions and its own numbers.
+         */
+        post: operations["refresh_scenario_api_v1_ioe_scenarios__scenario_id__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ioe/scenarios/{scenario_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unarchive Scenario */
+        post: operations["unarchive_scenario_api_v1_ioe_scenarios__scenario_id__unarchive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ioe/{entity_type}/{entity_id}/integrity": {
         parameters: {
             query?: never;
@@ -1334,18 +1020,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/opportunity-lifecycle": {
+    "/api/v1/recommendations": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * The current lifecycle of every governed opportunity
-         * @description Joins the Tax Assurance Map with the Decision Journal: availability, the user's decision, whether they reported acting, evidence readiness, the governed deadline and its timing band, freshness and integrity — seven axes that never collapse into one another. Expired opportunities stay visible with timing EXPIRED rather than disappearing. Reports state; it computes no tax, evaluates no rule, and ranks nothing the optimizer has not already ranked.
-         */
-        get: operations["get_opportunity_lifecycle_api_v1_ioe_opportunity_lifecycle_get"];
+        /** List Recommendations */
+        get: operations["list_recommendations_api_v1_recommendations_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1354,7 +1037,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/changes": {
+    "/api/v1/tax/rules": {
         parameters: {
             query?: never;
             header?: never;
@@ -1362,10 +1045,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What materially changed since the last acknowledged state
-         * @description Compares current governed state against the state the user last explicitly acknowledged. SIDE-EFFECT FREE: reading never advances the baseline, so refreshing shows the same unacknowledged changes until they are acknowledged. Reports band transitions, not countdowns — a deadline moving from 38 to 37 days is not a change; NORMAL becoming APPROACHING is. On first use `baseline_status` is NO_BASELINE and the change list is empty rather than restating current state as arrivals.
+         * List Published Rules
+         * @description Published tax rules in force for a year (the versioned KB, read-only).
          */
-        get: operations["get_retention_changes_api_v1_ioe_changes_get"];
+        get: operations["list_published_rules_api_v1_tax_rules_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1374,7 +1057,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ioe/changes/acknowledge": {
+    "/api/v1/tkms/dead-letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Dead Letters */
+        get: operations["list_dead_letters_api_v1_tkms_dead_letters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Imports */
+        get: operations["list_imports_api_v1_tkms_imports_get"];
+        put?: never;
+        /**
+         * Create Import
+         * @description Ingest a legislation document and run the governed pipeline.
+         *
+         *     THREE bounds, in the order they cost something:
+         *
+         *       1. the payload's real encoded size, refused before a row is written;
+         *       2. admission on the acting operator, refused before parsing starts;
+         *       3. `MAX_IMPORT_ROWS` inside `ImportService.extract`, which is where the
+         *          staged-row count is actually known — a small document can expand into
+         *          an enormous ruleset, so a byte bound does not imply a row bound.
+         *
+         *     Authorization comes FIRST, before the byte check and before admission: an
+         *     operator without `tkms.import` must not be able to spend an admission
+         *     allowance, and must not learn anything from the difference between "too
+         *     large" and "not permitted".
+         */
+        post: operations["create_import_api_v1_tkms_imports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/imports/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Import */
+        get: operations["get_import_api_v1_tkms_imports__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/imports/{job_id}/extracted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Extracted */
+        get: operations["get_extracted_api_v1_tkms_imports__job_id__extracted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/imports/{job_id}/reparse": {
         parameters: {
             query?: never;
             header?: never;
@@ -1384,10 +1152,262 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Acknowledge the reviewed state, establishing a new baseline
-         * @description The ONLY operation that advances the retention baseline. The client echoes the `current_snapshot_hash` it reviewed and the baseline it compared against; if either has moved the request is refused with 409 rather than silently recording that the user reviewed changes they never saw. Retrying with the same `request_id` returns the checkpoint the first attempt created.
+         * Reparse Import
+         * @description Re-run the pipeline for an existing job.
+         *
+         *     The same class as a fresh import, because it costs the same: it discards the
+         *     prior parse and re-executes every stage. Deduped on the job, so a retry
+         *     storm against one job resolves to the run already in flight rather than
+         *     stacking full re-parses of the same document.
          */
-        post: operations["acknowledge_retention_changes_api_v1_ioe_changes_acknowledge_post"];
+        post: operations["reparse_import_api_v1_tkms_imports__job_id__reparse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/imports/{job_id}/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Validation */
+        get: operations["get_validation_api_v1_tkms_imports__job_id__validation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/parsers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Parsers */
+        get: operations["list_parsers_api_v1_tkms_parsers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/rollbacks/{rollback_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Rollback */
+        post: operations["approve_rollback_api_v1_tkms_rollbacks__rollback_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/rules/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Rules */
+        get: operations["search_rules_api_v1_tkms_rules_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/rules/{rule_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Rollback */
+        post: operations["request_rollback_api_v1_tkms_rules__rule_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stats */
+        get: operations["stats_api_v1_tkms_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/versions/{version_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Version */
+        post: operations["approve_version_api_v1_tkms_versions__version_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/versions/{version_id}/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Compare */
+        get: operations["get_compare_api_v1_tkms_versions__version_id__compare_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/versions/{version_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Version
+         * @description Publish an approved version and reindex the knowledge base.
+         *
+         *     Costlier than the `/admin/rules/{id}/publish` path — it reindexes — and
+         *     guarded on the same class and the same principal. Refused BEFORE the
+         *     publication, so a rejected call leaves no published version, no reindex and
+         *     no freshness event behind.
+         */
+        post: operations["publish_version_api_v1_tkms_versions__version_id__publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/versions/{version_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Version */
+        post: operations["reject_version_api_v1_tkms_versions__version_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/versions/{version_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Version */
+        post: operations["submit_version_api_v1_tkms_versions__version_id__submit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tkms/versions/{version_id}/trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trace Version */
+        get: operations["trace_version_api_v1_tkms_versions__version_id__trace_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Me */
+        get: operations["get_me_api_v1_users_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me/tax-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Tax Profile */
+        get: operations["get_tax_profile_api_v1_users_me_tax_profile_get"];
+        /** Upsert Tax Profile */
+        put: operations["upsert_tax_profile_api_v1_users_me_tax_profile_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1444,11 +1464,6 @@ export interface components {
          */
         AcknowledgeChangesRequest: {
             /**
-             * Snapshot Hash
-             * @description The `current_snapshot_hash` from the changes response being acknowledged. Refused with 409 if current state has moved since.
-             */
-            snapshot_hash: string;
-            /**
              * Baseline Checkpoint Id
              * @description The `baseline_checkpoint.id` the client compared against, or null when establishing the first baseline. Refused with 409 if another acknowledgement superseded it first.
              */
@@ -1459,6 +1474,11 @@ export interface components {
              * @description Idempotency key. A retry returns the same checkpoint.
              */
             request_id: string;
+            /**
+             * Snapshot Hash
+             * @description The `current_snapshot_hash` from the changes response being acknowledged. Refused with 409 if current state has moved since.
+             */
+            snapshot_hash: string;
         };
         /** AdminLogin */
         AdminLogin: {
@@ -1469,23 +1489,6 @@ export interface components {
         };
         /** AnalysisOut */
         AnalysisOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Tax Year */
-            tax_year: number;
-            /** Province Code */
-            province_code: string | null;
-            /** Engine Version */
-            engine_version: string;
-            /** Taxable Income */
-            taxable_income: string | null;
-            /** Estimated Tax */
-            estimated_tax: string | null;
-            /** Marginal Rate */
-            marginal_rate: string | null;
             /** Average Rate */
             average_rate: string | null;
             /** Confidence Score */
@@ -1495,6 +1498,23 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Engine Version */
+            engine_version: string;
+            /** Estimated Tax */
+            estimated_tax: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Marginal Rate */
+            marginal_rate: string | null;
+            /** Province Code */
+            province_code: string | null;
+            /** Tax Year */
+            tax_year: number;
+            /** Taxable Income */
+            taxable_income: string | null;
         };
         /** AnalysisRequest */
         AnalysisRequest: {
@@ -1509,14 +1529,14 @@ export interface components {
         AppliedChangeOut: {
             /** Apply Order */
             apply_order: number;
-            /** Lever Code */
-            lever_code: string;
             /** Field */
             field: string;
-            /** Old Value */
-            old_value: string | null;
+            /** Lever Code */
+            lever_code: string;
             /** New Value */
             new_value: string | null;
+            /** Old Value */
+            old_value: string | null;
         };
         /** AskRequest */
         AskRequest: {
@@ -1538,16 +1558,21 @@ export interface components {
          */
         "AssumptionInput-Input": {
             /**
+             * Affects Eligibility
+             * @default false
+             */
+            affects_eligibility: boolean;
+            /**
              * Assumption Code
              * @example CONTRIBUTION_ROOM_AVAILABLE
              */
             assumption_code: string;
-            /** Value Number */
-            value_number?: number | string | null;
-            /** Value Text */
-            value_text?: string | null;
-            /** Value Boolean */
-            value_boolean?: boolean | null;
+            /**
+             * Certainty
+             * @default user_asserted
+             * @enum {string}
+             */
+            certainty: "user_asserted" | "platform_default" | "derived_from_data" | "statutory_known";
             /**
              * Materiality
              * @default medium
@@ -1560,17 +1585,12 @@ export interface components {
              * @enum {string}
              */
             source: "user" | "platform" | "analysis";
-            /**
-             * Certainty
-             * @default user_asserted
-             * @enum {string}
-             */
-            certainty: "user_asserted" | "platform_default" | "derived_from_data" | "statutory_known";
-            /**
-             * Affects Eligibility
-             * @default false
-             */
-            affects_eligibility: boolean;
+            /** Value Boolean */
+            value_boolean?: boolean | null;
+            /** Value Number */
+            value_number?: number | string | null;
+            /** Value Text */
+            value_text?: string | null;
         };
         /**
          * AssumptionInput
@@ -1585,16 +1605,21 @@ export interface components {
          */
         "AssumptionInput-Output": {
             /**
+             * Affects Eligibility
+             * @default false
+             */
+            affects_eligibility: boolean;
+            /**
              * Assumption Code
              * @example CONTRIBUTION_ROOM_AVAILABLE
              */
             assumption_code: string;
-            /** Value Number */
-            value_number?: string | null;
-            /** Value Text */
-            value_text?: string | null;
-            /** Value Boolean */
-            value_boolean?: boolean | null;
+            /**
+             * Certainty
+             * @default user_asserted
+             * @enum {string}
+             */
+            certainty: "user_asserted" | "platform_default" | "derived_from_data" | "statutory_known";
             /**
              * Materiality
              * @default medium
@@ -1607,17 +1632,12 @@ export interface components {
              * @enum {string}
              */
             source: "user" | "platform" | "analysis";
-            /**
-             * Certainty
-             * @default user_asserted
-             * @enum {string}
-             */
-            certainty: "user_asserted" | "platform_default" | "derived_from_data" | "statutory_known";
-            /**
-             * Affects Eligibility
-             * @default false
-             */
-            affects_eligibility: boolean;
+            /** Value Boolean */
+            value_boolean?: boolean | null;
+            /** Value Number */
+            value_number?: string | null;
+            /** Value Text */
+            value_text?: string | null;
         };
         /**
          * AssumptionNoteV1
@@ -1626,12 +1646,12 @@ export interface components {
         AssumptionNoteV1: {
             /** Assumption Code */
             assumption_code: string;
-            /** Source */
-            source: string;
             /** Certainty */
             certainty: string;
             /** Note */
             note: string;
+            /** Source */
+            source: string;
         };
         /**
          * AssuranceSummaryOut
@@ -1639,28 +1659,28 @@ export interface components {
          *     model defines what such a number would measure.
          */
         AssuranceSummaryOut: {
-            /** Opportunity Count */
-            opportunity_count: number;
-            /** Opportunities By Status */
-            opportunities_by_status: {
+            /** Assumption Dependent Count */
+            assumption_dependent_count: number;
+            /** Families By Status */
+            families_by_status: {
                 [key: string]: number;
             };
             /** Opportunities By Action */
             opportunities_by_action: {
                 [key: string]: number;
             };
+            /** Opportunities By Status */
+            opportunities_by_status: {
+                [key: string]: number;
+            };
             /** Opportunities By Urgency */
             opportunities_by_urgency: {
                 [key: string]: number;
             };
-            /** Assumption Dependent Count */
-            assumption_dependent_count: number;
+            /** Opportunity Count */
+            opportunity_count: number;
             /** Upcoming Deadline Count */
             upcoming_deadline_count: number;
-            /** Families By Status */
-            families_by_status: {
-                [key: string]: number;
-            };
         };
         /**
          * AttentionFlagsOut
@@ -1668,18 +1688,18 @@ export interface components {
          *     can render, explain, or ignore independently.
          */
         AttentionFlagsOut: {
-            /** Needs Decision */
-            needs_decision: boolean;
-            /** Needs Evidence */
-            needs_evidence: boolean;
+            /** Blocked */
+            blocked: boolean;
             /** Deadline Approaching */
             deadline_approaching: boolean;
             /** Deadline Urgent */
             deadline_urgent: boolean;
             /** Expired */
             expired: boolean;
-            /** Blocked */
-            blocked: boolean;
+            /** Needs Decision */
+            needs_decision: boolean;
+            /** Needs Evidence */
+            needs_evidence: boolean;
             /** Stale */
             stale: boolean;
         };
@@ -1688,6 +1708,10 @@ export interface components {
          * @description Which acknowledged state the comparison was measured from.
          */
         BaselineCheckpointOut: {
+            /** Acknowledged At */
+            acknowledged_at: string;
+            /** Evaluated As Of */
+            evaluated_as_of: string;
             /**
              * Id
              * Format: uuid
@@ -1697,10 +1721,6 @@ export interface components {
             snapshot_hash: string;
             /** Snapshot Schema Version */
             snapshot_schema_version: string;
-            /** Evaluated As Of */
-            evaluated_as_of: string;
-            /** Acknowledged At */
-            acknowledged_at: string;
         };
         /**
          * BeforeYouActComparisonOut
@@ -1712,32 +1732,32 @@ export interface components {
          *     every client, and they would each do it differently.
          */
         BeforeYouActComparisonOut: {
-            /** Schema Version */
-            schema_version: string;
+            /** Assumption Changes */
+            assumption_changes: components["schemas"]["ChangeOut"][];
+            /** Comparison Hash */
+            comparison_hash: string;
+            /** Deadline Changes */
+            deadline_changes: components["schemas"]["ChangeOut"][];
             /** Direction */
             direction: string;
+            /** Evidence Changes */
+            evidence_changes: components["schemas"]["ChangeOut"][];
+            /** Fact Changes */
+            fact_changes: components["schemas"]["ChangeOut"][];
+            /** Family Applicability */
+            family_applicability: components["schemas"]["FamilyApplicabilityOut"][];
+            /** Includes Unchanged */
+            includes_unchanged: boolean;
+            /** Opportunity Changes */
+            opportunity_changes: components["schemas"]["ChangeOut"][];
             scenario: components["schemas"]["ScenarioContextOut"];
+            /** Scenario Changes */
+            scenario_changes: components["schemas"]["ChangeOut"][];
+            /** Schema Version */
+            schema_version: string;
             summary: components["schemas"]["ComparisonSummaryOut"];
             /** Tax State Changes */
             tax_state_changes: components["schemas"]["ChangeOut"][];
-            /** Opportunity Changes */
-            opportunity_changes: components["schemas"]["ChangeOut"][];
-            /** Evidence Changes */
-            evidence_changes: components["schemas"]["ChangeOut"][];
-            /** Deadline Changes */
-            deadline_changes: components["schemas"]["ChangeOut"][];
-            /** Fact Changes */
-            fact_changes: components["schemas"]["ChangeOut"][];
-            /** Assumption Changes */
-            assumption_changes: components["schemas"]["ChangeOut"][];
-            /** Scenario Changes */
-            scenario_changes: components["schemas"]["ChangeOut"][];
-            /** Family Applicability */
-            family_applicability: components["schemas"]["FamilyApplicabilityOut"][];
-            /** Comparison Hash */
-            comparison_hash: string;
-            /** Includes Unchanged */
-            includes_unchanged: boolean;
         };
         /**
          * ChangeOut
@@ -1748,66 +1768,66 @@ export interface components {
          *     an internal row id and resolves to nothing on its own.
          */
         ChangeOut: {
-            /** Key */
-            key: string;
             /** Change */
             change: string;
             /** Fields */
             fields?: components["schemas"]["FieldChangeOut"][];
+            /** Key */
+            key: string;
         };
         /**
          * ChangeSummaryOut
          * @description Transparent counts only — no composite score, and no money.
          */
         ChangeSummaryOut: {
-            /** Total */
-            total: number;
-            /** By Kind */
-            by_kind: {
-                [key: string]: number;
-            };
             /** By Category */
             by_category: {
+                [key: string]: number;
+            };
+            /** By Kind */
+            by_kind: {
                 [key: string]: number;
             };
             /** By Severity */
             by_severity: {
                 [key: string]: number;
             };
-            /** Opportunities Added */
-            opportunities_added: number;
-            /** Opportunities Removed */
-            opportunities_removed: number;
-            /** Newly Urgent */
-            newly_urgent: number;
-            /** Newly Expired */
-            newly_expired: number;
-            /** Newly Blocked */
-            newly_blocked: number;
             /** Decision Changes */
             decision_changes: number;
-            /** Execution Reports */
-            execution_reports: number;
             /** Evidence Improvements */
             evidence_improvements: number;
             /** Evidence Regressions */
             evidence_regressions: number;
+            /** Execution Reports */
+            execution_reports: number;
             /** Freshness Changes */
             freshness_changes: number;
             /** Integrity Changes */
             integrity_changes: number;
+            /** Newly Blocked */
+            newly_blocked: number;
+            /** Newly Expired */
+            newly_expired: number;
+            /** Newly Urgent */
+            newly_urgent: number;
+            /** Opportunities Added */
+            opportunities_added: number;
+            /** Opportunities Removed */
+            opportunities_removed: number;
+            /** Total */
+            total: number;
         };
         /** ComparisonSideOut */
         ComparisonSideOut: {
+            freshness: components["schemas"]["FreshnessOut"];
+            /** Label */
+            label: string | null;
+            objective_delta: components["schemas"]["MonetaryAmount"];
             /**
              * Scenario Id
              * Format: uuid
              */
             scenario_id: string;
-            /** Label */
-            label: string | null;
-            freshness: components["schemas"]["FreshnessOut"];
-            objective_delta: components["schemas"]["MonetaryAmount"];
             tax_delta: components["schemas"]["MonetaryAmount"];
         };
         /**
@@ -1818,16 +1838,16 @@ export interface components {
          *     describes the comparison and the lists describe what was rendered.
          */
         ComparisonSummaryOut: {
-            /** Node Counts By Change */
-            node_counts_by_change: {
-                [key: string]: number;
-            };
+            /** Changed Families */
+            changed_families: string[];
             /** Edge Counts By Change */
             edge_counts_by_change: {
                 [key: string]: number;
             };
-            /** Changed Families */
-            changed_families: string[];
+            /** Node Counts By Change */
+            node_counts_by_change: {
+                [key: string]: number;
+            };
         };
         /** ConfirmRequest */
         ConfirmRequest: {
@@ -1843,15 +1863,15 @@ export interface components {
          */
         CreateDecisionJournalRequest: {
             /**
-             * Scenario Id
-             * Format: uuid
-             */
-            scenario_id: string;
-            /**
              * Request Id
              * Format: uuid
              */
             request_id: string;
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
             /**
              * Subject Opportunity Code
              * @description Optional governed opportunity code this decision is about.
@@ -1865,14 +1885,14 @@ export interface components {
          *     the derivation is reproducible.
          */
         DeadlineOut: {
+            /** Days Remaining */
+            days_remaining: number;
             /** Deadline Code */
             deadline_code: string;
             /** Deadline Date */
             deadline_date: string;
             /** Is Hard */
             is_hard: boolean;
-            /** Days Remaining */
-            days_remaining: number;
             /** Urgency */
             urgency: string;
         };
@@ -1883,15 +1903,10 @@ export interface components {
          */
         DecisionJournalDetailOut: {
             /**
-             * Id
-             * Format: uuid
+             * Created At
+             * Format: date-time
              */
-            id: string;
-            /** Schema Version */
-            schema_version: string;
-            /** Subject Opportunity Code */
-            subject_opportunity_code: string | null;
-            scenario_reference: components["schemas"]["ScenarioReferenceOut"];
+            created_at: string;
             /** Current Decision */
             current_decision: string;
             /**
@@ -1899,43 +1914,48 @@ export interface components {
              * Format: date-time
              */
             decision_recorded_at: string;
-            /** Execution State */
-            execution_state: string;
-            /** Last Reported Action Date */
-            last_reported_action_date: string | null;
             /** Event Count */
             event_count: number;
+            /** Events */
+            events: components["schemas"]["DecisionJournalEventOut"][];
+            evidence_context: components["schemas"]["EvidenceContextOut"];
+            /** Execution State */
+            execution_state: string;
             /**
-             * Created At
-             * Format: date-time
+             * Id
+             * Format: uuid
              */
-            created_at: string;
+            id: string;
             /**
              * Last Event At
              * Format: date-time
              */
             last_event_at: string;
-            /** Events */
-            events: components["schemas"]["DecisionJournalEventOut"][];
-            evidence_context: components["schemas"]["EvidenceContextOut"];
+            /** Last Reported Action Date */
+            last_reported_action_date: string | null;
+            scenario_reference: components["schemas"]["ScenarioReferenceOut"];
+            /** Schema Version */
+            schema_version: string;
+            /** Subject Opportunity Code */
+            subject_opportunity_code: string | null;
         };
         /** DecisionJournalEventOut */
         DecisionJournalEventOut: {
-            /** Sequence */
-            sequence: number;
-            /** Event Type */
-            event_type: string;
             /** Decision */
             decision: string | null;
-            /** User Reported Action Date */
-            user_reported_action_date: string | null;
             /** Event Schema Version */
             event_schema_version: string;
+            /** Event Type */
+            event_type: string;
             /**
              * Recorded At
              * Format: date-time
              */
             recorded_at: string;
+            /** Sequence */
+            sequence: number;
+            /** User Reported Action Date */
+            user_reported_action_date: string | null;
         };
         /**
          * DecisionJournalSummaryOut
@@ -1943,15 +1963,10 @@ export interface components {
          */
         DecisionJournalSummaryOut: {
             /**
-             * Id
-             * Format: uuid
+             * Created At
+             * Format: date-time
              */
-            id: string;
-            /** Schema Version */
-            schema_version: string;
-            /** Subject Opportunity Code */
-            subject_opportunity_code: string | null;
-            scenario_reference: components["schemas"]["ScenarioReferenceOut"];
+            created_at: string;
             /** Current Decision */
             current_decision: string;
             /**
@@ -1959,22 +1974,27 @@ export interface components {
              * Format: date-time
              */
             decision_recorded_at: string;
-            /** Execution State */
-            execution_state: string;
-            /** Last Reported Action Date */
-            last_reported_action_date: string | null;
             /** Event Count */
             event_count: number;
+            /** Execution State */
+            execution_state: string;
             /**
-             * Created At
-             * Format: date-time
+             * Id
+             * Format: uuid
              */
-            created_at: string;
+            id: string;
             /**
              * Last Event At
              * Format: date-time
              */
             last_event_at: string;
+            /** Last Reported Action Date */
+            last_reported_action_date: string | null;
+            scenario_reference: components["schemas"]["ScenarioReferenceOut"];
+            /** Schema Version */
+            schema_version: string;
+            /** Subject Opportunity Code */
+            subject_opportunity_code: string | null;
         };
         /**
          * EvidenceContextOut
@@ -1986,16 +2006,16 @@ export interface components {
          *     verification that the reported action occurred.
          */
         EvidenceContextOut: {
-            /** Status */
-            status: string;
-            /** Reason Code */
-            reason_code: string | null;
-            /** Sealed Readiness */
-            sealed_readiness: components["schemas"]["EvidenceReadinessRowOut"][];
             /** Current Observed Readiness */
             current_observed_readiness: components["schemas"]["EvidenceReadinessRowOut"][];
+            /** Reason Code */
+            reason_code: string | null;
             /** Sealed Deadline Codes */
             sealed_deadline_codes: string[];
+            /** Sealed Readiness */
+            sealed_readiness: components["schemas"]["EvidenceReadinessRowOut"][];
+            /** Status */
+            status: string;
         };
         /**
          * EvidenceReadinessRowOut
@@ -2025,14 +2045,14 @@ export interface components {
         };
         /** ExpenseIn */
         ExpenseIn: {
-            /** Tax Year */
-            tax_year: number;
-            /** Expense Category Code */
-            expense_category_code: string;
             /** Amount */
             amount: number | string;
             /** Description */
             description?: string | null;
+            /** Expense Category Code */
+            expense_category_code: string;
+            /** Tax Year */
+            tax_year: number;
         };
         /**
          * ExplanationEnvelopeOut
@@ -2040,17 +2060,14 @@ export interface components {
          *     metadata. No internal hashes, no subject binding.
          */
         ExplanationEnvelopeOut: {
+            /** As Of */
+            as_of: string;
+            /**
+             * Disclaimer
+             * @default Educational information only. This is not tax advice, not a filing, and is not submitted to the CRA.
+             */
+            disclaimer: string;
             explanation: components["schemas"]["ExplanationOutputV1"];
-            /**
-             * Explanation Type
-             * @enum {string}
-             */
-            explanation_type: "TAX_POSITION" | "OPPORTUNITY" | "PORTFOLIO" | "SCENARIO" | "COMPARISON" | "EVIDENCE_READINESS" | "WHAT_CHANGED";
-            /**
-             * Renderer Mode
-             * @enum {string}
-             */
-            renderer_mode: "model" | "fallback";
             /**
              * Explanation Input Version
              * @default 1.0.0
@@ -2061,13 +2078,16 @@ export interface components {
              * @default 1.0.0
              */
             explanation_output_version: string;
-            /** As Of */
-            as_of: string;
             /**
-             * Disclaimer
-             * @default Educational information only. This is not tax advice, not a filing, and is not submitted to the CRA.
+             * Explanation Type
+             * @enum {string}
              */
-            disclaimer: string;
+            explanation_type: "TAX_POSITION" | "OPPORTUNITY" | "PORTFOLIO" | "SCENARIO" | "COMPARISON" | "EVIDENCE_READINESS" | "WHAT_CHANGED";
+            /**
+             * Renderer Mode
+             * @enum {string}
+             */
+            renderer_mode: "model" | "fallback";
         };
         /**
          * ExplanationOutputV1
@@ -2080,6 +2100,12 @@ export interface components {
          *     convention.
          */
         ExplanationOutputV1: {
+            /** Citation Refs */
+            citation_refs?: string[];
+            /** Constraints And Exclusions */
+            constraints_and_exclusions?: string | null;
+            /** Estimated Effect Explanation */
+            estimated_effect_explanation?: string | null;
             /**
              * Explanation Output Version
              * @default 1.0.0
@@ -2091,34 +2117,28 @@ export interface components {
              * @enum {string}
              */
             explanation_type: "TAX_POSITION" | "OPPORTUNITY" | "PORTFOLIO" | "SCENARIO" | "COMPARISON" | "EVIDENCE_READINESS" | "WHAT_CHANGED";
-            /** Summary */
-            summary: string;
-            /** Why This Result */
-            why_this_result?: string | null;
-            /** Why This Applies */
-            why_this_applies?: string | null;
-            /** Estimated Effect Explanation */
-            estimated_effect_explanation?: string | null;
-            /** What You Can Do */
-            what_you_can_do?: components["schemas"]["NextStepV1"][];
-            /** Required Cash Or Resource */
-            required_cash_or_resource?: string | null;
-            /** What You Need */
-            what_you_need?: string[];
-            /** Important Assumptions */
-            important_assumptions?: components["schemas"]["AssumptionNoteV1"][];
-            /** Constraints And Exclusions */
-            constraints_and_exclusions?: string | null;
-            /** What Changed */
-            what_changed?: string | null;
             /** Freshness Notice */
             freshness_notice?: string | null;
+            /** Important Assumptions */
+            important_assumptions?: components["schemas"]["AssumptionNoteV1"][];
             /** Limitations */
             limitations: string;
-            /** Citation Refs */
-            citation_refs?: string[];
+            /** Required Cash Or Resource */
+            required_cash_or_resource?: string | null;
+            /** Summary */
+            summary: string;
             /** Value Refs Used */
             value_refs_used?: string[];
+            /** What Changed */
+            what_changed?: string | null;
+            /** What You Can Do */
+            what_you_can_do?: components["schemas"]["NextStepV1"][];
+            /** What You Need */
+            what_you_need?: string[];
+            /** Why This Applies */
+            why_this_applies?: string | null;
+            /** Why This Result */
+            why_this_result?: string | null;
         };
         /**
          * ExplanationRequest
@@ -2155,10 +2175,10 @@ export interface components {
         FamilyApplicabilityOut: {
             /** Family */
             family: string;
-            /** Status */
-            status: string;
             /** Reason Code */
             reason_code: string;
+            /** Status */
+            status: string;
         };
         /**
          * FamilyAssuranceOut
@@ -2168,12 +2188,12 @@ export interface components {
         FamilyAssuranceOut: {
             /** Family */
             family: string;
-            /** Status */
-            status: string;
-            /** Reason Code */
-            reason_code: string;
             /** Item Count */
             item_count: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Status */
+            status: string;
         };
         /**
          * FieldChangeOut
@@ -2184,32 +2204,34 @@ export interface components {
          *     a difference here, not that the difference is zero.
          */
         FieldChangeOut: {
-            /** Field */
-            field: string;
-            /** Before */
-            before: string | null;
             /** After */
             after: string | null;
+            /** Before */
+            before: string | null;
             /** Delta */
             delta: string | null;
+            /** Field */
+            field: string;
         };
         /**
          * FieldTransitionOut
          * @description One field's before and after. Structured, never a rendered diff.
          */
         FieldTransitionOut: {
-            /** Field */
-            field: string;
-            /** Before */
-            before: string | null;
             /** After */
             after: string | null;
+            /** Before */
+            before: string | null;
+            /** Field */
+            field: string;
         };
         /**
          * FreshnessOut
          * @description Whether the result is still a statement about today's world.
          */
         FreshnessOut: {
+            /** Freshness Evaluated At */
+            freshness_evaluated_at?: string | null;
             /**
              * Freshness Status
              * @description unknown | current | stale | superseded
@@ -2217,8 +2239,6 @@ export interface components {
             freshness_status: string;
             /** Stale Reason Code */
             stale_reason_code?: string | null;
-            /** Freshness Evaluated At */
-            freshness_evaluated_at?: string | null;
             /** Superseded By Scenario Id */
             superseded_by_scenario_id?: string | null;
         };
@@ -2229,56 +2249,56 @@ export interface components {
         };
         /** ImportBody */
         ImportBody: {
-            /** Source Org */
-            source_org: string;
-            /** Format */
-            format: string;
-            /** Payload */
-            payload: string;
-            /** Tax Year */
-            tax_year?: number | null;
-            /** Jurisdiction Code */
-            jurisdiction_code?: string | null;
-            /** Province Code */
-            province_code?: string | null;
-            /** Source Url */
-            source_url?: string | null;
             /** Document Version */
             document_version?: string | null;
+            /** Format */
+            format: string;
+            /** Jurisdiction Code */
+            jurisdiction_code?: string | null;
             /** Parser Name */
             parser_name?: string | null;
             /** Parser Version */
             parser_version?: string | null;
+            /** Payload */
+            payload: string;
+            /** Province Code */
+            province_code?: string | null;
+            /** Source Org */
+            source_org: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Tax Year */
+            tax_year?: number | null;
         };
         /** IncomeIn */
         IncomeIn: {
-            /** Tax Year */
-            tax_year: number;
-            /** Income Type Code */
-            income_type_code: string;
             /** Amount */
             amount: number | string;
+            /** Income Type Code */
+            income_type_code: string;
             /** Source Name */
             source_name?: string | null;
+            /** Tax Year */
+            tax_year: number;
         };
         /** IncomeOut */
         IncomeOut: {
+            /** Amount */
+            amount: string;
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /** Tax Year */
-            tax_year: number;
             /**
              * Income Type Id
              * Format: uuid
              */
             income_type_id: string;
-            /** Amount */
-            amount: string;
             /** Source Name */
             source_name: string | null;
+            /** Tax Year */
+            tax_year: number;
         };
         /** IngestionJob */
         IngestionJob: {
@@ -2297,28 +2317,28 @@ export interface components {
              * Format: uuid
              */
             check_id: string;
-            /** Entity Type */
-            entity_type: string;
-            /**
-             * Entity Id
-             * Format: uuid
-             */
-            entity_id: string;
-            /** Integrity Status */
-            integrity_status: string;
-            /** Integrity State */
-            integrity_state: string;
-            /** Integrity Reason Code */
-            integrity_reason_code: string;
-            /** Integrity Warning */
-            integrity_warning: string;
-            /** Duration Ms */
-            duration_ms: number;
             /**
              * Disclaimer
              * @default Replay verification checks that a stored result can be reproduced from its own sealed inputs. It is not a statement of tax correctness.
              */
             disclaimer: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Entity Type */
+            entity_type: string;
+            /** Integrity Reason Code */
+            integrity_reason_code: string;
+            /** Integrity State */
+            integrity_state: string;
+            /** Integrity Status */
+            integrity_status: string;
+            /** Integrity Warning */
+            integrity_warning: string;
         };
         /**
          * IntegrityOut
@@ -2351,32 +2371,32 @@ export interface components {
          */
         IntegrityOut: {
             /**
-             * Integrity Status
-             * @description not_checked | verified | mismatch | unavailable
+             * Execution Policy
+             * @description How this result's inputs were obtained. `frozen_snapshot_v1` means it was calculated exclusively from the pinned analysis snapshot. A `*_legacy` value means it predates that guarantee and may not reproduce; legacy rows are never relabelled. Null on an entity that records no policy of its own — a portfolio's is its run's.
              */
-            integrity_status: string;
+            execution_policy?: string | null;
+            /**
+             * Integrity Reason Code
+             * @default NONE
+             */
+            integrity_reason_code: string;
             /**
              * Integrity State
              * @description User-visible classification: not_checked | verified | non_reproducible | unavailable | legacy_unverifiable. A mismatch is reported as non_reproducible; an unavailable explained by the result's age is reported as legacy_unverifiable.
              */
             integrity_state: string;
             /**
-             * Integrity Reason Code
-             * @default NONE
+             * Integrity Status
+             * @description not_checked | verified | mismatch | unavailable
              */
-            integrity_reason_code: string;
-            /** Last Integrity Checked At */
-            last_integrity_checked_at?: string | null;
+            integrity_status: string;
             /**
              * Integrity Warning
              * @description Plain statement about REPRODUCIBILITY only. It says nothing about whether the figure is correct, accepted by the CRA, or legally sound.
              */
             integrity_warning: string;
-            /**
-             * Execution Policy
-             * @description How this result's inputs were obtained. `frozen_snapshot_v1` means it was calculated exclusively from the pinned analysis snapshot. A `*_legacy` value means it predates that guarantee and may not reproduce; legacy rows are never relabelled. Null on an entity that records no policy of its own — a portfolio's is its run's.
-             */
-            execution_policy?: string | null;
+            /** Last Integrity Checked At */
+            last_integrity_checked_at?: string | null;
         };
         /**
          * JournalLinkOut
@@ -2456,14 +2476,14 @@ export interface components {
          *     reported as `deadline: null` with `timing: NO_DEADLINE`.
          */
         LifecycleDeadlineOut: {
+            /** Days Remaining */
+            days_remaining: number;
             /** Deadline Code */
             deadline_code: string;
             /** Deadline Date */
             deadline_date: string;
             /** Is Hard */
             is_hard: boolean;
-            /** Days Remaining */
-            days_remaining: number;
             /** Urgency */
             urgency: string;
         };
@@ -2472,8 +2492,10 @@ export interface components {
          * @description Transparent counts only.
          */
         LifecycleSummaryOut: {
-            /** Opportunity Count */
-            opportunity_count: number;
+            /** By Actionability */
+            by_actionability: {
+                [key: string]: number;
+            };
             /** By Availability */
             by_availability: {
                 [key: string]: number;
@@ -2490,12 +2512,10 @@ export interface components {
             by_timing: {
                 [key: string]: number;
             };
-            /** By Actionability */
-            by_actionability: {
-                [key: string]: number;
-            };
             /** Needing Attention */
             needing_attention: number;
+            /** Opportunity Count */
+            opportunity_count: number;
             /** Unlinked Thread Count */
             unlinked_thread_count: number;
         };
@@ -2514,6 +2534,8 @@ export interface components {
          * @description One semantic event about one governed subject.
          */
         MaterialChangeOut: {
+            /** Category */
+            category: string;
             /**
              * Change Id
              * @description Deterministic identity, bound to both snapshot hashes and the transition. Stable across repeated reads of the same two states, so a future delivery path can deduplicate on it. Never a row id.
@@ -2521,8 +2543,6 @@ export interface components {
             change_id: string;
             /** Kind */
             kind: string;
-            /** Category */
-            category: string;
             /** Severity */
             severity: string;
             /**
@@ -2546,27 +2566,26 @@ export interface components {
             /** Amount */
             amount: string;
             /**
-             * Effect Type
-             * @description What KIND of money this is (current_year_tax_reduction, tax_deferral, refundable_benefit, liquidity_commitment, ...). Amounts of different effect types are never summed.
-             */
-            effect_type: string;
-            /**
              * Calculation Basis
              * @description engine_determined | rule_formula_determined | scenario_estimate | projection_estimate
              */
             calculation_basis: string;
             /**
-             * Evidence Status
-             * @description documented_verified | documented_unverified | user_attested | incomplete
-             */
-            evidence_status: string;
-            /** Tax Year */
-            tax_year?: number | null;
-            /**
              * Currency Code
              * @default CAD
              */
             currency_code: string;
+            /**
+             * Effect Type
+             * @description What KIND of money this is (current_year_tax_reduction, tax_deferral, refundable_benefit, liquidity_commitment, ...). Amounts of different effect types are never summed.
+             */
+            effect_type: string;
+            /**
+             * Evidence Status
+             * @description documented_verified | documented_unverified | user_attested | incomplete
+             */
+            evidence_status: string;
+            freshness?: components["schemas"]["FreshnessOut"] | null;
             /**
              * Horizon Years
              * @description 1 = current year only. A multi-year figure is never comparable with a current-year one.
@@ -2580,7 +2599,8 @@ export interface components {
              */
             is_permanent: boolean;
             support?: components["schemas"]["SupportScore"] | null;
-            freshness?: components["schemas"]["FreshnessOut"] | null;
+            /** Tax Year */
+            tax_year?: number | null;
         };
         /**
          * MultiYearProjectionOut
@@ -2591,11 +2611,8 @@ export interface components {
          *     the credibility of a deterministic calculation.
          */
         MultiYearProjectionOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
+            /** Assumptions */
+            assumptions?: components["schemas"]["ProjectionAssumptionOut"][];
             /**
              * Horizon Year
              * @description The final year of the horizon.
@@ -2606,19 +2623,22 @@ export interface components {
              * @description Length of the horizon in years.
              */
             horizon_years: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
             /** Methodology Version */
             methodology_version: string;
-            projected_total: components["schemas"]["MonetaryAmount"];
             /** Per Year */
             per_year?: components["schemas"]["MonetaryAmount"][];
-            /** Assumptions */
-            assumptions?: components["schemas"]["ProjectionAssumptionOut"][];
-            uncertainty: components["schemas"]["ProjectionUncertaintyOut"];
+            projected_total: components["schemas"]["MonetaryAmount"];
             /**
              * Separation Note
              * @default Projected figures are estimates over a multi-year horizon and are NOT included in any current-year total.
              */
             separation_note: string;
+            uncertainty: components["schemas"]["ProjectionUncertaintyOut"];
         };
         /**
          * NextStepV1
@@ -2641,100 +2661,100 @@ export interface components {
          *     except day counts against `as_of`.
          */
         OpportunityAssuranceOut: {
-            /** Opportunity Code */
-            opportunity_code: string;
-            /** Source Id */
-            source_id: string;
-            /** Eligibility Status */
-            eligibility_status: string;
-            /** Status */
-            status: string;
             /** Action */
             action: string;
+            /** Assumption Dependent */
+            assumption_dependent: boolean;
             /** Blocked Reason Code */
             blocked_reason_code: string | null;
-            /** Review Reason Codes */
-            review_reason_codes: string[];
+            /** Candidate Rank */
+            candidate_rank: number | null;
+            deadline: components["schemas"]["DeadlineOut"] | null;
+            /** Deadline Count */
+            deadline_count: number;
+            /** Eligibility Status */
+            eligibility_status: string;
             /** Evidence Readiness */
             evidence_readiness: string;
             /** Evidence Requirements */
             evidence_requirements: components["schemas"]["EvidenceRequirementOut"][];
-            deadline: components["schemas"]["DeadlineOut"] | null;
-            /** Deadline Count */
-            deadline_count: number;
-            /** Urgency */
-            urgency: string;
-            support: components["schemas"]["SupportScore"];
-            /** Assumption Dependent */
-            assumption_dependent: boolean;
+            /** Freshness */
+            freshness: string;
+            /** Incremental Portfolio Benefit */
+            incremental_portfolio_benefit: string | null;
+            /** Integrity */
+            integrity: string;
+            /** Integrity Reason Code */
+            integrity_reason_code: string;
+            /** Opportunity Code */
+            opportunity_code: string;
+            /** Review Reason Codes */
+            review_reason_codes: string[];
+            /** Source Id */
+            source_id: string;
+            /** Stale Reason Codes */
+            stale_reason_codes: string[];
             /**
              * Standalone Potential
              * @description Governed impact figure, sealed by the optimizer. Not recomputed here.
              */
             standalone_potential?: string | null;
-            /** Incremental Portfolio Benefit */
-            incremental_portfolio_benefit: string | null;
-            /** Candidate Rank */
-            candidate_rank: number | null;
-            /** Freshness */
-            freshness: string;
-            /** Stale Reason Codes */
-            stale_reason_codes: string[];
-            /** Integrity */
-            integrity: string;
-            /** Integrity Reason Code */
-            integrity_reason_code: string;
+            /** Status */
+            status: string;
+            support: components["schemas"]["SupportScore"];
+            /** Urgency */
+            urgency: string;
         };
         /**
          * OpportunityLifecycleItemOut
          * @description One opportunity, on seven axes that never collapse into one another.
          */
         OpportunityLifecycleItemOut: {
-            /** Opportunity Code */
-            opportunity_code: string;
-            /** Source Id */
-            source_id: string;
+            /** Actionability */
+            actionability: string;
+            /** Assumption Dependent */
+            assumption_dependent: boolean;
+            attention: components["schemas"]["AttentionFlagsOut"];
             /** Availability */
             availability: string;
+            /** Candidate Rank */
+            candidate_rank: number | null;
+            /** Days Remaining */
+            days_remaining: number | null;
+            deadline: components["schemas"]["LifecycleDeadlineOut"] | null;
             /** Decision */
             decision: string;
+            /** Evidence */
+            evidence: string;
             /**
              * Execution
              * @description NOT_REPORTED or USER_REPORTED. Never system verification.
              */
             execution: string;
-            /** Evidence */
-            evidence: string;
-            /** Timing */
-            timing: string;
             /** Freshness */
             freshness: string;
-            /** Stale Reason Codes */
-            stale_reason_codes: string[];
+            /** Incremental Portfolio Benefit */
+            incremental_portfolio_benefit: string | null;
             /** Integrity */
             integrity: string;
             /** Integrity Reason Code */
             integrity_reason_code: string;
-            deadline: components["schemas"]["LifecycleDeadlineOut"] | null;
-            /** Days Remaining */
-            days_remaining: number | null;
-            /** Actionability */
-            actionability: string;
-            /** Reason Codes */
-            reason_codes: string[];
-            attention: components["schemas"]["AttentionFlagsOut"];
             journal: components["schemas"]["JournalLinkOut"] | null;
             /** Last Reported Action Date */
             last_reported_action_date: string | null;
+            /** Opportunity Code */
+            opportunity_code: string;
+            /** Reason Codes */
+            reason_codes: string[];
+            /** Source Id */
+            source_id: string;
+            /** Stale Reason Codes */
+            stale_reason_codes: string[];
             /** Standalone Potential */
             standalone_potential: string | null;
-            /** Incremental Portfolio Benefit */
-            incremental_portfolio_benefit: string | null;
-            /** Candidate Rank */
-            candidate_rank: number | null;
             support: components["schemas"]["SupportScore"];
-            /** Assumption Dependent */
-            assumption_dependent: boolean;
+            /** Timing */
+            timing: string;
         };
         /**
          * OpportunityLifecycleOut
@@ -2745,23 +2765,23 @@ export interface components {
          *     when the truth is that no governing run exists.
          */
         OpportunityLifecycleOut: {
-            /** Schema Version */
-            schema_version: string;
-            /** Tax Year */
-            tax_year: number;
             /** As Of */
             as_of: string;
+            /** Attention Order */
+            attention_order: string[];
             /** Graph Hash */
             graph_hash: string;
+            /** Opportunities */
+            opportunities: components["schemas"]["OpportunityLifecycleItemOut"][];
             /** Opportunity Authority */
             opportunity_authority: string;
             /** Opportunity Authority Reason */
             opportunity_authority_reason: string;
-            /** Opportunities */
-            opportunities: components["schemas"]["OpportunityLifecycleItemOut"][];
-            /** Attention Order */
-            attention_order: string[];
+            /** Schema Version */
+            schema_version: string;
             summary: components["schemas"]["LifecycleSummaryOut"];
+            /** Tax Year */
+            tax_year: number;
         };
         /**
          * OptimizationRequest
@@ -2791,6 +2811,18 @@ export interface components {
          * @description The orchestrator's structured outcome, verbatim.
          */
         OptimizationRunOut: {
+            /** Candidate Count */
+            candidate_count: number;
+            /** Error Code */
+            error_code: string | null;
+            /** Portfolio Member Count */
+            portfolio_member_count: number;
+            /** Relationship Count */
+            relationship_count: number;
+            /** Replayed */
+            replayed: boolean;
+            /** Result Hash */
+            result_hash: string | null;
             /**
              * Run Id
              * Format: uuid
@@ -2798,22 +2830,10 @@ export interface components {
             run_id: string;
             /** Spec Hash */
             spec_hash: string;
-            /** Result Hash */
-            result_hash: string | null;
-            /** Workflow Status */
-            workflow_status: string;
-            /** Replayed */
-            replayed: boolean;
-            /** Candidate Count */
-            candidate_count: number;
-            /** Relationship Count */
-            relationship_count: number;
-            /** Portfolio Member Count */
-            portfolio_member_count: number;
-            /** Error Code */
-            error_code: string | null;
             /** Warnings */
             warnings: string[];
+            /** Workflow Status */
+            workflow_status: string;
         };
         /**
          * PortfolioExclusionOut
@@ -2829,43 +2849,43 @@ export interface components {
             membership: string;
             /** Reason Code */
             reason_code: string;
-            /** Shared Resource Code */
-            shared_resource_code?: string | null;
             /** Resolution Options */
             resolution_options?: string[];
+            /** Shared Resource Code */
+            shared_resource_code?: string | null;
         };
         /** PortfolioMemberOut */
         PortfolioMemberOut: {
+            /** Apply Order */
+            apply_order: number;
             /**
              * Candidate Id
              * Format: uuid
              */
             candidate_id: string;
-            /** Apply Order */
-            apply_order: number;
             incremental_benefit: components["schemas"]["MonetaryAmount"];
         };
         /** ProcessRequest */
         ProcessRequest: {
-            /** Text */
-            text?: string | null;
             /** Fields */
             fields?: {
                 [key: string]: unknown;
             } | null;
+            /** Text */
+            text?: string | null;
         };
         /** ProjectionAssumptionOut */
         ProjectionAssumptionOut: {
             /** Assumption Code */
             assumption_code: string;
-            /** Value */
-            value: string | null;
-            /** Materiality */
-            materiality: string;
             /** Certainty */
             certainty: string;
+            /** Materiality */
+            materiality: string;
             /** Source */
             source: string;
+            /** Value */
+            value: string | null;
         };
         /**
          * ProjectionResponse
@@ -2876,33 +2896,41 @@ export interface components {
          *     those is a different fact and each gets its own status.
          */
         ProjectionResponse: {
-            /**
-             * Status
-             * @description generated | not_generated_no_eligible_candidates | not_generated_missing_assumptions | feature_not_enabled
-             */
-            status: string;
+            /** Missing Assumption Codes */
+            missing_assumption_codes?: string[];
+            projection?: components["schemas"]["MultiYearProjectionOut"] | null;
             /**
              * Reason
              * @description Why nothing was generated, when nothing was.
              */
             reason?: string | null;
-            /** Missing Assumption Codes */
-            missing_assumption_codes?: string[];
-            projection?: components["schemas"]["MultiYearProjectionOut"] | null;
+            /**
+             * Status
+             * @description generated | not_generated_no_eligible_candidates | not_generated_missing_assumptions | feature_not_enabled
+             */
+            status: string;
         };
         /**
          * ProjectionUncertaintyOut
          * @description A projection's uncertainty is stated, not implied by a single number.
          */
         ProjectionUncertaintyOut: {
-            low_estimate?: components["schemas"]["MonetaryAmount"] | null;
             high_estimate?: components["schemas"]["MonetaryAmount"] | null;
+            low_estimate?: components["schemas"]["MonetaryAmount"] | null;
             /** Sensitivity Note */
             sensitivity_note?: string | null;
             support?: components["schemas"]["SupportScore"] | null;
         };
         /** RecommendationOut */
         RecommendationOut: {
+            /** Category */
+            category: string | null;
+            /** Citation */
+            citation: string | null;
+            /** Confidence Score */
+            confidence_score: number | null;
+            /** Estimated Impact */
+            estimated_impact: string | null;
             /**
              * Id
              * Format: uuid
@@ -2910,20 +2938,12 @@ export interface components {
             id: string;
             /** Opportunity Code */
             opportunity_code: string;
-            /** Title */
-            title: string;
-            /** Category */
-            category: string | null;
-            /** Estimated Impact */
-            estimated_impact: string | null;
-            /** Confidence Score */
-            confidence_score: number | null;
             /** Priority */
             priority: number;
-            /** Citation */
-            citation: string | null;
             /** Status */
             status: string;
+            /** Title */
+            title: string;
         };
         /**
          * RecordDecisionRequest
@@ -2967,22 +2987,22 @@ export interface components {
          *     engine computes today are accepted.
          */
         RegisteredAccountIn: {
-            /** Tax Year */
-            tax_year: number;
-            /**
-             * Registered Type
-             * @enum {string}
-             */
-            registered_type: "RRSP" | "FHSA";
-            /** Contributions Ytd */
-            contributions_ytd: number | string;
             /**
              * Contribution Room
              * @description Known available room, when the taxpayer has it to state.
              */
             contribution_room?: number | string | null;
+            /** Contributions Ytd */
+            contributions_ytd: number | string;
             /** Label */
             label?: string | null;
+            /**
+             * Registered Type
+             * @enum {string}
+             */
+            registered_type: "RRSP" | "FHSA";
+            /** Tax Year */
+            tax_year: number;
         };
         /** RegisteredAccountOut */
         RegisteredAccountOut: {
@@ -2991,26 +3011,26 @@ export interface components {
              * Format: uuid
              */
             asset_id: string;
-            /** Registered Type */
-            registered_type: string;
-            /** Tax Year */
-            tax_year: number;
             /** Contribution Room */
             contribution_room: string | null;
             /** Contributions Ytd */
             contributions_ytd: string;
+            /** Registered Type */
+            registered_type: string;
+            /** Tax Year */
+            tax_year: number;
             /** Withdrawals Ytd */
             withdrawals_ytd: string;
         };
         /** RejectBody */
         RejectBody: {
-            /** Reason */
-            reason: string;
             /**
              * Discard
              * @default false
              */
             discard: boolean;
+            /** Reason */
+            reason: string;
         };
         /**
          * ReportActionRequest
@@ -3018,15 +3038,15 @@ export interface components {
          */
         ReportActionRequest: {
             /**
-             * Request Id
-             * Format: uuid
-             */
-            request_id: string;
-            /**
              * Action Date
              * @description The date the user says the action happened, if they choose to say. Validated for sanity; never rewrites the server's own recorded_at.
              */
             action_date?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
         };
         /**
          * RetentionChangesOut
@@ -3038,56 +3058,56 @@ export interface components {
          *     report events that never happened.
          */
         RetentionChangesOut: {
-            /** Schema Version */
-            schema_version: string;
-            /** Tax Year */
-            tax_year: number;
             /** As Of */
             as_of: string;
+            baseline_checkpoint: components["schemas"]["BaselineCheckpointOut"] | null;
             /** Baseline Status */
             baseline_status: string;
-            baseline_checkpoint: components["schemas"]["BaselineCheckpointOut"] | null;
+            /** Changes */
+            changes: components["schemas"]["MaterialChangeOut"][];
             /**
              * Current Snapshot Hash
              * @description Echo this to acknowledge the state described here. It is the optimistic-concurrency token.
              */
             current_snapshot_hash: string;
-            /** Changes */
-            changes: components["schemas"]["MaterialChangeOut"][];
+            /** Schema Version */
+            schema_version: string;
             summary: components["schemas"]["ChangeSummaryOut"];
+            /** Tax Year */
+            tax_year: number;
         };
         /**
          * RetentionCheckpointOut
          * @description A newly recorded acknowledgement.
          */
         RetentionCheckpointOut: {
+            /** Acknowledged At */
+            acknowledged_at: string;
+            /** Evaluated As Of */
+            evaluated_as_of: string;
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /** Tax Year */
-            tax_year: number;
             /** Snapshot Hash */
             snapshot_hash: string;
             /** Snapshot Schema Version */
             snapshot_schema_version: string;
-            /** Evaluated As Of */
-            evaluated_as_of: string;
-            /** Acknowledged At */
-            acknowledged_at: string;
             /** Supersedes Checkpoint Id */
             supersedes_checkpoint_id: string | null;
+            /** Tax Year */
+            tax_year: number;
         };
         /** RollbackBody */
         RollbackBody: {
+            /** Reason */
+            reason: string;
             /**
              * To Version Id
              * Format: uuid
              */
             to_version_id: string;
-            /** Reason */
-            reason: string;
         };
         /**
          * ScenarioComparisonOut
@@ -3098,20 +3118,6 @@ export interface components {
          *     make a timing benefit and a permanent reduction look like the same thing.
          */
         ScenarioComparisonOut: {
-            left: components["schemas"]["ComparisonSideOut"];
-            right: components["schemas"]["ComparisonSideOut"];
-            /** Objective Code */
-            objective_code: string;
-            /** Objective Version */
-            objective_version: string;
-            /** Comparison Policy Version */
-            comparison_policy_version: string;
-            objective_difference: components["schemas"]["MonetaryAmount"];
-            tax_difference: components["schemas"]["MonetaryAmount"];
-            refund_balance_difference?: components["schemas"]["MonetaryAmount"] | null;
-            liquidity_commitment_difference?: components["schemas"]["MonetaryAmount"] | null;
-            /** Effect Type Differences */
-            effect_type_differences?: components["schemas"]["MonetaryAmount"][];
             /**
              * Better
              * @description left | right | equivalent
@@ -3119,8 +3125,22 @@ export interface components {
             better: string;
             /** Both Current */
             both_current: boolean;
+            /** Comparison Policy Version */
+            comparison_policy_version: string;
+            /** Effect Type Differences */
+            effect_type_differences?: components["schemas"]["MonetaryAmount"][];
+            left: components["schemas"]["ComparisonSideOut"];
+            liquidity_commitment_difference?: components["schemas"]["MonetaryAmount"] | null;
+            /** Objective Code */
+            objective_code: string;
+            objective_difference: components["schemas"]["MonetaryAmount"];
+            /** Objective Version */
+            objective_version: string;
+            refund_balance_difference?: components["schemas"]["MonetaryAmount"] | null;
+            right: components["schemas"]["ComparisonSideOut"];
             /** Stale Notices */
             stale_notices?: string[];
+            tax_difference: components["schemas"]["MonetaryAmount"];
         };
         /**
          * ScenarioContextOut
@@ -3130,21 +3150,21 @@ export interface components {
          *     document ids, no object keys.
          */
         ScenarioContextOut: {
+            /** Completed At */
+            completed_at: string | null;
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /** Label */
-            label: string | null;
-            /** Tax Year */
-            tax_year: number | null;
             /** Jurisdiction */
             jurisdiction: string | null;
+            /** Label */
+            label: string | null;
             /** Result Schema Version */
             result_schema_version: string | null;
-            /** Completed At */
-            completed_at: string | null;
+            /** Tax Year */
+            tax_year: number | null;
         };
         /**
          * ScenarioCreateRequest
@@ -3159,8 +3179,6 @@ export interface components {
              * Format: uuid
              */
             analysis_id: string;
-            /** Levers */
-            levers: components["schemas"]["LeverInput-Input"][];
             /** Assumptions */
             assumptions?: components["schemas"]["AssumptionInput-Input"][];
             /**
@@ -3168,70 +3186,72 @@ export interface components {
              * @description Descriptive only. Excluded from the scenario hashes, so renaming never changes identity or invalidates evidence.
              */
             label?: string | null;
+            /** Levers */
+            levers: components["schemas"]["LeverInput-Input"][];
             /** Note */
             note?: string | null;
         };
         /** ScenarioDetailOut */
         ScenarioDetailOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Label */
-            label: string | null;
-            /** Note */
-            note: string | null;
-            /** Workflow Status */
-            workflow_status: string;
-            /** Visibility Status */
-            visibility_status: string;
-            /** Tax Year */
-            tax_year: number | null;
-            /** Jurisdiction */
-            jurisdiction: string | null;
+            /** Applied Changes */
+            applied_changes?: components["schemas"]["AppliedChangeOut"][];
+            /** Assumptions */
+            assumptions: components["schemas"]["AssumptionInput-Output"][];
             /**
              * Base Analysis Id
              * Format: uuid
              */
             base_analysis_id: string;
-            /** Objective Code */
-            objective_code: string | null;
-            /** Objective Version */
-            objective_version: string | null;
-            /** Result Schema Version */
-            result_schema_version: string | null;
-            /** Scenario Spec Hash */
-            scenario_spec_hash: string | null;
-            /** Scenario Result Hash */
-            scenario_result_hash: string | null;
+            baseline_tax?: components["schemas"]["MonetaryAmount"] | null;
+            /** Completed At */
+            completed_at: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Completed At */
-            completed_at: string | null;
-            /** Error Code */
-            error_code: string | null;
-            freshness: components["schemas"]["FreshnessOut"];
-            integrity: components["schemas"]["IntegrityOut"];
-            /** Levers */
-            levers: components["schemas"]["LeverInput-Output"][];
-            /** Assumptions */
-            assumptions: components["schemas"]["AssumptionInput-Output"][];
-            baseline_tax?: components["schemas"]["MonetaryAmount"] | null;
-            scenario_tax?: components["schemas"]["MonetaryAmount"] | null;
-            tax_delta?: components["schemas"]["MonetaryAmount"] | null;
-            objective_delta?: components["schemas"]["MonetaryAmount"] | null;
-            support?: components["schemas"]["SupportScore"] | null;
-            /** Applied Changes */
-            applied_changes?: components["schemas"]["AppliedChangeOut"][];
             /**
              * Disclaimer
              * @default Educational information only. This is not tax advice, not a filing, and is not submitted to the CRA.
              */
             disclaimer: string;
+            /** Error Code */
+            error_code: string | null;
+            freshness: components["schemas"]["FreshnessOut"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            integrity: components["schemas"]["IntegrityOut"];
+            /** Jurisdiction */
+            jurisdiction: string | null;
+            /** Label */
+            label: string | null;
+            /** Levers */
+            levers: components["schemas"]["LeverInput-Output"][];
+            /** Note */
+            note: string | null;
+            /** Objective Code */
+            objective_code: string | null;
+            objective_delta?: components["schemas"]["MonetaryAmount"] | null;
+            /** Objective Version */
+            objective_version: string | null;
+            /** Result Schema Version */
+            result_schema_version: string | null;
+            /** Scenario Result Hash */
+            scenario_result_hash: string | null;
+            /** Scenario Spec Hash */
+            scenario_spec_hash: string | null;
+            scenario_tax?: components["schemas"]["MonetaryAmount"] | null;
+            support?: components["schemas"]["SupportScore"] | null;
+            tax_delta?: components["schemas"]["MonetaryAmount"] | null;
+            /** Tax Year */
+            tax_year: number | null;
+            /** Visibility Status */
+            visibility_status: string;
+            /** Workflow Status */
+            workflow_status: string;
         };
         /**
          * ScenarioReferenceOut
@@ -3239,6 +3259,10 @@ export interface components {
          *     the sealed scenario remains the authority for its own content.
          */
         ScenarioReferenceOut: {
+            /** Comparison Hash */
+            comparison_hash: string | null;
+            /** Comparison Schema Version */
+            comparison_schema_version: string | null;
             /**
              * Scenario Id
              * Format: uuid
@@ -3248,83 +3272,79 @@ export interface components {
             scenario_result_hash: string | null;
             /** Scenario Result Schema Version */
             scenario_result_schema_version: string | null;
-            /** Comparison Hash */
-            comparison_hash: string | null;
-            /** Comparison Schema Version */
-            comparison_schema_version: string | null;
         };
         /** ScenarioSummaryOut */
         ScenarioSummaryOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Label */
-            label: string | null;
-            /** Workflow Status */
-            workflow_status: string;
-            /** Visibility Status */
-            visibility_status: string;
-            /** Tax Year */
-            tax_year: number | null;
-            /** Jurisdiction */
-            jurisdiction: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
             freshness: components["schemas"]["FreshnessOut"];
-        };
-        /** StrategyPortfolioOut */
-        StrategyPortfolioOut: {
             /**
              * Id
              * Format: uuid
              */
             id: string;
-            /**
-             * Run Id
-             * Format: uuid
-             */
-            run_id: string;
-            /** Objective Code */
-            objective_code: string | null;
-            /** Objective Version */
-            objective_version: string | null;
+            /** Jurisdiction */
+            jurisdiction: string | null;
+            /** Label */
+            label: string | null;
+            /** Tax Year */
+            tax_year: number | null;
+            /** Visibility Status */
+            visibility_status: string;
+            /** Workflow Status */
+            workflow_status: string;
+        };
+        /** StrategyPortfolioOut */
+        StrategyPortfolioOut: {
             /** Assembly Method */
             assembly_method: string;
+            /** Engine Runs Used */
+            engine_runs_used: number;
+            /** Exclusions */
+            exclusions?: components["schemas"]["PortfolioExclusionOut"][];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            integrity?: components["schemas"]["IntegrityOut"] | null;
+            /** Members */
+            members?: components["schemas"]["PortfolioMemberOut"][];
+            /** Objective Code */
+            objective_code: string | null;
+            objective_value_baseline?: components["schemas"]["MonetaryAmount"] | null;
+            objective_value_final?: components["schemas"]["MonetaryAmount"] | null;
+            /** Objective Version */
+            objective_version: string | null;
             /**
              * Optimality Claim
              * @description Always 'none'. This is a feasible, deterministic, engine-evaluated portfolio, not a globally optimal one.
              */
             optimality_claim: string;
-            /** Search Budget Exhausted */
-            search_budget_exhausted: boolean;
-            /** Engine Runs Used */
-            engine_runs_used: number;
-            portfolio_total_benefit: components["schemas"]["MonetaryAmount"];
-            objective_value_baseline?: components["schemas"]["MonetaryAmount"] | null;
-            objective_value_final?: components["schemas"]["MonetaryAmount"] | null;
-            total_tax_reduction?: components["schemas"]["MonetaryAmount"] | null;
-            total_refund_impact?: components["schemas"]["MonetaryAmount"] | null;
-            total_refundable_benefit?: components["schemas"]["MonetaryAmount"] | null;
-            total_deferral_amount?: components["schemas"]["MonetaryAmount"] | null;
-            total_liquidity_commitment?: components["schemas"]["MonetaryAmount"] | null;
-            total_asset_transfer?: components["schemas"]["MonetaryAmount"] | null;
-            total_nonrecoverable_expenditure?: components["schemas"]["MonetaryAmount"] | null;
-            total_implementation_cost?: components["schemas"]["MonetaryAmount"] | null;
-            /** Members */
-            members?: components["schemas"]["PortfolioMemberOut"][];
-            /** Exclusions */
-            exclusions?: components["schemas"]["PortfolioExclusionOut"][];
             /**
              * Optimality Note
              * @default This is a feasible, deterministic, engine-evaluated strategy set. It is not a globally optimal portfolio.
              */
             optimality_note: string;
-            integrity?: components["schemas"]["IntegrityOut"] | null;
+            portfolio_total_benefit: components["schemas"]["MonetaryAmount"];
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Search Budget Exhausted */
+            search_budget_exhausted: boolean;
+            total_asset_transfer?: components["schemas"]["MonetaryAmount"] | null;
+            total_deferral_amount?: components["schemas"]["MonetaryAmount"] | null;
+            total_implementation_cost?: components["schemas"]["MonetaryAmount"] | null;
+            total_liquidity_commitment?: components["schemas"]["MonetaryAmount"] | null;
+            total_nonrecoverable_expenditure?: components["schemas"]["MonetaryAmount"] | null;
+            total_refund_impact?: components["schemas"]["MonetaryAmount"] | null;
+            total_refundable_benefit?: components["schemas"]["MonetaryAmount"] | null;
+            total_tax_reduction?: components["schemas"]["MonetaryAmount"] | null;
         };
         /**
          * SupportScore
@@ -3336,15 +3356,20 @@ export interface components {
          */
         SupportScore: {
             /**
-             * Display Support Score
-             * @description User-facing support score, 0-100. Not a probability.
-             */
-            display_support_score?: string | null;
-            /**
              * Assumption Adjusted Score
              * @description Uncapped support after assumption uncertainty; ordering key.
              */
             assumption_adjusted_score?: string | null;
+            /**
+             * Disclaimer
+             * @default This is a support score: it reflects how well this result is backed by the information supplied, its documentation, and the published rule it relies on. It is not a probability that the CRA will accept a claim, and not a probability of receiving the amount shown.
+             */
+            disclaimer: string;
+            /**
+             * Display Support Score
+             * @description User-facing support score, 0-100. Not a probability.
+             */
+            display_support_score?: string | null;
             /**
              * Raw Support Score
              * @description Support before any assumption adjustment.
@@ -3357,11 +3382,6 @@ export interface components {
             support_cap_applied: boolean;
             /** Support Cap Reason Code */
             support_cap_reason_code?: string | null;
-            /**
-             * Disclaimer
-             * @default This is a support score: it reflects how well this result is backed by the information supplied, its documentation, and the published rule it relies on. It is not a probability that the CRA will accept a claim, and not a probability of receiving the amount shown.
-             */
-            disclaimer: string;
         };
         /**
          * TaxAssuranceOut
@@ -3372,57 +3392,38 @@ export interface components {
          *     sealed rank, then identity. It is a presentation order, not an optimum.
          */
         TaxAssuranceOut: {
-            /** Schema Version */
-            schema_version: string;
-            /** View */
-            view: string;
-            /** Tax Year */
-            tax_year: number;
             /** As Of */
             as_of: string;
-            /** Graph Hash */
-            graph_hash: string;
-            /** Families */
-            families: components["schemas"]["FamilyAssuranceOut"][];
-            /** Opportunities */
-            opportunities: components["schemas"]["OpportunityAssuranceOut"][];
-            /** Attention */
-            attention: string[];
             /** Assumption Codes */
             assumption_codes: string[];
+            /** Attention */
+            attention: string[];
+            /** Families */
+            families: components["schemas"]["FamilyAssuranceOut"][];
+            /** Graph Hash */
+            graph_hash: string;
+            /** Opportunities */
+            opportunities: components["schemas"]["OpportunityAssuranceOut"][];
+            /** Schema Version */
+            schema_version: string;
             summary: components["schemas"]["AssuranceSummaryOut"];
+            /** Tax Year */
+            tax_year: number;
+            /** View */
+            view: string;
         };
         /** TaxProfileIn */
         TaxProfileIn: {
-            /** Province Code */
-            province_code?: string | null;
-            /** Marital Status */
-            marital_status?: string | null;
-            /**
-             * Is Student
-             * @default false
-             */
-            is_student: boolean;
-            /**
-             * Has Disability
-             * @default false
-             */
-            has_disability: boolean;
             /**
              * First Time Home Buyer
              * @default false
              */
             first_time_home_buyer: boolean;
             /**
-             * Is Self Employed
+             * Has Disability
              * @default false
              */
-            is_self_employed: boolean;
-            /**
-             * Owns Home
-             * @default false
-             */
-            owns_home: boolean;
+            has_disability: boolean;
             /**
              * Has Investments
              * @default false
@@ -3433,24 +3434,43 @@ export interface components {
              * @default false
              */
             has_rental_income: boolean;
+            /**
+             * Is Self Employed
+             * @default false
+             */
+            is_self_employed: boolean;
+            /**
+             * Is Student
+             * @default false
+             */
+            is_student: boolean;
+            /** Marital Status */
+            marital_status?: string | null;
+            /**
+             * Owns Home
+             * @default false
+             */
+            owns_home: boolean;
+            /** Province Code */
+            province_code?: string | null;
         };
         /** TaxProfileOut */
         TaxProfileOut: {
+            /** Has Rental Income */
+            has_rental_income: boolean;
+            /** Is Self Employed */
+            is_self_employed: boolean;
+            /** Is Student */
+            is_student: boolean;
+            /** Marital Status */
+            marital_status: string | null;
+            /** Province Code */
+            province_code: string | null;
             /**
              * User Id
              * Format: uuid
              */
             user_id: string;
-            /** Province Code */
-            province_code: string | null;
-            /** Marital Status */
-            marital_status: string | null;
-            /** Is Student */
-            is_student: boolean;
-            /** Is Self Employed */
-            is_self_employed: boolean;
-            /** Has Rental Income */
-            has_rental_income: boolean;
         };
         /** TokenPair */
         TokenPair: {
@@ -3470,6 +3490,8 @@ export interface components {
          *     before a handler ever builds a string out of it.
          */
         UploadRequest: {
+            /** Byte Size */
+            byte_size?: number | null;
             /** Document Type Code */
             document_type_code: string;
             /** Filename */
@@ -3478,21 +3500,19 @@ export interface components {
             mime_type?: string | null;
             /** Tax Year */
             tax_year?: number | null;
-            /** Byte Size */
-            byte_size?: number | null;
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -3503,714 +3523,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    register_api_v1_auth_register_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegisterRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    login_api_v1_auth_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TokenPair"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    refresh_api_v1_auth_refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RefreshRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TokenPair"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    logout_api_v1_auth_logout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_me_api_v1_users_me_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_tax_profile_api_v1_users_me_tax_profile_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaxProfileOut"];
-                };
-            };
-        };
-    };
-    upsert_tax_profile_api_v1_users_me_tax_profile_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TaxProfileIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaxProfileOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_income_api_v1_financials_income_get: {
-        parameters: {
-            query: {
-                tax_year: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IncomeOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    add_income_api_v1_financials_income_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["IncomeIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IncomeOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_registered_accounts_api_v1_financials_registered_accounts_get: {
-        parameters: {
-            query: {
-                tax_year: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegisteredAccountOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    add_registered_account_api_v1_financials_registered_accounts_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegisteredAccountIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegisteredAccountOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    add_expense_api_v1_financials_expenses_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ExpenseIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_income_api_v1_financials_income__income_id__delete: {
-        parameters: {
-            query: {
-                tax_year: number;
-            };
-            header?: never;
-            path: {
-                income_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_expense_api_v1_financials_expenses__expense_id__delete: {
-        parameters: {
-            query: {
-                tax_year: number;
-            };
-            header?: never;
-            path: {
-                expense_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_published_rules_api_v1_tax_rules_get: {
-        parameters: {
-            query: {
-                tax_year: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_analyses_api_v1_analysis_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnalysisOut"][];
-                };
-            };
-        };
-    };
-    run_analysis_api_v1_analysis_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AnalysisRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnalysisOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_recommendations_api_v1_recommendations_get: {
-        parameters: {
-            query: {
-                analysis_id: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecommendationOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_documents_api_v1_documents_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    create_upload_api_v1_documents_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UploadRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    process_api_v1_documents__document_id__process_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProcessRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    confirm_api_v1_documents__document_id__confirm_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConfirmRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_document_api_v1_documents__document_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_account_deletion_status_api_v1_account_deletion_get: {
         parameters: {
             query?: never;
@@ -4251,6 +3563,232 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    admin_login_api_v1_admin_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminLogin"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_change_requests_api_v1_admin_change_requests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    approve_change_request_api_v1_admin_change_requests__change_request_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_ingestion_job_api_v1_admin_ingestion_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestionJob"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rule_versions_api_v1_admin_rules_get: {
+        parameters: {
+            query: {
+                tax_year: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_rule_api_v1_admin_rules__version_id__publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_new_api_v1_ai_ask_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4347,41 +3885,6 @@ export interface operations {
             };
         };
     };
-    ask_new_api_v1_ai_ask_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AskRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     create_explanation_api_v1_ai_explanations_post: {
         parameters: {
             query?: never;
@@ -4415,7 +3918,27 @@ export interface operations {
             };
         };
     };
-    admin_login_api_v1_admin_auth_login_post: {
+    list_analyses_api_v1_analysis_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisOut"][];
+                };
+            };
+        };
+    };
+    run_analysis_api_v1_analysis_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4424,19 +3947,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AdminLogin"];
+                "application/json": components["schemas"]["AnalysisRequest"];
             };
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AnalysisOut"];
                 };
             };
             /** @description Validation Error */
@@ -4450,7 +3971,7 @@ export interface operations {
             };
         };
     };
-    create_ingestion_job_api_v1_admin_ingestion_jobs_post: {
+    login_api_v1_auth_login_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4459,7 +3980,91 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["IngestionJob"];
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_api_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    refresh_api_v1_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_api_v1_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterRequest"];
             };
         };
         responses: {
@@ -4485,12 +4090,91 @@ export interface operations {
             };
         };
     };
-    approve_change_request_api_v1_admin_change_requests__change_request_id__approve_post: {
+    launch_scope_api_v1_config_launch_scope_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    list_documents_api_v1_documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    create_upload_api_v1_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_api_v1_documents__document_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                change_request_id: string;
+                document_id: string;
             };
             cookie?: never;
         };
@@ -4518,12 +4202,123 @@ export interface operations {
             };
         };
     };
-    publish_rule_api_v1_admin_rules__version_id__publish_post: {
+    confirm_api_v1_documents__document_id__confirm_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                version_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    process_api_v1_documents__document_id__process_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProcessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_expense_api_v1_financials_expenses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_expense_api_v1_financials_expenses__expense_id__delete: {
+        parameters: {
+            query: {
+                tax_year: number;
+            };
+            header?: never;
+            path: {
+                expense_id: string;
             };
             cookie?: never;
         };
@@ -4551,7 +4346,7 @@ export interface operations {
             };
         };
     };
-    list_rule_versions_api_v1_admin_rules_get: {
+    list_income_api_v1_financials_income_get: {
         parameters: {
             query: {
                 tax_year: number;
@@ -4568,9 +4363,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["IncomeOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4584,62 +4377,7 @@ export interface operations {
             };
         };
     };
-    list_change_requests_api_v1_admin_change_requests_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    list_imports_api_v1_tkms_imports_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_import_api_v1_tkms_imports_post: {
+    add_income_api_v1_financials_income_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4648,7 +4386,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ImportBody"];
+                "application/json": components["schemas"]["IncomeIn"];
             };
         };
         responses: {
@@ -4658,9 +4396,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["IncomeOut"];
                 };
             };
             /** @description Validation Error */
@@ -4674,15 +4410,14 @@ export interface operations {
             };
         };
     };
-    reparse_import_api_v1_tkms_imports__job_id__reparse_post: {
+    delete_income_api_v1_financials_income__income_id__delete: {
         parameters: {
-            query?: {
-                parser_name?: string | null;
-                parser_version?: string | null;
+            query: {
+                tax_year: number;
             };
             header?: never;
             path: {
-                job_id: string;
+                income_id: string;
             };
             cookie?: never;
         };
@@ -4710,13 +4445,13 @@ export interface operations {
             };
         };
     };
-    get_import_api_v1_tkms_imports__job_id__get: {
+    list_registered_accounts_api_v1_financials_registered_accounts_get: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
+            query: {
+                tax_year: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -4727,9 +4462,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RegisteredAccountOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4743,253 +4476,16 @@ export interface operations {
             };
         };
     };
-    get_extracted_api_v1_tkms_imports__job_id__extracted_get: {
+    add_registered_account_api_v1_financials_registered_accounts_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_validation_api_v1_tkms_imports__job_id__validation_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_compare_api_v1_tkms_versions__version_id__compare_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    submit_version_api_v1_tkms_versions__version_id__submit_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    approve_version_api_v1_tkms_versions__version_id__approve_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reject_version_api_v1_tkms_versions__version_id__reject_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RejectBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    publish_version_api_v1_tkms_versions__version_id__publish_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    request_rollback_api_v1_tkms_rules__rule_id__rollback_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rule_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RollbackBody"];
+                "application/json": components["schemas"]["RegisteredAccountIn"];
             };
         };
         responses: {
@@ -4999,463 +4495,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    approve_rollback_api_v1_tkms_rollbacks__rollback_id__approve_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                rollback_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    trace_version_api_v1_tkms_versions__version_id__trace_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    search_rules_api_v1_tkms_rules_search_get: {
-        parameters: {
-            query?: {
-                tax_year?: number | null;
-                status_?: string | null;
-                q?: string | null;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_parsers_api_v1_tkms_parsers_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    list_dead_letters_api_v1_tkms_dead_letters_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    stats_api_v1_tkms_stats_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    create_optimization_api_v1_ioe_optimizations_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OptimizationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OptimizationRunOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_scenarios_api_v1_ioe_scenarios_get: {
-        parameters: {
-            query?: {
-                /** @description Archived scenarios are hidden, not deleted. */
-                include_archived?: boolean;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScenarioSummaryOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_scenario_api_v1_ioe_scenarios_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ScenarioCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScenarioDetailOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_scenario_api_v1_ioe_scenarios__scenario_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                scenario_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScenarioDetailOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    archive_scenario_api_v1_ioe_scenarios__scenario_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                scenario_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    refresh_scenario_api_v1_ioe_scenarios__scenario_id__refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                scenario_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScenarioDetailOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    unarchive_scenario_api_v1_ioe_scenarios__scenario_id__unarchive_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                scenario_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    compare_scenarios_api_v1_ioe_scenarios__left_id__compare__right_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                left_id: string;
-                right_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScenarioComparisonOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_before_you_act_comparison_api_v1_ioe_scenarios__scenario_id__comparison_get: {
-        parameters: {
-            query?: {
-                /** @description Render records that did not change. Presentation only: the summary counts and the comparison hash are identical either way. */
-                include_unchanged?: boolean;
-            };
-            header?: never;
-            path: {
-                scenario_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BeforeYouActComparisonOut"];
+                    "application/json": components["schemas"]["RegisteredAccountOut"];
                 };
             };
             /** @description Validation Error */
@@ -5489,6 +4529,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaxAssuranceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_retention_changes_api_v1_ioe_changes_get: {
+        parameters: {
+            query: {
+                tax_year: number;
+                /** @description Evaluation date for the timing bands, echoed in the response. Defaults to today (UTC). */
+                as_of?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionChangesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_retention_changes_api_v1_ioe_changes_acknowledge_post: {
+        parameters: {
+            query: {
+                tax_year: number;
+                as_of?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgeChangesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionCheckpointOut"];
                 };
             };
             /** @description Validation Error */
@@ -5586,6 +4695,41 @@ export interface operations {
             };
         };
     };
+    report_decision_action_api_v1_ioe_decision_journal__journal_id__action_report_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                journal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionJournalDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     record_decision_api_v1_ioe_decision_journal__journal_id__decision_post: {
         parameters: {
             query?: never;
@@ -5621,18 +4765,49 @@ export interface operations {
             };
         };
     };
-    report_decision_action_api_v1_ioe_decision_journal__journal_id__action_report_post: {
+    get_opportunity_lifecycle_api_v1_ioe_opportunity_lifecycle_get: {
+        parameters: {
+            query: {
+                tax_year: number;
+                /** @description Evaluation date for deadline timing, echoed in the response. Defaults to today (UTC). The only field the clock touches. */
+                as_of?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityLifecycleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_optimization_api_v1_ioe_optimizations_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                journal_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ReportActionRequest"];
+                "application/json": components["schemas"]["OptimizationRequest"];
             };
         };
         responses: {
@@ -5642,7 +4817,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DecisionJournalDetailOut"];
+                    "application/json": components["schemas"]["OptimizationRunOut"];
                 };
             };
             /** @description Validation Error */
@@ -5706,6 +4881,259 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProjectionResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scenarios_api_v1_ioe_scenarios_get: {
+        parameters: {
+            query?: {
+                /** @description Archived scenarios are hidden, not deleted. */
+                include_archived?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioSummaryOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_scenario_api_v1_ioe_scenarios_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compare_scenarios_api_v1_ioe_scenarios__left_id__compare__right_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                left_id: string;
+                right_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioComparisonOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scenario_api_v1_ioe_scenarios__scenario_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_scenario_api_v1_ioe_scenarios__scenario_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_before_you_act_comparison_api_v1_ioe_scenarios__scenario_id__comparison_get: {
+        parameters: {
+            query?: {
+                /** @description Render records that did not change. Presentation only: the summary counts and the comparison hash are identical either way. */
+                include_unchanged?: boolean;
+            };
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BeforeYouActComparisonOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_scenario_api_v1_ioe_scenarios__scenario_id__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unarchive_scenario_api_v1_ioe_scenarios__scenario_id__unarchive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -5782,12 +5210,10 @@ export interface operations {
             };
         };
     };
-    get_opportunity_lifecycle_api_v1_ioe_opportunity_lifecycle_get: {
+    list_recommendations_api_v1_recommendations_get: {
         parameters: {
             query: {
-                tax_year: number;
-                /** @description Evaluation date for deadline timing, echoed in the response. Defaults to today (UTC). The only field the clock touches. */
-                as_of?: string | null;
+                analysis_id: string;
             };
             header?: never;
             path?: never;
@@ -5801,7 +5227,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OpportunityLifecycleOut"];
+                    "application/json": components["schemas"]["RecommendationOut"][];
                 };
             };
             /** @description Validation Error */
@@ -5815,12 +5241,10 @@ export interface operations {
             };
         };
     };
-    get_retention_changes_api_v1_ioe_changes_get: {
+    list_published_rules_api_v1_tax_rules_get: {
         parameters: {
             query: {
                 tax_year: number;
-                /** @description Evaluation date for the timing bands, echoed in the response. Defaults to today (UTC). */
-                as_of?: string | null;
             };
             header?: never;
             path?: never;
@@ -5834,7 +5258,9 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RetentionChangesOut"];
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
                 };
             };
             /** @description Validation Error */
@@ -5848,19 +5274,71 @@ export interface operations {
             };
         };
     };
-    acknowledge_retention_changes_api_v1_ioe_changes_acknowledge_post: {
+    list_dead_letters_api_v1_tkms_dead_letters_get: {
         parameters: {
-            query: {
-                tax_year: number;
-                as_of?: string | null;
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
             };
+        };
+    };
+    list_imports_api_v1_tkms_imports_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_import_api_v1_tkms_imports_post: {
+        parameters: {
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AcknowledgeChangesRequest"];
+                "application/json": components["schemas"]["ImportBody"];
             };
         };
         responses: {
@@ -5870,7 +5348,571 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RetentionCheckpointOut"];
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_import_api_v1_tkms_imports__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_extracted_api_v1_tkms_imports__job_id__extracted_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reparse_import_api_v1_tkms_imports__job_id__reparse_post: {
+        parameters: {
+            query?: {
+                parser_name?: string | null;
+                parser_version?: string | null;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_validation_api_v1_tkms_imports__job_id__validation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_parsers_api_v1_tkms_parsers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    approve_rollback_api_v1_tkms_rollbacks__rollback_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rollback_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_rules_api_v1_tkms_rules_search_get: {
+        parameters: {
+            query?: {
+                tax_year?: number | null;
+                status_?: string | null;
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_rollback_api_v1_tkms_rules__rule_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RollbackBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stats_api_v1_tkms_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    approve_version_api_v1_tkms_versions__version_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compare_api_v1_tkms_versions__version_id__compare_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_version_api_v1_tkms_versions__version_id__publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_version_api_v1_tkms_versions__version_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_version_api_v1_tkms_versions__version_id__submit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trace_version_api_v1_tkms_versions__version_id__trace_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_me_api_v1_users_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_tax_profile_api_v1_users_me_tax_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxProfileOut"];
+                };
+            };
+        };
+    };
+    upsert_tax_profile_api_v1_users_me_tax_profile_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaxProfileIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaxProfileOut"];
                 };
             };
             /** @description Validation Error */

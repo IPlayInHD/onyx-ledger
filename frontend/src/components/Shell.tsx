@@ -18,15 +18,20 @@ import {
 } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/auth/AuthProvider'
+import { useLaunchScope } from '@/lib/queries'
 
 /* ------------------------------------------------------------- tax year -- */
 
-/** Years the certified backend actually has governed reference data for. The
- *  list is explicit rather than derived from the clock: offering a year the
- *  engine cannot resolve would produce a fail-closed error the customer
- *  cannot act on. */
-export const SUPPORTED_TAX_YEARS = [2025, 2026] as const
-export type SupportedTaxYear = (typeof SUPPORTED_TAX_YEARS)[number]
+/** The year a fresh session starts on, before the backend has answered.
+ *
+ *  NOT a list of supported years — that list is the backend's, served by
+ *  `/config/launch-scope`. The frontend kept its own copy once and it drifted:
+ *  the copy offered a jurisdiction the engine could not answer for. A single
+ *  starting value is not a second registry, and the picker below only ever
+ *  offers what the backend returned. */
+const DEFAULT_TAX_YEAR = 2025
+
+export type SupportedTaxYear = number
 
 interface YearState {
   taxYear: SupportedTaxYear
@@ -35,7 +40,7 @@ interface YearState {
 const YearContext = createContext<YearState | null>(null)
 
 export function TaxYearProvider({ children }: { children: ReactNode }) {
-  const [taxYear, setTaxYear] = useState<SupportedTaxYear>(2025)
+  const [taxYear, setTaxYear] = useState<SupportedTaxYear>(DEFAULT_TAX_YEAR)
   const value = useMemo(() => ({ taxYear, setTaxYear }), [taxYear])
   return <YearContext.Provider value={value}>{children}</YearContext.Provider>
 }
@@ -178,6 +183,13 @@ export function SiteFooter() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { taxYear, setTaxYear } = useTaxYear()
+  const scope = useLaunchScope()
+
+  // Until the backend answers, the picker offers the year already selected and
+  // nothing else. Falling back to a built-in list would be the parallel
+  // registry this endpoint exists to remove, and it would offer years during
+  // the first moments of every page load that the backend might not support.
+  const years = scope.data?.tax_years ?? [taxYear]
 
   return (
     <div className="shell">
@@ -198,7 +210,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 }
                 aria-label="Tax year"
               >
-                {SUPPORTED_TAX_YEARS.map((year) => (
+                {years.map((year) => (
                   <option key={year} value={year}>
                     {year}
                   </option>

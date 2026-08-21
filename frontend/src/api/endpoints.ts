@@ -238,3 +238,25 @@ export const accountApi = {
       body: { request_id: requestId },
     }),
 }
+
+/* ----------------------------------------------------------------- config -- */
+
+export interface LaunchScope {
+  tax_years: number[]
+  provinces: { code: string; name: string }[]
+}
+
+/**
+ * What Onyx currently offers.
+ *
+ * ANONYMOUS on purpose: onboarding needs the list before an account exists.
+ *
+ * The frontend used to keep its own copy of this — a hard-coded array of
+ * provinces and another of tax years — and the two drifted immediately. The
+ * copy offered Quebec, which the engine cannot answer for. There is now one
+ * list, the backend owns it, and it is checked against the engine's own
+ * resolved dataset on the backend side.
+ */
+export const configApi = {
+  launchScope: () => request<LaunchScope>('/config/launch-scope', { anonymous: true }),
+}
