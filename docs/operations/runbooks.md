@@ -98,6 +98,11 @@ analyses.
 
 ## AI provider outage
 
+**Not reachable yet:** no external provider is wired. `get_llm_client()`
+returns the deterministic `TemplateLlmClient` unconditionally, so there is
+nothing to have an outage. This runbook applies from the day a provider adapter
+ships, and the fallback it describes is already the only path.
+
 **Nothing is required of you.** The explanation layer falls back to the
 deterministic renderer on timeout, rate limit, malformed response or validation
 failure, and the customer reads a perfectly good explanation. Fallback frequency

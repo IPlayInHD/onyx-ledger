@@ -34,7 +34,7 @@ the product state a figure the certified engine did not produce.
 | Authentication | Register, login, refresh rotation, logout, password reset |
 | Admission control | Per-identity and per-source-IP rate and concurrency limits |
 | Tenant isolation | PostgreSQL row level security, per-request `app.user_id` |
-| Object storage | Pre-signed URL issuance and expiry |
+| Object storage | Pre-signed URL issuance and expiry — see §8, the store behind it is a fake |
 | Webhooks | Payment provider callback endpoint |
 | AI explanation | `POST /api/v1/ai/explanations` |
 | Admin and publication surfaces | Separate credentials, four-eyes publication |
@@ -85,10 +85,15 @@ testing is exactly what an external test exists to check.
 5. No ambient authority: cookies are never sent, authorisation is an explicit
    header, so CSRF has nothing to borrow.
 6. No inline scripts or styles; CSP is `script-src 'self'; style-src 'self'`.
-7. The AI layer cannot become an authority. The model receives a validated
-   input contract only — no database, no retrieval, no web, no admin context —
-   and a failed validation falls back to a deterministic renderer. It decides no
-   amount.
+7. The AI layer cannot become an authority, and today it is not even a layer:
+   `get_llm_client()` returns `TemplateLlmClient`, a deterministic renderer, so
+   **no external model is called at all** — there is no outbound provider
+   request in staging to intercept, poison or bill. The seam is built so that
+   when a provider is wired it receives a validated input contract only — no
+   database, no retrieval, no web, no admin context — and a failed validation
+   falls back to the same deterministic renderer. Either way it decides no
+   amount. Prompt-injection attempts are still wanted against the explanation
+   endpoint; they simply exercise the renderer rather than a model.
 8. Error bodies are RFC-9457, correlated, and carry no stack trace, SQL
    fragment or internal identifier. `/readyz` returns a verdict and no reason.
 9. The tax engine is the only authority for a customer-facing figure.
@@ -122,9 +127,19 @@ than committed here.
 Told up front rather than discovered, because your time is better spent
 elsewhere:
 
-- Document upload is scaffolded and returns 501.
+- Document upload is **implemented and reachable** — an earlier draft of this
+  document wrongly said it returns 501, and a tester who believed that would
+  skip a live surface. `POST /api/v1/documents` enforces a MIME allow-list, a
+  size ceiling and ownership, and issues a presigned upload URL. What is behind
+  it is a fake: `get_object_storage()` returns an in-memory `LocalObjectStorage`
+  unconditionally, so presigned URLs are `local://` strings and no real bucket
+  is involved in staging or anywhere else. Treat the *endpoint* as in scope and
+  the *storage* as not yet existing.
 - Email verification is not implemented; accounts are created active.
 - Payments and entitlement are not implemented.
+- No external AI provider is wired. `settings.llm_provider` and
+  `settings.llm_model` exist and nothing reads them; the provider adapter is a
+  commented-out sketch in `app/integrations/llm.py`.
 - Multi-factor authentication is not implemented for customers or admins.
 - Legal-acceptance persistence is not implemented.
 

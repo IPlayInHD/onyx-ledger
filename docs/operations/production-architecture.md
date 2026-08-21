@@ -39,7 +39,10 @@ Launch scope is **Federal + Ontario** (`/api/v1/config/launch-scope`).
 ```
 
 External services, all reached outbound over TLS: transactional email, the
-payment provider, the AI provider, and error/metric collection.
+payment provider, the AI provider, and error/metric collection. **None of the
+four is wired today.** The AI seam in particular returns a deterministic
+renderer (`get_llm_client()` → `TemplateLlmClient`) rather than calling a model,
+so the product currently makes no outbound provider request of any kind.
 
 ## 2. Cloud and region
 
@@ -180,10 +183,37 @@ which turns a key into an enumeration oracle.
 the backend after it has checked ownership, so the authorisation decision stays
 with the application rather than with whoever holds a link.
 
-**Launch blocker, stated plainly:** document upload is scaffolded, not
-finished — the documents pipeline returns 501. Until it is implemented, the
-bucket exists for nothing and the privacy policy must not describe a document
-store the product does not have.
+**Launch blocker, stated plainly — and it is not the one an earlier draft of
+this document described.** That draft said the documents pipeline returns 501.
+It does not. `POST /api/v1/documents` is fully implemented: it registers the
+document, enforces a MIME allow-list and a size ceiling, passes through
+admission control, and hands back a presigned upload URL. Process, confirm,
+list and delete are implemented too.
+
+What is missing is underneath. `get_object_storage()` returns
+`LocalObjectStorage` **unconditionally** — an in-process, in-memory fake whose
+presigned URLs are `local://` strings no browser can use. `settings.s3_endpoint_url`
+exists and nothing reads it; `boto3` is not in `requirements.lock.txt`; the S3
+adapter is a commented-out sketch at the bottom of `app/integrations/storage.py`.
+
+Three subsystems resolve through that factory, and the third is the sharp edge:
+
+| caller | what it stores |
+|---|---|
+| `document_processing` | customer document bytes |
+| `tkms.ingestion` | tax knowledge source bytes |
+| `privacy.lifecycle` | **deletes** customer objects |
+
+A deletion phase running against an in-memory fake reports success having
+touched nothing. Point that code at a real bucket without writing the adapter
+and the privacy pipeline would record erasure that did not happen — which is a
+worse failure than an endpoint that refuses.
+
+So: writing `S3ObjectStorage` and wiring the factory to settings is a launch
+prerequisite, not a nice-to-have, and until it exists the privacy policy must
+not describe a document store the product does not have. The commented sketch
+also carries PD-10 unresolved: on a versioned bucket, `delete_object` writes a
+delete marker and previous versions remain, which is not erasure.
 
 ## 7. Secrets
 
