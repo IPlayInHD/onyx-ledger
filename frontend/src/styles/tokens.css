@@ -1,0 +1,303 @@
+/* =========================================================================
+   ONYX LEDGER — DESIGN TOKENS
+   =========================================================================
+   The visual DNA is "ledger, not dashboard": ink on paper, hairline rules,
+   tabular figures, and a single restrained accent. Every decision here is
+   aimed at one feeling — FINANCIAL INTELLIGENCE, PRECISION, CALM CONFIDENCE.
+
+   Deliberately absent, because they are what makes software look generated:
+   neon, glassmorphism, large gradients, glowing cards, uniform rounded-card
+   grids, and a KPI tile for every number.
+
+   PROVENANCE IS A FIRST-CLASS VISUAL SYSTEM (see --prov-*). A customer must be
+   able to tell a deterministic calculation from a governed source, a fact they
+   typed, a platform assumption, and AI prose — WITHOUT relying on colour, so
+   every provenance treatment pairs a hue with a glyph and a word.
+   ========================================================================= */
+
+:root {
+  /* ---- type ------------------------------------------------------------
+     Two families, no webfonts: no network request, no layout shift, no
+     external origin in the CSP. The serif carries money and headlines
+     (financial gravitas); the sans carries interface text. */
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino,
+    'Book Antiqua', Georgia, 'Times New Roman', serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, 'Cascadia Mono', Menlo,
+    Consolas, monospace;
+
+  /* Modular scale, 1.25 (major third) from a 16px base. */
+  --text-2xs: 0.6875rem; /* 11px — micro-labels, provenance tags */
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.875rem;   /* 14px */
+  --text-base: 1rem;     /* 16px */
+  --text-lg: 1.125rem;   /* 18px */
+  --text-xl: 1.375rem;   /* 22px */
+  --text-2xl: 1.75rem;   /* 28px */
+  --text-3xl: 2.25rem;   /* 36px */
+  --text-4xl: 3rem;      /* 48px — headline figures only */
+  --text-5xl: 3.75rem;   /* 60px — hero figure */
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7; /* long-form legal + trust reading */
+
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.02em;
+  --tracking-caps: 0.09em; /* letterspaced micro-labels — an Onyx signature */
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* ---- space: 4px base, no arbitrary values anywhere in the app ---- */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.5rem;
+  --space-8: 3rem;
+  --space-9: 4rem;
+  --space-10: 6rem;
+
+  /* ---- radii: restrained. Ledgers have corners, not pills. ---- */
+  --radius-none: 0;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-full: 999px; /* only for dots/indicators, never for cards */
+
+  /* ---- borders: the hairline rule is the primary structural device ---- */
+  --border-hair: 1px;
+  --border-thick: 2px;
+  --rule: var(--border-hair) solid var(--c-rule);
+  --rule-strong: var(--border-hair) solid var(--c-rule-strong);
+
+  /* ---- elevation: almost flat. Depth comes from rules and ground, not
+         from drop shadows stacked on every card. ---- */
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px rgba(16, 18, 20, 0.06);
+  --shadow-md: 0 2px 8px rgba(16, 18, 20, 0.08);
+  --shadow-lg: 0 12px 32px rgba(16, 18, 20, 0.14);
+
+  /* ---- motion ---- */
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 420ms;
+  --dur-figure: 640ms; /* the Decision Twin figure roll */
+  --ease-standard: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* ---- layout ---- */
+  --bp-sm: 30rem;   /* 480 — large phone */
+  --bp-md: 48rem;   /* 768 — tablet */
+  --bp-lg: 64rem;   /* 1024 — desktop */
+  --bp-xl: 80rem;   /* 1280 — wide */
+  --measure: 68ch;  /* legal/trust reading width */
+  --shell-max: 78rem;
+
+  /* ---- focus: one visible treatment, everywhere, never removed ---- */
+  --focus-ring: 2px solid var(--c-focus);
+  --focus-offset: 2px;
+
+  /* =====================================================================
+     LIGHT — "paper and ink". Warm paper keeps long financial reading calm;
+     pure #fff reads clinical and blue-shifts under warm displays.
+     ===================================================================== */
+  --c-paper: #fbfaf7;       /* app ground */
+  --c-surface: #ffffff;     /* raised reading surface */
+  --c-surface-sunken: #f4f2ee; /* wells, table headers, code */
+  --c-surface-inset: #efece6;
+
+  --c-ink: #14171a;         /* primary text — near-black, not pure black */
+  --c-ink-secondary: #4a5157;
+  --c-ink-muted: #6d757c;
+  --c-ink-faint: #939aa1;
+  --c-ink-inverse: #f7f6f3;
+
+  --c-rule: #e2ded6;        /* hairline */
+  --c-rule-strong: #c9c3b8;
+
+  /* The single accent. Deep verdigris — money-adjacent, calm, and nothing
+     like a crypto dashboard's electric cyan. */
+  --c-accent: #14584f;
+  --c-accent-hover: #0f453e;
+  --c-accent-soft: #e3efec;
+  --c-accent-border: #a8ccc4;
+  --c-on-accent: #ffffff;
+
+  --c-focus: #14584f;
+
+  /* ---- semantic status. Distinct from provenance on purpose. ---- */
+  --c-positive: #1c6b47;      /* a reduction in tax owing */
+  --c-positive-soft: #e4f0ea;
+  --c-negative: #9a2c2c;      /* an increase */
+  --c-negative-soft: #f8e8e6;
+  --c-caution: #8a5a12;       /* needs attention */
+  --c-caution-soft: #fbf0dc;
+  --c-neutral: #4a5157;
+  --c-neutral-soft: #eeecE7;
+
+  /* =====================================================================
+     PROVENANCE — the trust system (§3). Each has hue + glyph + word.
+     ===================================================================== */
+  --prov-calculated: #14171a;        /* deterministic Onyx calculation */
+  --prov-calculated-soft: #eceae5;
+  --prov-governed: #26407a;          /* published governed source */
+  --prov-governed-soft: #e6eaf4;
+  --prov-user: #7a4a12;              /* the customer's own stated fact */
+  --prov-user-soft: #f6ecdd;
+  --prov-assumption: #5b3a86;        /* platform/statutory assumption */
+  --prov-assumption-soft: #efe8f6;
+  --prov-ai: #1d5f66;                /* AI-generated prose */
+  --prov-ai-soft: #e2eff0;
+
+  /* ---- data visualisation: sequential, colour-blind safe, and never
+         more than is needed to read a position. ---- */
+  --viz-1: #14584f;
+  --viz-2: #26407a;
+  --viz-3: #7a4a12;
+  --viz-4: #5b3a86;
+  --viz-5: #1d5f66;
+  --viz-grid: #e2ded6;
+  --viz-axis: #939aa1;
+
+  --skeleton-base: #eeebe5;
+  --skeleton-sheen: #f7f5f1;
+}
+
+/* =========================================================================
+   DARK — genuine obsidian, not an inverted filter. Surfaces lift with
+   lightness rather than shadow, and every provenance hue is re-tuned for
+   contrast on dark ground rather than reused from light.
+   ========================================================================= */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --c-paper: #0e1113;
+    --c-surface: #16191c;
+    --c-surface-sunken: #1c2023;
+    --c-surface-inset: #22262a;
+
+    --c-ink: #eceef0;
+    --c-ink-secondary: #b6bcc2;
+    --c-ink-muted: #8d959c;
+    --c-ink-faint: #6b7378;
+    --c-ink-inverse: #14171a;
+
+    --c-rule: #2a2f34;
+    --c-rule-strong: #3d444b;
+
+    --c-accent: #5fbfae;
+    --c-accent-hover: #7bcfc0;
+    --c-accent-soft: #16302c;
+    --c-accent-border: #2f6459;
+    --c-on-accent: #0b1614;
+    --c-focus: #7bcfc0;
+
+    --c-positive: #63c295;
+    --c-positive-soft: #14291f;
+    --c-negative: #e08b84;
+    --c-negative-soft: #2c1a19;
+    --c-caution: #dcae62;
+    --c-caution-soft: #2a2214;
+    --c-neutral: #b6bcc2;
+    --c-neutral-soft: #21262a;
+
+    --prov-calculated: #eceef0;
+    --prov-calculated-soft: #22262a;
+    --prov-governed: #93aee8;
+    --prov-governed-soft: #182236;
+    --prov-user: #d9a86a;
+    --prov-user-soft: #2a2016;
+    --prov-assumption: #b498dd;
+    --prov-assumption-soft: #241d31;
+    --prov-ai: #6fbcc4;
+    --prov-ai-soft: #142a2c;
+
+    --viz-1: #5fbfae;
+    --viz-2: #93aee8;
+    --viz-3: #d9a86a;
+    --viz-4: #b498dd;
+    --viz-5: #6fbcc4;
+    --viz-grid: #2a2f34;
+    --viz-axis: #6b7378;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+    --skeleton-base: #1e2226;
+    --skeleton-sheen: #262b30;
+  }
+}
+
+/* Explicit user choice wins over the system preference in both directions. */
+:root[data-theme='dark'] {
+  --c-paper: #0e1113;
+  --c-surface: #16191c;
+  --c-surface-sunken: #1c2023;
+  --c-surface-inset: #22262a;
+  --c-ink: #eceef0;
+  --c-ink-secondary: #b6bcc2;
+  --c-ink-muted: #8d959c;
+  --c-ink-faint: #6b7378;
+  --c-ink-inverse: #14171a;
+  --c-rule: #2a2f34;
+  --c-rule-strong: #3d444b;
+  --c-accent: #5fbfae;
+  --c-accent-hover: #7bcfc0;
+  --c-accent-soft: #16302c;
+  --c-accent-border: #2f6459;
+  --c-on-accent: #0b1614;
+  --c-focus: #7bcfc0;
+  --c-positive: #63c295;
+  --c-positive-soft: #14291f;
+  --c-negative: #e08b84;
+  --c-negative-soft: #2c1a19;
+  --c-caution: #dcae62;
+  --c-caution-soft: #2a2214;
+  --c-neutral: #b6bcc2;
+  --c-neutral-soft: #21262a;
+  --prov-calculated: #eceef0;
+  --prov-calculated-soft: #22262a;
+  --prov-governed: #93aee8;
+  --prov-governed-soft: #182236;
+  --prov-user: #d9a86a;
+  --prov-user-soft: #2a2016;
+  --prov-assumption: #b498dd;
+  --prov-assumption-soft: #241d31;
+  --prov-ai: #6fbcc4;
+  --prov-ai-soft: #142a2c;
+  --viz-1: #5fbfae;
+  --viz-2: #93aee8;
+  --viz-3: #d9a86a;
+  --viz-4: #b498dd;
+  --viz-5: #6fbcc4;
+  --viz-grid: #2a2f34;
+  --viz-axis: #6b7378;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  --skeleton-base: #1e2226;
+  --skeleton-sheen: #262b30;
+}
+
+/* Motion is a communication device, never decoration: when the viewer asks
+   for less of it, everything still works and nothing is left mid-animation. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 1ms;
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --dur-figure: 1ms;
+  }
+}

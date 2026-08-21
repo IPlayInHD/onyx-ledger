@@ -1,0 +1,461 @@
+/* =========================================================================
+   PRODUCT SURFACES
+   =========================================================================
+   The signature Onyx interactions. Each one is built from the tokens, and each
+   one encodes state with SHAPE and STROKE as well as hue — a customer using a
+   high-contrast theme, a monochrome display, or colour-blind vision reads the
+   same information.
+   ========================================================================= */
+
+/* =========================================================================
+   1. THE ASSURANCE LEDGER  (signature surface)
+   -------------------------------------------------------------------------
+   Not a table of badges. Each governed family is a RULED LINE whose stroke
+   says what state it is in — solid for ready, dotted where evidence is
+   missing, dashed where no governing run exists. A ledger you can read down
+   the left edge in one pass, which is exactly how an accountant scans one.
+   ========================================================================= */
+.assurance { display: flex; flex-direction: column; }
+
+.afam {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-4) 0;
+  border-bottom: var(--rule);
+}
+.afam:last-child { border-bottom: 0; }
+.afam__name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+}
+.afam__meta { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+
+/* The state rule: 3px of stroke that carries the meaning. */
+.afam__rule {
+  grid-column: 1 / -1;
+  height: 3px;
+  border-radius: 2px;
+  background-repeat: repeat-x;
+}
+.afam__rule--ready { background: var(--c-positive); }
+.afam__rule--attention {
+  /* dotted — something is outstanding */
+  background-image: radial-gradient(circle, var(--c-caution) 40%, transparent 42%);
+  background-size: 8px 3px;
+}
+.afam__rule--blocked {
+  background-image: repeating-linear-gradient(
+    90deg, var(--c-negative) 0 10px, transparent 10px 16px
+  );
+}
+.afam__rule--unavailable {
+  /* long dashes on faint ink: nothing governs this family yet, which is NOT
+     the same claim as "there is nothing here" */
+  background-image: repeating-linear-gradient(
+    90deg, var(--c-rule-strong) 0 14px, transparent 14px 24px
+  );
+}
+.afam__count {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--c-ink-muted);
+}
+
+/* ---------------------------------------------------------- attention list -- */
+.attention { display: flex; flex-direction: column; }
+.attention__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-bottom: var(--rule);
+  text-decoration: none;
+  color: inherit;
+}
+.attention__item:last-child { border-bottom: 0; }
+.attention__item:hover { background: var(--c-surface-sunken); }
+.attention__rank {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  color: var(--c-ink-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5rem;
+}
+.attention__title { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.attention__sub { font-size: var(--text-xs); color: var(--c-ink-muted); margin-top: 2px; }
+
+/* =========================================================================
+   2. THE POSITION HEADLINE
+   -------------------------------------------------------------------------
+   One figure, set large in the display serif, with its provenance and
+   currency stated beside it rather than implied. This is the only place on
+   the overview that raises its voice.
+   ========================================================================= */
+.headline {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: 1fr;
+  align-items: end;
+}
+@media (min-width: 48rem) {
+  .headline { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+}
+.headline__figure { display: flex; flex-direction: column; gap: var(--space-2); }
+.headline__meta { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+
+/* Secondary figures sit in a ruled row — a ledger line, not four KPI tiles. */
+.figrow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+@media (min-width: 48rem) {
+  .figrow--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .figrow--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.figrow__cell {
+  padding-left: var(--space-4);
+  border-left: var(--rule-strong);
+}
+.figrow__label {
+  display: block;
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+  margin-bottom: var(--space-1);
+}
+
+/* =========================================================================
+   3. THE DECISION TWIN
+   -------------------------------------------------------------------------
+   Baseline and modelled position, side by side, with the delta between them
+   as the loudest element — because the delta is the decision. On a phone the
+   two stack and the connector rotates, so the relationship survives.
+   ========================================================================= */
+.twin {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  align-items: center;
+}
+@media (min-width: 48rem) {
+  .twin { grid-template-columns: 1fr auto 1fr; gap: var(--space-6); }
+}
+.twin__side {
+  padding: var(--space-5);
+  border: var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--c-surface);
+}
+.twin__side--modelled {
+  border-color: var(--c-accent-border);
+  background: var(--c-accent-soft);
+}
+.twin__label {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+  margin-bottom: var(--space-2);
+  display: block;
+}
+
+/* The connector carries the delta. Vertical on phones, horizontal above. */
+.twin__delta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-thick) solid var(--c-rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--c-surface);
+  text-align: center;
+}
+.twin__delta--down { border-color: var(--c-positive); color: var(--c-positive); }
+.twin__delta--up { border-color: var(--c-negative); color: var(--c-negative); }
+.twin__delta-arrow { font-size: var(--text-xl); line-height: 1; }
+.twin__delta-value {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-variant-numeric: tabular-nums;
+}
+.twin__delta-caption {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+}
+
+/* A figure that has just changed gets one short, quiet lift. Motion here says
+   "this number moved because of what you did" — it is never decorative, and
+   under prefers-reduced-motion the duration token collapses to 1ms. */
+@keyframes figure-settle {
+  from { opacity: 0; transform: translateY(0.35rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.figure--settling {
+  animation: figure-settle var(--dur-figure) var(--ease-entrance);
+}
+
+/* The lever bench: registry-controlled levers only. */
+.lever {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--rule);
+  border-radius: var(--radius-md);
+}
+.lever--active { border-color: var(--c-accent); background: var(--c-accent-soft); }
+.lever__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.lever__name { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+
+/* =========================================================================
+   4. OPPORTUNITY RECORDS
+   -------------------------------------------------------------------------
+   A ruled record, not a shadowed card in a repeating grid. Structure comes
+   from a heavier left edge whose colour states the eligibility band.
+   ========================================================================= */
+.opp {
+  border: var(--rule);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--c-surface);
+  padding: var(--space-5);
+}
+.opp--eligible { border-left-color: var(--c-positive); }
+.opp--conditional { border-left-color: var(--c-caution); }
+.opp--ineligible { border-left-color: var(--c-rule-strong); }
+.opp--indeterminate { border-left-color: var(--c-rule-strong); }
+.opp__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.opp__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-regular);
+}
+.opp__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: var(--rule);
+}
+@media (min-width: 48rem) {
+  .opp__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.opp__facet-label {
+  display: block;
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+  margin-bottom: var(--space-1);
+}
+
+/* =========================================================================
+   5. WHAT CHANGED — the timeline
+   -------------------------------------------------------------------------
+   A ledger spine with severity carried by the node, so a scan down the left
+   edge shows what actually matters instead of an undifferentiated feed.
+   ========================================================================= */
+.timeline { border-left: var(--border-thick) solid var(--c-rule); padding-left: var(--space-5); }
+.change { position: relative; padding: 0 0 var(--space-5) 0; }
+.change:last-child { padding-bottom: 0; }
+.change::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--space-5) - 6px);
+  top: 0.4rem;
+  width: 10px;
+  height: 10px;
+  background: var(--c-surface);
+  border: var(--border-thick) solid var(--c-rule-strong);
+  border-radius: var(--radius-full);
+}
+/* High severity is a filled square: a different SHAPE, legible without hue. */
+.change--high::before {
+  border-radius: 1px;
+  background: var(--c-caution);
+  border-color: var(--c-caution);
+}
+.change--medium::before { border-color: var(--prov-governed); }
+.change__subject { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.change__kind {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+}
+.change__transitions {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--c-ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.change__arrow { color: var(--c-ink-faint); padding: 0 var(--space-2); }
+
+/* =========================================================================
+   6. EVIDENCE
+   ========================================================================= */
+.evidence-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-bottom: var(--rule);
+}
+.evidence-row:last-child { border-bottom: 0; }
+.evidence-row__name { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.evidence-row__necessity {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+}
+
+/* =========================================================================
+   7. PUBLIC / MARKETING
+   -------------------------------------------------------------------------
+   The landing page shares the product's type and rules so the first
+   impression matches the thing behind the sign-in.
+   ========================================================================= */
+.hero { padding: var(--space-9) 0 var(--space-8); }
+.hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 6vw, 3.75rem);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.05;
+  max-width: 18ch;
+}
+.hero__lede {
+  margin-top: var(--space-5);
+  font-size: var(--text-lg);
+  color: var(--c-ink-secondary);
+  max-width: 56ch;
+}
+.hero__actions { margin-top: var(--space-6); display: flex; gap: var(--space-3); flex-wrap: wrap; }
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+}
+@media (min-width: 48rem) { .feature-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 64rem) { .feature-grid--3 { grid-template-columns: repeat(3, 1fr); } }
+.feature { border-top: var(--border-thick) solid var(--c-ink); padding-top: var(--space-4); }
+.feature__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-regular);
+  margin-bottom: var(--space-2);
+}
+.feature__body { color: var(--c-ink-secondary); font-size: var(--text-sm); }
+
+/* =========================================================================
+   8. LEGAL / TRUST READING
+   ========================================================================= */
+.doc { max-width: var(--measure); }
+.doc h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-regular);
+  margin-top: var(--space-7);
+  margin-bottom: var(--space-3);
+}
+.doc h3 {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-2);
+}
+.doc p, .doc li { color: var(--c-ink-secondary); line-height: var(--leading-relaxed); }
+.doc p + p { margin-top: var(--space-3); }
+.doc ul { padding-left: var(--space-5); list-style: disc; }
+.doc li { margin-top: var(--space-2); }
+.doc__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-top: var(--rule);
+  border-bottom: var(--rule);
+  margin-bottom: var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--c-ink-muted);
+}
+.doc__meta dt {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-faint);
+}
+.doc__meta dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+/* A draft banner, because these documents have NOT been through Canadian
+   legal review and saying so is more honest than a polished silence. */
+.doc__draft {
+  padding: var(--space-4);
+  border: var(--border-hair) solid var(--c-caution);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--c-caution-soft);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-6);
+}
+
+/* =========================================================================
+   9. ONBOARDING
+   ========================================================================= */
+.steps { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-6); }
+.step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--c-ink-muted);
+}
+.step__dot {
+  width: 1.5rem; height: 1.5rem;
+  border: var(--rule-strong);
+  border-radius: var(--radius-full);
+  display: grid; place-items: center;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+}
+.step--done .step__dot { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); }
+.step--current .step__dot { border-color: var(--c-ink); color: var(--c-ink); font-weight: var(--weight-semibold); }
+.step--current { color: var(--c-ink); font-weight: var(--weight-medium); }
+
+/* "Why we need this" — privacy explained where the data is collected, not
+   buried in a policy nobody opens. */
+.why {
+  margin-top: var(--space-2);
+  border-left: var(--border-thick) solid var(--c-rule-strong);
+  padding-left: var(--space-3);
+}
+.why__toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.why__body { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--c-ink-secondary); max-width: 54ch; }

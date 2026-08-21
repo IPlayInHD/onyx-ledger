@@ -1,0 +1,184 @@
+/* =========================================================================
+   APP SHELL
+   =========================================================================
+   Deliberately NOT a fixed desktop sidebar. A sidebar spends a third of a
+   phone's width on chrome and is the single strongest "generated dashboard"
+   signal. Onyx uses a slim brand bar over a horizontal nav rail that scrolls
+   on narrow screens — the whole viewport stays available for the position the
+   customer came to read.
+   ========================================================================= */
+
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+
+.brandbar {
+  border-bottom: var(--rule);
+  background: var(--c-surface);
+}
+.brandbar__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 3.5rem;
+}
+
+/* The wordmark: a small solid onyx lozenge beside letterspaced type. It reads
+   as a maker's mark rather than a logo-shaped div. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  text-decoration: none;
+  color: var(--c-ink);
+}
+.wordmark__mark {
+  width: 0.85rem;
+  height: 0.85rem;
+  background: var(--c-ink);
+  transform: rotate(45deg);
+  border-radius: 1px;
+  flex: none;
+}
+.wordmark__text {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-wide);
+}
+.wordmark__text b { font-weight: var(--weight-semibold); }
+
+.navrail {
+  border-bottom: var(--rule);
+  background: var(--c-paper);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.navrail__scroll {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.navrail__scroll::-webkit-scrollbar { display: none; }
+
+.navlink {
+  position: relative;
+  padding: var(--space-3) var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--c-ink-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: var(--border-thick) solid transparent;
+  transition: color var(--dur-fast) var(--ease-standard);
+}
+.navlink:hover { color: var(--c-ink); }
+/* The active tab is marked by an ink underline AND aria-current, so it is not
+   communicated by colour alone. */
+.navlink[aria-current='page'] {
+  color: var(--c-ink);
+  border-bottom-color: var(--c-accent);
+  font-weight: var(--weight-semibold);
+}
+
+.shell__main { flex: 1 1 auto; padding: var(--space-6) 0 var(--space-9); }
+
+.pagehead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+.pagehead__title {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-tight);
+}
+.pagehead__lede {
+  margin-top: var(--space-2);
+  color: var(--c-ink-secondary);
+  max-width: 62ch;
+}
+
+/* ------------------------------------------------------------ year picker -- */
+.yearpick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border: var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--c-surface);
+  font-size: var(--text-sm);
+}
+.yearpick select {
+  border: 0;
+  background: transparent;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ account menu -- */
+.accountmenu { position: relative; }
+.accountmenu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  min-width: 15rem;
+  background: var(--c-surface);
+  border: var(--rule-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2);
+  z-index: 40;
+}
+.accountmenu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--c-ink);
+  text-decoration: none;
+}
+.accountmenu__item:hover { background: var(--c-surface-sunken); }
+.accountmenu__email {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--c-ink-muted);
+  border-bottom: var(--rule);
+  margin-bottom: var(--space-2);
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------- footer -- */
+.sitefooter {
+  border-top: var(--rule);
+  background: var(--c-surface);
+  padding: var(--space-6) 0;
+  font-size: var(--text-sm);
+}
+.sitefooter__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+}
+@media (min-width: 48rem) {
+  .sitefooter__grid { grid-template-columns: 2fr 1fr 1fr; }
+}
+.sitefooter a { color: var(--c-ink-secondary); text-decoration: none; display: block; padding: var(--space-1) 0; }
+.sitefooter a:hover { color: var(--c-ink); text-decoration: underline; }
+.sitefooter__legal {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: var(--rule);
+  color: var(--c-ink-muted);
+  font-size: var(--text-xs);
+  max-width: var(--measure);
+}

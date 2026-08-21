@@ -1,0 +1,355 @@
+/* =========================================================================
+   ONYX LEDGER — BASE
+   Element defaults and the small set of structural primitives every screen
+   composes from. Screens do not invent spacing, colour or type: they use the
+   tokens. That is what keeps twelve surfaces looking like one product.
+   ========================================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--c-paper);
+  color: var(--c-ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+p { margin: 0; }
+ul, ol { margin: 0; padding: 0; }
+
+a {
+  color: var(--c-accent);
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+a:hover { color: var(--c-accent-hover); }
+
+/* One focus treatment, application-wide. Never removed — only replaced by a
+   more visible one. A financial product that hides focus is unusable by
+   keyboard, which is a correctness failure, not a style preference. */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) { outline: none; }
+
+img, svg { display: block; max-width: 100%; }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+input, select, textarea { font: inherit; color: inherit; }
+
+/* Every figure in this product is tabular: digits must align in a column and
+   must not reflow width as they animate. This single rule is most of what
+   makes numbers feel financial rather than webby. */
+.figure,
+.tabular,
+td.numeric,
+th.numeric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ------------------------------------------------------------- skip link -- */
+.skip-link {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-4);
+  z-index: 100;
+  padding: var(--space-2) var(--space-4);
+  background: var(--c-surface);
+  border: var(--rule-strong);
+  border-radius: var(--radius-md);
+  transform: translateY(-200%);
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* --------------------------------------------------------- screen-reader -- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------- structure -- */
+.shell-container {
+  width: 100%;
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+@media (min-width: 48rem) {
+  .shell-container { padding: 0 var(--space-6); }
+}
+
+/* The PANEL is the one container primitive. It is a ruled surface, not a
+   floating rounded card — repeating a rounded shadowed card is precisely the
+   generated-template look this product avoids. */
+.panel {
+  background: var(--c-surface);
+  border: var(--rule);
+  border-radius: var(--radius-md);
+}
+.panel--sunken { background: var(--c-surface-sunken); }
+.panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: var(--rule);
+}
+.panel__body { padding: var(--space-5); }
+.panel__footer {
+  padding: var(--space-4) var(--space-5);
+  border-top: var(--rule);
+  background: var(--c-surface-sunken);
+}
+
+/* The EYEBROW is an Onyx signature: a letterspaced micro-label that names
+   what a region is, so hierarchy reads without oversized headings. */
+.eyebrow {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-normal);
+}
+
+.text-secondary { color: var(--c-ink-secondary); }
+.text-muted { color: var(--c-ink-muted); }
+.text-sm { font-size: var(--text-sm); }
+.text-xs { font-size: var(--text-xs); }
+
+.stack { display: flex; flex-direction: column; }
+.stack-2 { gap: var(--space-2); }
+.stack-3 { gap: var(--space-3); }
+.stack-4 { gap: var(--space-4); }
+.stack-5 { gap: var(--space-5); }
+.stack-6 { gap: var(--space-6); }
+.row { display: flex; align-items: center; }
+.row-2 { gap: var(--space-2); }
+.row-3 { gap: var(--space-3); }
+.row-4 { gap: var(--space-4); }
+.wrap { flex-wrap: wrap; }
+.grow { flex: 1 1 auto; }
+
+/* ---------------------------------------------------------------- figure -- */
+/* Money is set in the display serif. It is the one place the product raises
+   its voice, and it is why a position reads as a statement rather than a
+   metric tile. */
+.figure {
+  font-family: var(--font-display);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  color: var(--c-ink);
+}
+.figure--hero { font-size: var(--text-5xl); }
+.figure--xl { font-size: var(--text-4xl); }
+.figure--lg { font-size: var(--text-3xl); }
+.figure--md { font-size: var(--text-2xl); }
+.figure--sm { font-size: var(--text-lg); }
+.figure--positive { color: var(--c-positive); }
+.figure--negative { color: var(--c-negative); }
+
+/* ---------------------------------------------------------------- button -- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 2.75rem; /* 44px touch target */
+  padding: var(--space-2) var(--space-5);
+  border: var(--border-hair) solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn--primary {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+}
+.btn--primary:hover:not(:disabled) { background: var(--c-accent-hover); }
+.btn--secondary {
+  background: var(--c-surface);
+  border-color: var(--c-rule-strong);
+  color: var(--c-ink);
+}
+.btn--secondary:hover:not(:disabled) { background: var(--c-surface-sunken); }
+.btn--ghost { background: transparent; color: var(--c-ink-secondary); }
+.btn--ghost:hover:not(:disabled) {
+  background: var(--c-surface-sunken);
+  color: var(--c-ink);
+}
+.btn--sm { min-height: 2.25rem; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); }
+
+/* ----------------------------------------------------------------- field -- */
+.field { display: flex; flex-direction: column; gap: var(--space-2); }
+.field__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.field__hint { font-size: var(--text-xs); color: var(--c-ink-muted); }
+.field__optional {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-faint);
+}
+.field__control {
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-3);
+  background: var(--c-surface);
+  border: var(--border-hair) solid var(--c-rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--c-ink);
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+.field__control:hover { border-color: var(--c-ink-faint); }
+.field__control[aria-invalid='true'] { border-color: var(--c-negative); }
+.field__error {
+  font-size: var(--text-xs);
+  color: var(--c-negative);
+  font-weight: var(--weight-medium);
+}
+
+/* An error SUMMARY at the top of a form, focusable and linked to each field:
+   the difference between a form a screen-reader user can fix and one they
+   have to hunt through. */
+.error-summary {
+  padding: var(--space-4);
+  border: var(--border-hair) solid var(--c-negative);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--c-negative-soft);
+}
+
+/* ----------------------------------------------------------------- table -- */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.data-table th {
+  text-align: left;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--rule-strong);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: var(--space-3);
+  border-bottom: var(--rule);
+  vertical-align: baseline;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table .numeric { text-align: right; }
+
+/* Wide tables scroll INSIDE their own container so the page body never scrolls
+   horizontally on a phone. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* -------------------------------------------------------------- skeleton -- */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 0%,
+    var(--skeleton-sheen) 50%,
+    var(--skeleton-base) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-sm);
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+/* --------------------------------------------------------- state blocks -- */
+.state-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-5);
+  text-align: left;
+}
+.state-block__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-regular);
+}
+.state-block__body {
+  color: var(--c-ink-secondary);
+  max-width: 46ch;
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------------------------ misc -- */
+.divider { height: 1px; background: var(--c-rule); border: 0; margin: 0; }
+
+.print-only { display: none; }
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block; }
+  body { background: #fff; color: #000; }
+  .panel { border-color: #999; }
+}

@@ -1,0 +1,336 @@
+/* =========================================================================
+   PUBLIC LANDING
+   =========================================================================
+   The first page a visitor sees, and the last place to oversell. Onyx asks
+   people for their financial facts, so this page's job is to describe what
+   the product does, what it refuses to do, and where every figure it shows
+   comes from — accurately enough that creating an account is an informed
+   decision rather than a hopeful one.
+
+   There is deliberately no outcome claim anywhere here: no savings figure, no
+   typical result, no testimonial, no percentage. We hold no data that would
+   support one, and a tax product that opens with a promise it cannot keep has
+   already taught the customer not to believe the next screen.
+
+   Public chrome only. AppShell carries the tax-year context and the product
+   navigation, neither of which means anything to a signed-out visitor.
+   ========================================================================= */
+import { Link } from 'react-router-dom'
+import {
+  SUPPORTED_TAX_YEARS,
+  SiteFooter,
+  Wordmark,
+} from '@/components/Shell'
+import { Provenance, type ProvenanceKind } from '@/components/trust'
+
+/** "2025 and 2026". Presentation only — the list itself belongs to the shell,
+ *  which keeps it in step with the years the engine has governed data for. */
+function listYears(years: readonly number[]): string {
+  const labels = years.map(String)
+  const last = labels.pop()
+  if (last === undefined) return ''
+  if (labels.length === 0) return last
+  return `${labels.join(', ')} and ${last}`
+}
+
+interface Feature {
+  title: string
+  body: string
+  link?: { to: string; label: string }
+}
+
+/* The product surfaces, described as what they show rather than as what they
+   will do for you. Each sentence here has a screen behind it. */
+const SURFACES: Feature[] = [
+  {
+    title: 'Tax Assurance Map',
+    body: 'A map of your tax year, family by family: what Onyx can stand behind, what is waiting on a document, and what no governing run has established yet. A question nobody has answered is never shown as a clean result.',
+  },
+  {
+    title: 'Tax Decision Twin',
+    body: 'Set a decision you are weighing beside your current position and read the two together. Onyx shows the baseline, the modelled position, and the difference its engine calculated — before you commit to anything.',
+  },
+  {
+    title: 'Opportunities',
+    body: 'Provisions the governed rules say may apply to your recorded facts, each with its conditions and what it would ask of you. Onyx reports the engine’s finding in the engine’s words, and never turns a maybe into a yes.',
+  },
+]
+
+/* The discipline behind those surfaces. This is the part most products leave
+   out, and it is the part that decides whether the numbers are worth reading. */
+const DISCIPLINE: Feature[] = [
+  {
+    title: 'Evidence readiness',
+    body: 'Every claim rests on documents. Onyx lists what a provision asks for and tracks what you already hold, so you learn what is missing while there is still time to find it.',
+  },
+  {
+    title: 'What changed',
+    body: 'Acknowledge where you stand, and Onyx keeps a record of what moves from that point: a figure that changed, a source that was republished, a provision that stopped applying. Change arrives as a record rather than a surprise.',
+  },
+  {
+    title: 'Governed sources',
+    body: 'Rates, limits and thresholds come from published, version-controlled sources, and every result records the version it used. When a source is republished, results built on the older one are marked rather than quietly rewritten.',
+  },
+  {
+    title: 'AI transparency',
+    body: 'A language model writes the explanations. It does not decide any amount, eligibility, deadline or source — it puts figures Onyx has already calculated into sentences, and its wording is checked against those figures before you read it.',
+    link: { to: '/legal/ai-transparency', label: 'How Onyx uses AI' },
+  },
+]
+
+/* The provenance vocabulary, stated in public. It is the product's core
+   promise: a customer can always tell a calculation from a source, a fact they
+   gave us, an assumption nobody has confirmed, and prose written by a model. */
+const ORIGINS: { kind: ProvenanceKind; body: string }[] = [
+  {
+    kind: 'calculated',
+    body: 'A figure the Onyx engine worked out from your recorded facts and governed tax data.',
+  },
+  {
+    kind: 'governed',
+    body: 'A rate, limit or rule taken from a published source, with the version it came from recorded alongside it.',
+  },
+  {
+    kind: 'user',
+    body: 'A fact you entered. Onyx uses it exactly as you stated it, and says so.',
+  },
+  {
+    kind: 'assumption',
+    body: 'A value assumed so that a model could run. Onyx labels it rather than describing it as known, and asks you to confirm it before you act on it.',
+  },
+  {
+    kind: 'ai',
+    body: 'Wording generated by a language model from figures that were already calculated. It never sets a number.',
+  },
+]
+
+const LIMITS: { lead: string; body: string }[] = [
+  {
+    lead: 'It does not file anything.',
+    body: 'Onyx does not send returns, forms or contributions to the Canada Revenue Agency, and it is not affiliated with or endorsed by the CRA.',
+  },
+  {
+    lead: 'It does not replace a professional.',
+    body: 'Onyx produces software-generated estimates. For anything consequential, take the figures and the workings behind them to a qualified tax professional.',
+  },
+  {
+    lead: 'It does not promise an outcome.',
+    body: 'Onyx tells you what your position is and what a decision would change. It will not tell you that you are going to pay less.',
+  },
+  {
+    lead: 'It does not act for you.',
+    body: 'Nothing is contributed, claimed or submitted on your behalf. Every decision stays yours to make.',
+  },
+]
+
+function FeatureBlock({ feature }: { feature: Feature }) {
+  return (
+    <div className="feature">
+      <h3 className="feature__title">{feature.title}</h3>
+      <p className="feature__body">{feature.body}</p>
+      {feature.link ? (
+        <p className="feature__body" style={{ marginTop: 'var(--space-3)' }}>
+          <Link to={feature.link.to}>{feature.link.label}</Link>
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function SectionHead({
+  eyebrow,
+  title,
+  id,
+}: {
+  eyebrow: string
+  title: string
+  id: string
+}) {
+  return (
+    <div className="stack stack-2" style={{ marginBottom: 'var(--space-6)' }}>
+      <span className="eyebrow">{eyebrow}</span>
+      <h2 className="section-title" id={id}>
+        {title}
+      </h2>
+    </div>
+  )
+}
+
+export default function Landing() {
+  const years = listYears(SUPPORTED_TAX_YEARS)
+
+  return (
+    <div className="shell">
+      <a className="skip-link" href="#main">
+        Skip to main content
+      </a>
+
+      <header className="brandbar no-print">
+        <div className="shell-container brandbar__inner">
+          <Wordmark to="/" />
+          <nav className="row row-2 wrap" aria-label="Account">
+            <Link className="btn btn--ghost" to="/sign-in">
+              Sign in
+            </Link>
+            <Link className="btn btn--primary" to="/sign-up">
+              Create account
+            </Link>
+          </nav>
+        </div>
+      </header>
+
+      <main className="shell__main" id="main">
+        <div className="shell-container">
+          {/* ------------------------------------------------------- hero */}
+          <section className="hero" aria-labelledby="hero-title">
+            <span className="eyebrow">Canadian personal tax</span>
+            <h1 className="hero__title" id="hero-title">
+              Know where you stand before tax time.
+            </h1>
+            <p className="hero__lede">
+              Understand your tax position, explore legitimate decisions,
+              organise the evidence behind them, and see what changes before you
+              act.
+            </p>
+            <div className="hero__actions">
+              <Link className="btn btn--primary" to="/sign-up">
+                Create account
+              </Link>
+              <Link className="btn btn--secondary" to="/trust">
+                Read the Trust Centre
+              </Link>
+            </div>
+            {/* The boundary of the product, stated where it cannot be missed
+                rather than left to the footer. */}
+            <p
+              className="text-sm text-muted"
+              style={{ marginTop: 'var(--space-6)', maxWidth: '64ch' }}
+            >
+              Onyx Ledger estimates and explains Canadian federal and supported
+              provincial tax for the {years} tax years. It does not file
+              anything on your behalf, and it is not affiliated with or endorsed
+              by the Canada Revenue Agency.
+            </p>
+          </section>
+
+          <div className="stack" style={{ gap: 'var(--space-9)' }}>
+            {/* -------------------------------------------- what it does */}
+            <section aria-labelledby="surfaces-heading">
+              <SectionHead
+                eyebrow="What Onyx does"
+                title="Understand your position, then model a decision."
+                id="surfaces-heading"
+              />
+              <div className="feature-grid feature-grid--3">
+                {SURFACES.map((feature) => (
+                  <FeatureBlock feature={feature} key={feature.title} />
+                ))}
+              </div>
+            </section>
+
+            {/* ----------------------------------------- how it stays honest */}
+            <section aria-labelledby="discipline-heading">
+              <SectionHead
+                eyebrow="Discipline"
+                title="How Onyx keeps itself honest."
+                id="discipline-heading"
+              />
+              <div className="feature-grid">
+                {DISCIPLINE.map((feature) => (
+                  <FeatureBlock feature={feature} key={feature.title} />
+                ))}
+              </div>
+            </section>
+
+            {/* -------------------------------------------- provenance */}
+            <section className="panel" aria-labelledby="origins-heading">
+              <div className="panel__header">
+                <h2 className="section-title" id="origins-heading">
+                  Every figure says where it came from
+                </h2>
+              </div>
+              <div className="panel__body stack stack-5">
+                <p className="text-sm text-secondary" style={{ maxWidth: '64ch' }}>
+                  Onyx marks each statement with its origin, using the same five
+                  labels on every screen. The distinction between a calculation,
+                  a published rule and an assumption nobody has confirmed is the
+                  one that decides whether a number is safe to act on, so it is
+                  never left to the reader to guess.
+                </p>
+                <div className="feature-grid feature-grid--3">
+                  {ORIGINS.map((origin) => (
+                    <div className="stack stack-2" key={origin.kind}>
+                      <span>
+                        <Provenance kind={origin.kind} />
+                      </span>
+                      <p className="text-sm text-secondary">{origin.body}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* ------------------------------------------------- the limits */}
+            <section className="panel" aria-labelledby="limits-heading">
+              <div className="panel__header">
+                <h2 className="section-title" id="limits-heading">
+                  What Onyx does not do
+                </h2>
+              </div>
+              <div className="panel__body">
+                <div className="doc">
+                  <ul>
+                    {LIMITS.map((limit) => (
+                      <li key={limit.lead}>
+                        <strong>{limit.lead}</strong> {limit.body}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </section>
+
+            {/* ------------------------------------------------- start here */}
+            <section
+              className="panel panel--sunken"
+              aria-labelledby="start-heading"
+            >
+              <div className="panel__body stack stack-5">
+                <h2 className="section-title" id="start-heading">
+                  Start with the year in front of you
+                </h2>
+                <p className="text-secondary" style={{ maxWidth: '62ch' }}>
+                  Create an account, tell Onyx what it needs for {years}, and
+                  read your position. If you would rather look before you
+                  decide, the Trust Centre and the policies are open without an
+                  account.
+                </p>
+                <div className="row row-3 wrap">
+                  <Link className="btn btn--primary" to="/sign-up">
+                    Create account
+                  </Link>
+                  <Link className="btn btn--secondary" to="/sign-in">
+                    Sign in
+                  </Link>
+                </div>
+                <div className="row row-4 wrap">
+                  <Link className="text-sm" to="/trust">
+                    Trust Centre
+                  </Link>
+                  <Link className="text-sm" to="/legal">
+                    Legal and policies
+                  </Link>
+                  <Link className="text-sm" to="/legal/ai-transparency">
+                    AI transparency
+                  </Link>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+
+      <SiteFooter />
+    </div>
+  )
+}
