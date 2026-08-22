@@ -127,5 +127,54 @@ class Embedder(Protocol):
     def embed(self, text: str) -> list[float]: ...
 
 
-class EmailSender(Protocol):
-    async def send(self, to: str, subject: str, body: str) -> None: ...
+class TransactionalEmail(StrEnum):
+    """The complete set of messages this product sends.
+
+    Closed on purpose. Onyx sends three transactional messages and has no
+    marketing surface; a port that accepted an arbitrary subject and body would
+    be one, and the first thing to arrive in it would be something nobody
+    reviewed for the rule below.
+
+    NO CUSTOMER FINANCIAL DATA IN ANY OF THEM. Email is unencrypted at rest in
+    somebody else's mailbox, forwarded, and indexed. None of these messages
+    carries a figure, a document, or anything about a tax position.
+    """
+
+    EMAIL_VERIFICATION = "EMAIL_VERIFICATION"
+    PASSWORD_RESET = "PASSWORD_RESET"
+    PASSWORD_CHANGED = "PASSWORD_CHANGED"
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedEmail:
+    """A message ready to transmit: subject, plain text, and safe HTML."""
+
+    subject: str
+    text: str
+    html: str
+
+
+class EmailProvider(Protocol):
+    """Transmit one already-rendered transactional message.
+
+    ONE OPERATION, NOT THREE. Per-message methods read better at a call site,
+    and `AccountRecoveryService` offers exactly those. Putting them on the PORT
+    would mean every adapter renders every template, which is duplication whose
+    failure mode is two adapters that disagree about what a customer receives —
+    the same shape as B2's `get`, where the local and S3 stores had to be made
+    to agree about a missing object on purpose.
+
+    So rendering happens once, in `app/services/email/templates.py`, and an
+    adapter only transmits. `kind` travels alongside because a capture provider
+    and an operator both need to know WHICH message went out without parsing a
+    subject line.
+
+    Provider exceptions must NOT escape. Same rule as `ObjectStorage`: an
+    adapter translates a vendor failure into `EmailDeliveryFailed`, because a
+    caller that has to catch `ClientError` is coupled to botocore and a caller
+    keyed on `str(e)` cannot be reasoned about.
+    """
+
+    def send(
+        self, to: str, kind: TransactionalEmail, message: RenderedEmail
+    ) -> None: ...

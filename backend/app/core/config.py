@@ -167,6 +167,28 @@ class Settings(BaseSettings):
     #: place for a long-lived key to be committed to. There is no such field and
     #: there should not be one.
 
+    # --- transactional email ---
+    #: `capture` records messages in-process for development and tests; `ses`
+    #: is the production adapter. Production refuses `capture` at both the
+    #: settings layer and the factory, exactly as `storage_provider` does.
+    email_provider: str = "capture"
+    #: The From: identity. Must be a verified SES sending identity in
+    #: production; there is no sensible default, and a wrong one is a bounce.
+    email_sender_address: str | None = None
+    ses_region: str | None = None
+
+    #: Where a verification or reset link points. NOT derived from a request
+    #: header — `Host` is attacker-controlled, and a reset link whose host a
+    #: caller can choose is a password-reset token delivered to the attacker.
+    #: Configuration only, https in production.
+    app_public_url: str | None = None
+
+    #: Recovery token lifetimes. Short enough that a link sitting in a mailbox
+    #: stops being a credential quickly; long enough to survive a customer who
+    #: reads their mail after lunch.
+    verification_token_ttl_minutes: int = 60 * 24
+    password_reset_token_ttl_minutes: int = 60
+
     # --- ai ---
     llm_provider: str = "anthropic"
     llm_model: str = "claude-opus-4-8"
@@ -313,6 +335,56 @@ class Settings(BaseSettings):
                     f"{env_var} must be set explicitly in production; the "
                     "compiled default is a guess, not a bucket"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _production_email_is_real(self) -> Settings:
+        """Production must not file its own recovery mail in a list.
+
+        `CaptureEmailProvider` appends to a module-level list and opens no
+        socket. In production that means: every verification email captured,
+        every password-reset email captured, and an application that reports
+        success for both. Nothing errors. The only signal is customers who
+        cannot get in and cannot say why — which is the same failure shape as
+        the in-memory object store, and is checked here for the same reason.
+
+        THE PUBLIC URL IS PART OF THIS. A verification link is built from it,
+        so an unset value in production would send customers to nowhere, and a
+        plain-http value would put a single-use credential in a URL that
+        travels in cleartext.
+
+        NOT CHECKED HERE: AWS credentials. boto3 resolves them through its own
+        chain, and asserting them at import time would need static keys in
+        configuration — the thing to avoid. A missing credential surfaces as a
+        permanent `EmailDeliveryFailed`, which leaves the token usable and the
+        resend path open.
+        """
+        if self.environment != "production":
+            return self
+
+        if self.email_provider != "ses":
+            raise ValueError(
+                f"ONYX_EMAIL_PROVIDER is {self.email_provider!r} in production; "
+                "verification and password-reset mail would be captured in "
+                "memory instead of delivered. Set it to 'ses'."
+            )
+        if not self.email_sender_address:
+            raise ValueError(
+                "ONYX_EMAIL_SENDER_ADDRESS must be set in production and must "
+                "be a verified sending identity"
+            )
+        if not self.ses_region:
+            raise ValueError("ONYX_SES_REGION must be set in production")
+        if not self.app_public_url:
+            raise ValueError(
+                "ONYX_APP_PUBLIC_URL must be set in production; verification "
+                "and reset links are built from it"
+            )
+        if not self.app_public_url.startswith("https://"):
+            raise ValueError(
+                "ONYX_APP_PUBLIC_URL must be https in production; a "
+                "single-use recovery token must not travel in a cleartext URL"
+            )
         return self
 
     @property
