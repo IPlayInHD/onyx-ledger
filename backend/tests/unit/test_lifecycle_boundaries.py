@@ -42,6 +42,26 @@ _EXEMPT: frozenset[tuple[str, str]] = frozenset({
 #: not gaps.
 _NON_TENANT_DEPENDENCIES = frozenset({"db_admin", "db_anon"})
 
+#: Routes that take NO dependencies at all, because they serve no account and
+#: read no user data. A third category, added when the first one appeared.
+#:
+#: The two categories above both describe routes that reach the database as
+#: SOMEBODY — a tenant, an operator, or the system. `/config/launch-scope`
+#: reaches it as nobody: it returns the launch tax years and provinces out of
+#: settings and opens no session. Giving it `db_anon` purely to land in an
+#: existing bucket would open a real unit of work on every landing-page load to
+#: satisfy a structural test, which is paying in production for a category
+#: error in a test.
+#:
+#: This is NOT a hole. A route lands here only by being named, exactly as with
+#: `_EXEMPT`, so a new dependency-free route still fails until somebody decides
+#: it belongs — and the branch below asserts the entry really is dependency
+#: free, so adding `current_user_id` to one of these breaks the build rather
+#: than quietly serving an authenticated caller from the public list.
+_PUBLIC: frozenset[tuple[str, str]] = frozenset({
+    ("GET", "/config/launch-scope"),
+})
+
 
 def _routes(router) -> list[APIRoute]:
     """Every APIRoute, through FastAPI's lazily-included routers."""
@@ -91,12 +111,23 @@ def test_the_application_has_tenant_routes_to_check():
 )
 def test_every_tenant_route_meets_the_deletion_cutoff(method, path, names):
     """A route serving an authenticated account either applies the cutoff or is
-    on the exempt list with a stated reason.
+    named, with a stated reason, on one of the two small lists above.
 
     Taking `db_authed` is the usual way. A route that manages its own session
-    takes `assert_account_active` instead — the point is that there is no third
-    option where the check simply does not happen.
+    takes `assert_account_active` instead. `_EXEMPT` is for routes that must
+    keep working for a deleting account, `_PUBLIC` for routes that serve no
+    account at all — and the point is that there is no unnamed option where the
+    check simply does not happen.
     """
+    if (method, path) in _PUBLIC:
+        assert not names, (
+            f"{method} {path} is on the public list but now takes "
+            f"{sorted(names)}. A route with dependencies serves somebody; it "
+            "belongs in a category that says who, not on the list for routes "
+            "that serve nobody."
+        )
+        return
+
     if (method, path) in _EXEMPT:
         assert not (names & _CUTOFF_DEPENDENCIES), (
             f"{method} {path} is on the exempt list but also applies the "
