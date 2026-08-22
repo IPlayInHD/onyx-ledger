@@ -26,7 +26,16 @@ BACKEND = Path(__file__).resolve().parents[2]
 WORKERS = BACKEND / "workers" / "tasks"
 
 #: Dependencies that apply the cutoff, directly or by containing it.
-_CUTOFF_DEPENDENCIES = frozenset({"db_authed", "assert_account_active"})
+#:
+#: `db_authed_unverified_ok` belongs here and is not a weakening: it calls the
+#: same `assert_may_act` with `require_verified=False`, which relaxes the email
+#: check and nothing else. The deletion cutoff, the shared lifecycle lock,
+#: suspension and closure all still apply. It exists because the resend-
+#: verification endpoint is the one thing an unverified account must be able to
+#: reach, and `db_authed` refuses exactly that.
+_CUTOFF_DEPENDENCIES = frozenset({
+    "db_authed", "db_authed_unverified_ok", "assert_account_active",
+})
 
 #: The only user-facing routes allowed to work for a deleting account, and why.
 #: Requesting deletion must stay idempotent, and a user must be able to read the

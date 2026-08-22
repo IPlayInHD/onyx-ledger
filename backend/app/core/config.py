@@ -189,6 +189,15 @@ class Settings(BaseSettings):
     verification_token_ttl_minutes: int = 60 * 24
     password_reset_token_ttl_minutes: int = 60
 
+    #: The floor between two messages to the same mailbox. Admission bounds the
+    #: burst inside one minute; this bounds the hour, which a minute-windowed
+    #: counter cannot express — three a minute is also a hundred and eighty an
+    #: hour, and that is a flood however bounded each minute looks.
+    #:
+    #: Measured from the newest still-usable token, so it costs no new state:
+    #: the row the previous send already wrote is the record of when it went.
+    recovery_resend_cooldown_seconds: int = 120
+
     # --- ai ---
     llm_provider: str = "anthropic"
     llm_model: str = "claude-opus-4-8"

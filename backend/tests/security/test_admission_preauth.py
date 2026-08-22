@@ -186,12 +186,18 @@ async def test_the_digest_depends_on_the_secret():
 #:
 #: Keeping the rest of the production baseline here means the next requirement
 #: is added once, not hunted down in two assertions that look unrelated to it.
+#: It happened again in B3, which made production refuse the capture email
+#: provider — same shape, same two controls, one place to fix.
 PRODUCTION_BASELINE = {
     "environment": "production",
     "storage_provider": "s3",
     "s3_region": "ca-central-1",
     "s3_bucket_documents": "onyx-prod-documents",
     "s3_bucket_legislation": "onyx-prod-legislation",
+    "email_provider": "ses",
+    "email_sender_address": "no-reply@onyx.example.ca",
+    "ses_region": "ca-central-1",
+    "app_public_url": "https://app.onyx.example.ca",
 }
 
 
@@ -282,7 +288,8 @@ async def test_a_rejection_still_names_no_scope(client):
         async with unit_of_work(actor_type="system") as session:
             service = AdmissionService(session)
             for _ in range(40):
-                await service.charge_auth_attempt(
+                await service.charge_preauth_attempt(
+                    OperationClass.AUTH_ATTEMPT,
                     source_scope_id=f"throwaway-{uuid.uuid4().hex}",
                     subject_scope_id=auth_subject_scope(email),
                 )

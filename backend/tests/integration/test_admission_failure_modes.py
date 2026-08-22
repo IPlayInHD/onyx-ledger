@@ -205,7 +205,8 @@ async def test_the_incident_switch_actually_switches_admission_off():
         # The credential surface honours it too, or an incident would leave
         # login throttled while everything else was open.
         async with unit_of_work(actor_type="admin") as session:
-            decision = await AdmissionService(session).charge_auth_attempt(
+            decision = await AdmissionService(session).charge_preauth_attempt(
+                OperationClass.AUTH_ATTEMPT,
                 source_scope_id="bypass-source", subject_scope_id="bypass-subject")
         assert decision.accepted
     finally:

@@ -13,12 +13,25 @@ class ORMModel(BaseModel):
 
 
 # ---- auth ----
+#: Every credential request forbids unknown fields. These endpoints decide what
+#: an account IS — whether it exists, whether it may act — and every input that
+#: could influence that is derived on the server. A client sending `status`,
+#: `user_id` or `email_verified_at` alongside its password is attempting a
+#: mass assignment, and silently ignoring it looks identical to accepting it
+#: until the day a field is added with a matching name.
+_STRICT = ConfigDict(extra="forbid")
+
+
 class RegisterRequest(BaseModel):
+    model_config = _STRICT
+
     email: EmailStr
     password: str = Field(min_length=8, max_length=200)
 
 
 class LoginRequest(BaseModel):
+    model_config = _STRICT
+
     email: EmailStr
     password: str
 
@@ -30,6 +43,8 @@ class TokenPair(BaseModel):
 
 
 class RefreshRequest(BaseModel):
+    model_config = _STRICT
+
     refresh_token: str
 
 

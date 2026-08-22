@@ -15,6 +15,11 @@ from app.database.models import AuthSession, LoginEvent, UserAccount, UserCreden
 from app.database.session import unit_of_work
 from app.schemas import TokenPair
 
+#: What registration creates. Named rather than inlined so the one place that
+#: sets it and the one place that clears it (`AccountRecoveryService`) are
+#: greppable as a pair.
+UNVERIFIED_STATUS = "pending_verification"
+
 
 class AuthService:
     def __init__(self, session: AsyncSession):
@@ -27,7 +32,17 @@ class AuthService:
         )
         if existing:
             raise Conflict("An account with this email already exists")
-        user = UserAccount(email=email, status="active")
+        # UNVERIFIED UNTIL PROVEN. The column's own default has said
+        # `pending_verification` since the schema was written; registration
+        # overrode it with `active` because there was no verification flow to
+        # clear it, which meant the product asserted that every address it had
+        # ever been given was real. It now creates what the schema always said
+        # it should, and `AccountRecoveryService` is what promotes it.
+        #
+        # This does NOT block login — see `BLOCKING_ACCOUNT_STATUSES` for why an
+        # account that cannot sign in cannot ask for another link. It blocks the
+        # authenticated data surface, at `db_authed`.
+        user = UserAccount(email=email, status=UNVERIFIED_STATUS)
         self.s.add(user)
         await self.s.flush()  # populate user.id via RETURNING
         self.s.add(UserCredential(user_id=user.id, password_hash=hash_password(password)))
@@ -148,10 +163,10 @@ class AuthService:
 
     async def _revoke_user_sessions_durably(self, user_id: uuid.UUID) -> None:
         async with unit_of_work(actor_type="system") as session:
-            await AuthService(session)._revoke_user_sessions(user_id)
+            await AuthService(session).revoke_all_sessions(user_id)
 
     async def logout(self, user_id: uuid.UUID) -> None:
-        await self._revoke_user_sessions(user_id)
+        await self.revoke_all_sessions(user_id)
 
     async def _issue_tokens(self, user_id: uuid.UUID, ip: str | None) -> TokenPair:
         raw_refresh = generate_refresh_token()
@@ -167,7 +182,16 @@ class AuthService:
             access_token=create_access_token(user_id), refresh_token=raw_refresh
         )
 
-    async def _revoke_user_sessions(self, user_id: uuid.UUID) -> None:
+    async def revoke_all_sessions(self, user_id: uuid.UUID) -> None:
+        """End every live session for an account, inside the caller's transaction.
+
+        PUBLIC because logout is not the only caller. A completed password
+        reset must revoke everything too (B3 §15), and reaching into a private
+        helper from another service to do it would leave the guarantee looking
+        incidental — it is a named operation of the auth authority, and the
+        privacy lifecycle and the recovery flow both depend on it meaning the
+        same thing.
+        """
         sessions = await self.s.scalars(
             select(AuthSession).where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None))
         )

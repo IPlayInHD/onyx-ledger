@@ -42,12 +42,25 @@ from __future__ import annotations
 
 from app.database.session import unit_of_work
 from app.services.admission.identity import auth_subject_scope, source_ip_scope
+from app.services.admission.policy import OperationClass
 from app.services.admission.service import AdmissionService
 
 #: Stand-in scope key for a request with no derivable peer address. A missing
 #: address is pooled into ONE bucket rather than skipped, so a transport that
 #: hides the peer cannot be used to opt out of address throttling.
 _UNKNOWN_SOURCE = "unknown-source"
+
+
+async def _charge(
+    operation: OperationClass, *, source_ip: str | None, subject: str
+) -> None:
+    async with unit_of_work(actor_type="system") as session:
+        decision = await AdmissionService(session).charge_preauth_attempt(
+            operation,
+            source_scope_id=source_ip_scope(source_ip or _UNKNOWN_SOURCE),
+            subject_scope_id=auth_subject_scope(subject),
+        )
+    decision.raise_if_rejected()
 
 
 async def admit_auth_attempt(*, source_ip: str | None, subject: str) -> None:
@@ -65,12 +78,27 @@ async def admit_auth_attempt(*, source_ip: str | None, subject: str) -> None:
     process. The refusal is raised AFTER that transaction closes, so the counters
     it just advanced are not rolled back by the exception that reports them.
     """
-    async with unit_of_work(actor_type="system") as session:
-        decision = await AdmissionService(session).charge_auth_attempt(
-            source_scope_id=source_ip_scope(source_ip or _UNKNOWN_SOURCE),
-            subject_scope_id=auth_subject_scope(subject),
-        )
-    decision.raise_if_rejected()
+    await _charge(OperationClass.AUTH_ATTEMPT, source_ip=source_ip, subject=subject)
 
 
-__all__ = ["admit_auth_attempt"]
+async def admit_recovery_request(*, source_ip: str | None, mailbox: str) -> None:
+    """Charge one message-sending recovery request, or raise `AdmissionRejected`.
+
+    SEPARATE FROM `admit_auth_attempt`, AND THAT IS THE POINT. Sharing the
+    counter would have made either limit wrong for the other operation: at
+    AUTH_ATTEMPT's allowance a stranger could put fifteen messages a minute in
+    somebody's inbox, and at this one a customer who mistyped their password
+    three times would be locked out of logging in.
+
+    `mailbox` is whatever identifies the DESTINATION — the address a caller
+    typed, or the account id of an authenticated resend. Never the account's
+    stored address for an anonymous caller: looking it up to build the key would
+    put a user-table read in front of the limiter, which is how a limiter
+    becomes the enumeration oracle it was supposed to bound.
+    """
+    await _charge(
+        OperationClass.ACCOUNT_RECOVERY, source_ip=source_ip, subject=mailbox
+    )
+
+
+__all__ = ["admit_auth_attempt", "admit_recovery_request"]

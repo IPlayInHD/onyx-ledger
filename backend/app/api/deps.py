@@ -52,6 +52,30 @@ async def db_authed(user_id: uuid.UUID = Depends(current_user_id)) -> AsyncItera
         yield session
 
 
+async def db_authed_unverified_ok(
+    user_id: uuid.UUID = Depends(current_user_id),
+) -> AsyncIterator[AsyncSession]:
+    """For the endpoints that EXIST to clear the unverified state.
+
+    `db_authed` refuses an account that has not confirmed its address, which is
+    the point of it — but the resend endpoint is the one thing such an account
+    must be able to reach, and refusing it would make the state permanent for
+    anyone whose first link expired.
+
+    This relaxes EXACTLY that check. The deletion cutoff still applies, and so
+    do suspension and closure: an unverified account that is also suspended is
+    still refused here, because a verification link must never be the thing
+    that brings an account back.
+    """
+    from app.services.privacy.lifecycle import AccountLifecycleService
+
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        await AccountLifecycleService(session).assert_may_act(
+            user_id, require_verified=False
+        )
+        yield session
+
+
 async def db_authed_lifecycle_exempt(
     user_id: uuid.UUID = Depends(current_user_id),
 ) -> AsyncIterator[AsyncSession]:

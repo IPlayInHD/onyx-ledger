@@ -87,13 +87,51 @@ class LifecycleFailureCode(StrEnum):
     LIFECYCLE_CUTOFF_CONFLICT = "LIFECYCLE_CUTOFF_CONFLICT"
 
 
-#: Account statuses that must not transact. `pending_verification` is
-#: DELIBERATELY ABSENT: registration currently creates accounts `active`, email
-#: verification is not implemented yet, and blocking the status before the flow
-#: exists would lock out every account with no way to clear it. When the
-#: verification flow ships it belongs here, and the test that pins this set is
-#: where that decision has to be made explicitly rather than by drift.
+#: Account statuses that may not AUTHENTICATE and may not act. An operator or
+#: the customer themselves ended this account's ability to use the product, and
+#: no token, link or credential reopens it.
+#:
+#: `pending_verification` is deliberately NOT here — see
+#: `UNVERIFIED_ACCOUNT_STATUSES`, which is a different question with a different
+#: answer. The note this replaces said verification "belongs here when the flow
+#: ships"; building the flow showed that it does not. Putting it in this set
+#: would refuse LOGIN to an account that has not confirmed its address, and an
+#: account that cannot log in cannot ask for another verification link except
+#: through an anonymous endpoint keyed on a typed address — which is an
+#: enumeration oracle and an email-flood amplifier, both of which B3 §10 and §12
+#: forbid outright. The account signs in; it just cannot do anything yet.
 BLOCKING_ACCOUNT_STATUSES = frozenset({"suspended", "closed"})
+
+#: Statuses that may authenticate but may NOT reach the application's data
+#: surface. One member today, and the set exists rather than an `== ` because
+#: the question it answers ("has this account proved it owns its address?") is
+#: separate from the one above and must stay separately answerable.
+UNVERIFIED_ACCOUNT_STATUSES = frozenset({"pending_verification"})
+
+
+class EmailVerificationRequired(DomainError):
+    """Authenticated, not suspended, not deleting — and not yet verified.
+
+    A SEPARATE ERROR TYPE, not a variant of `AccountNotActive`, because the
+    caller's next step is completely different and the frontend has to be able
+    to tell. "Your account is suspended" is a dead end that wants a support
+    contact; this one is cleared by clicking a link the product will happily
+    send again, and B3 §22 requires that state to be obvious rather than
+    presented as a generic failure.
+
+    403 for the same reason `AccountNotActive` is: the caller proved who they
+    are and is refused for what the account is. A 401 would invite a client to
+    retry a login that is going to succeed and change nothing.
+    """
+
+    status_code = 403
+    error_type = "https://onyx.ledger/errors/email-verification-required"
+    title = "Email Verification Required"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Confirm your email address to finish setting up your account."
+        )
 
 
 class AccountNotActive(DomainError):
@@ -231,7 +269,9 @@ class AccountLifecycleService:
             state=LifecycleState(row[0]), requested_at=row[1]
         )
 
-    async def assert_may_act(self, user_id: uuid.UUID) -> None:
+    async def assert_may_act(
+        self, user_id: uuid.UUID, *, require_verified: bool = True
+    ) -> None:
         """THE cutoff check. One statement, on a connection already open.
 
         Called from the authenticated dependency, so every protected route
@@ -293,6 +333,17 @@ class AccountLifecycleService:
 
         if is_deleted or status in BLOCKING_ACCOUNT_STATUSES:
             raise AccountNotActive()
+
+        # LAST, and only for callers that need it. Ordering again: an account
+        # that is both unverified and suspended gets the suspension answer,
+        # because "confirm your address" would be a false promise — confirming
+        # it would change nothing.
+        #
+        # `require_verified=False` is for the endpoints that EXIST to clear this
+        # state. It relaxes exactly this check and nothing above it, so an
+        # unverified account that is also deleting is still refused.
+        if require_verified and status in UNVERIFIED_ACCOUNT_STATUSES:
+            raise EmailVerificationRequired()
 
     # ---------------------------------------------------------- request --
     async def request_deletion(self, user_id: uuid.UUID) -> LifecycleStatus:
@@ -471,7 +522,10 @@ class AccountLifecycleService:
 
 __all__ = [
     "TERMINAL_FOR_11B1",
+    "UNVERIFIED_ACCOUNT_STATUSES",
     "AccountDeletionInProgress",
+    "AccountNotActive",
+    "EmailVerificationRequired",
     "AccountLifecycleService",
     "ClaimedLifecycle",
     "LifecycleFailureCode",

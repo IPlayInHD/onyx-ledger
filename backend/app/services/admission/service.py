@@ -419,14 +419,21 @@ class AdmissionService:
         return lease_id
 
     # -------------------------------------------------------------- pre-auth --
-    async def charge_auth_attempt(
+    async def charge_preauth_attempt(
         self,
+        operation: OperationClass,
         *,
         source_scope_id: str,
         subject_scope_id: str,
         now: datetime | None = None,
     ) -> AuthAdmissionDecision:
-        """Charge one credential attempt to BOTH pre-authentication scopes.
+        """Charge one pre-authentication attempt to BOTH scopes.
+
+        TWO CLASSES USE THIS, and the mechanism is identical for both:
+        `AUTH_ATTEMPT` for anything that presents a credential, and
+        `ACCOUNT_RECOVERY` for anything that causes an email to be sent. What
+        differs is only the policy — see the registry for why the numbers are
+        an order of magnitude apart.
 
         Returns a decision instead of raising, and the distinction is
         load-bearing. `_reject` raises, and an exception inside the caller's
@@ -443,12 +450,12 @@ class AdmissionService:
         and there is no partial state worth committing when the store cannot
         answer at all.
         """
-        policy = policy_for(OperationClass.AUTH_ATTEMPT)
+        policy = policy_for(operation)
         now = now or datetime.now(tz=UTC)
-        ADMISSION_REQUESTS[OperationClass.AUTH_ATTEMPT.value] += 1
+        ADMISSION_REQUESTS[operation.value] += 1
 
         if _admission_disabled():
-            ADMISSION_BYPASSED[OperationClass.AUTH_ATTEMPT.value] += 1
+            ADMISSION_BYPASSED[operation.value] += 1
             return AuthAdmissionDecision(
                 accepted=True, retry_after_seconds=policy.retry_after_seconds
             )
@@ -460,24 +467,23 @@ class AdmissionService:
                 policy, ScopeType.AUTH_SUBJECT, subject_scope_id, now=now)
         except (SQLAlchemyError, DBAPIError) as exc:
             self._on_store_failure(policy, source_scope_id, exc)
-            raise  # unreachable: AUTH_ATTEMPT is FAIL_CLOSED, which raises above
+            raise  # unreachable: both classes are FAIL_CLOSED, which raises above
 
         accepted = source_ok and subject_ok
         if accepted:
-            ADMISSION_ACCEPTED[OperationClass.AUTH_ATTEMPT.value] += 1
-            log.info("admission", operation=OperationClass.AUTH_ATTEMPT.value,
-                     decision="ACCEPTED")
+            ADMISSION_ACCEPTED[operation.value] += 1
+            log.info("admission", operation=operation.value, decision="ACCEPTED")
         else:
             # Counted here, raised by the caller after the commit. The metric
             # records WHICH scope refused, because "stuffing across accounts"
             # and "guessing at one account" need different responses — but only
             # as a bounded code, never with the scope id attached.
             ADMISSION_REJECTED[
-                f"{OperationClass.AUTH_ATTEMPT.value}:"
+                f"{operation.value}:"
                 f"{RejectionReason.AUTH_RATE_LIMIT.value}:"
                 f"{'SOURCE' if not source_ok else 'SUBJECT'}"
             ] += 1
-            log.info("admission", operation=OperationClass.AUTH_ATTEMPT.value,
+            log.info("admission", operation=operation.value,
                      decision="REJECTED",
                      reason=RejectionReason.AUTH_RATE_LIMIT.value,
                      scope="SOURCE" if not source_ok else "SUBJECT")

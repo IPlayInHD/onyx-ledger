@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 
 import httpx
 import pytest_asyncio
@@ -72,6 +73,94 @@ def client_from_one_address():
             yield c
 
     return _make
+
+
+# ---------------------------------------------------------------------------
+# Account setup
+# ---------------------------------------------------------------------------
+#
+# B3 made registration create `pending_verification`, which is refused by
+# `db_authed` — so a test that registers an account and immediately calls an
+# authenticated endpoint now gets 403 instead of its subject. Almost every such
+# test is about something else entirely (documents, RLS, admission, the audit
+# log) and wants a verified account as a PRECONDITION, not as a subject.
+#
+# `verify_account` is how they get one, THROUGH THE REAL ENDPOINTS. Setting the
+# status column directly would be one line shorter and would mean the suite
+# stopped exercising the transition that every one of those tests now depends
+# on — the kind of shortcut that makes a whole flow untested by making it
+# invisible.
+
+#: The token as it appears in a link. Matches the query parameter rather than
+#: the surrounding copy, so restyling a template cannot break sixteen test
+#: files. `_link` in `app.services.auth.recovery` owns the format.
+_LINK_TOKEN = re.compile(r"[?&]token=([A-Za-z0-9_-]+)")
+
+
+def token_from_link(message) -> str:
+    """The raw token out of a captured message's plain-text part."""
+    found = _LINK_TOKEN.search(message.text)
+    assert found, (
+        "no ?token= in the captured message; the link format changed and this "
+        f"helper has to change with it. Body was:\n{message.text}"
+    )
+    return found.group(1)
+
+
+async def verify_account(client, email: str, token: str) -> None:
+    """Take a freshly registered account from pending_verification to active.
+
+    Drives the same two endpoints a customer does: ask for the link, read it
+    out of the capture provider's outbox, redeem it.
+
+    The outbox is scoped BY RECIPIENT, never by position. `captured_emails()[-1]`
+    would make every test depend on whatever ran before it, which is the
+    isolation failure this repository has hit repeatedly; addresses here are
+    per-test and unique, so filtering by one is exact.
+    """
+    from app.domain.ports import TransactionalEmail
+    from app.integrations.email import captured_emails
+
+    sent = await client.post(
+        "/api/v1/auth/verification", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert sent.status_code == 202, sent.text
+
+    messages = captured_emails(to=email, kind=TransactionalEmail.EMAIL_VERIFICATION)
+    assert messages, f"no verification message captured for {email}"
+
+    confirmed = await client.post(
+        "/api/v1/auth/verification/confirm",
+        json={"token": token_from_link(messages[-1].message)},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "active"
+
+
+async def register_verified(
+    client, email: str, password: str
+) -> str:
+    """Register, verify, and return an access token for an ACTIVE account.
+
+    The one-call form for the many tests whose subject is not authentication.
+    Returns a token minted AFTER verification, because the account's status is
+    read per request rather than carried in the token — but a caller that logs
+    in again gets the same answer, and this saves them the round trip.
+    """
+    created = await client.post(
+        "/api/v1/auth/register", json={"email": email, "password": password}
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["status"] == "pending_verification", created.text
+
+    signed_in = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": password}
+    )
+    assert signed_in.status_code == 200, signed_in.text
+    token = signed_in.json()["access_token"]
+
+    await verify_account(client, email, token)
+    return token
 
 
 def owner_dsn() -> str:

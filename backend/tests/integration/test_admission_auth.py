@@ -51,7 +51,8 @@ async def _fill(*, subject: str | None = None, source: str | None = None,
     async with unit_of_work(actor_type="system") as session:
         service = AdmissionService(session)
         for _ in range(to or 0):
-            await service.charge_auth_attempt(
+            await service.charge_preauth_attempt(
+                OperationClass.AUTH_ATTEMPT,
                 source_scope_id=(
                     source_ip_scope(source) if source
                     else f"throwaway-{uuid.uuid4().hex}"

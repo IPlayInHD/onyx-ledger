@@ -42,6 +42,7 @@ class OperationClass(StrEnum):
     CHEAP_READ = "CHEAP_READ"
     NORMAL_WRITE = "NORMAL_WRITE"
     AUTH_ATTEMPT = "AUTH_ATTEMPT"
+    ACCOUNT_RECOVERY = "ACCOUNT_RECOVERY"
     ANALYSIS_RUN = "ANALYSIS_RUN"
     OPTIMIZATION_RUN = "OPTIMIZATION_RUN"
     SCENARIO_RUN = "SCENARIO_RUN"
@@ -58,9 +59,9 @@ class ScopeType(StrEnum):
 
     The first three are PRINCIPAL scopes: the caller has already been
     authenticated, so the identity is one the server assigned. The last two are
-    PRE-AUTHENTICATION scopes and exist only for `AUTH_ATTEMPT`, where there is
-    by definition no principal yet — the whole point of the operation is to find
-    out whether the caller is one. They are derived, never accepted: see
+    PRE-AUTHENTICATION scopes, used by `AUTH_ATTEMPT` and `ACCOUNT_RECOVERY` —
+    the two classes whose whole purpose is reached without a principal, or
+    without one that may act yet. They are derived, never accepted: see
     `app.services.admission.identity`.
     """
 
@@ -254,6 +255,34 @@ _POLICIES: tuple[AdmissionPolicy, ...] = (
         per_user_per_minute=10,
         per_source_ip_per_minute=30,
         burst=5,
+        on_store_failure=StoreFailurePolicy.FAIL_CLOSED,
+        retry_after_seconds=60,
+    ),
+    # THE ONLY CLASS WHOSE COST IS PAID BY SOMEBODY ELSE. Every other operation
+    # here spends this server's CPU; an admitted recovery request spends a
+    # stranger's attention, because it puts a message in a mailbox that anybody
+    # can name and nobody has to consent to. That is why the numbers are an
+    # order of magnitude below AUTH_ATTEMPT's rather than in line with them: a
+    # login flood is a denial of service against Onyx, and a reset flood is a
+    # denial of service against a customer, delivered by Onyx.
+    #
+    # Two scopes, same shape as AUTH_ATTEMPT and for the same two attacks. The
+    # subject scope is a digest of the TARGET MAILBOX — the typed address for a
+    # reset request, the account id for a resend, one bucket per mailbox either
+    # way — so the per-mailbox ceiling holds no matter which endpoint is used.
+    #
+    # This bounds the BURST. The per-mailbox floor between two messages is a
+    # different control and lives in `AccountRecoveryService`, because a
+    # minute-windowed counter cannot express "not again for five minutes" and
+    # pretending otherwise would leave 60 messages an hour looking bounded.
+    #
+    # Fail-closed: if the store cannot answer, not sending is recoverable by
+    # asking again, and sending without a limit is not recoverable at all.
+    AdmissionPolicy(
+        OperationClass.ACCOUNT_RECOVERY,
+        per_user_per_minute=2,
+        per_source_ip_per_minute=10,
+        burst=1,
         on_store_failure=StoreFailurePolicy.FAIL_CLOSED,
         retry_after_seconds=60,
     ),

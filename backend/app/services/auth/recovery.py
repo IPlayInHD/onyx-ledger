@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -61,6 +61,7 @@ from app.services.email.templates import (
     render_password_changed,
     render_password_reset,
 )
+from app.services.privacy.lifecycle import UNVERIFIED_ACCOUNT_STATUSES
 
 log = get_logger("onyx.auth.recovery")
 
@@ -126,6 +127,30 @@ class PendingEmail:
     to: str
     kind: TransactionalEmail
     message: RenderedEmail
+
+
+class RecoveryThrottled(DomainError):
+    """A message to this mailbox went out too recently to send another.
+
+    ONLY EVER RAISED ON THE AUTHENTICATED RESEND. The anonymous reset request
+    hits the same floor and answers with the same generic acceptance it gives
+    every other input, because "you asked too recently" would confirm that the
+    address has an account and that somebody is using it.
+
+    429, and it carries `Retry-After` through the standard handler: the caller
+    did nothing wrong and the wait is short and knowable.
+    """
+
+    status_code = 429
+    error_type = "https://onyx.ledger/errors/recovery-throttled"
+    title = "Message Already Sent"
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(
+            "A message was sent recently. Check your inbox, including spam, "
+            f"and try again in {retry_after_seconds} seconds."
+        )
 
 
 class RecoveryTokenInvalid(DomainError):
@@ -212,6 +237,34 @@ class AccountRecoveryService:
             return None
         return user
 
+    async def _seconds_until_resend(
+        self, model: RecoveryTokenModel, user_id: uuid.UUID
+    ) -> int:
+        """How long before another message may go to this account. 0 if now.
+
+        Reads the newest STILL-USABLE token — unused and unexpired — because
+        that is the one whose link is sitting in the mailbox. A used or expired
+        token is not a message the customer can act on, so it must not hold up
+        the replacement they are asking for.
+        """
+        cooldown = self.settings.recovery_resend_cooldown_seconds
+        if cooldown <= 0:
+            return 0
+        newest = await self.s.scalar(
+            select(model.created_at)
+            .where(
+                model.user_id == user_id,
+                model.used_at.is_(None),
+                model.expires_at > func.now(),
+            )
+            .order_by(model.created_at.desc())
+            .limit(1)
+        )
+        if newest is None:
+            return 0
+        elapsed = (datetime.now(tz=UTC) - newest).total_seconds()
+        return max(0, int(cooldown - elapsed))
+
     async def _mint(
         self, model: RecoveryTokenModel, user_id: uuid.UUID, ttl_minutes: int
     ) -> str:
@@ -277,10 +330,19 @@ class AccountRecoveryService:
         verified or cannot recover. The caller is authenticated as this account,
         so there is no enumeration to worry about; there is simply nothing
         useful to say and no reason to send mail.
+
+        RAISES `RecoveryThrottled` if a usable link was sent recently. This is
+        the one flow that reports the floor instead of hiding behind it: the
+        caller pressed a button and is owed an answer, and telling an
+        authenticated account when its own last message went out discloses
+        nothing it does not already know.
         """
         user = await self._usable_account(user_id)
         if user is None or user.email_verified_at is not None:
             return None
+        wait = await self._seconds_until_resend(EmailVerificationToken, user_id)
+        if wait:
+            raise RecoveryThrottled(wait)
         ttl = self.settings.verification_token_ttl_minutes
         raw = await self._mint(EmailVerificationToken, user_id, ttl)
         await self._audit(user_id, RecoveryEvent.VERIFICATION_REQUESTED)
@@ -292,13 +354,21 @@ class AccountRecoveryService:
             ),
         )
 
-    async def verify_email(self, raw_token: str) -> None:
+    async def verify_email(self, raw_token: str) -> str:
         """Complete verification: the smallest authorized transition and no more.
 
         `pending_verification` becomes `active` and `email_verified_at` is
         stamped. An account that is suspended, closed or deleting is refused by
         `_usable_account` BEFORE the transition, so a verification link can
         never be the thing that brings an account back.
+
+        IDEMPOTENT IN EFFECT, NOT IN ADMISSION. A second click on the same link
+        raises — the token is used and `_claim` matches nothing — but a link
+        redeemed against an account that somehow verified in between simply
+        finds nothing left to change and reports the status it already had.
+
+        Returns that status, which is what the client needs to drop its
+        "unverified" banner without a second round trip.
         """
         user_id = await self._claim(EmailVerificationToken, raw_token)
         if user_id is None:
@@ -308,10 +378,11 @@ class AccountRecoveryService:
             raise RecoveryTokenInvalid()
         if user.email_verified_at is None:
             user.email_verified_at = datetime.now(tz=UTC)
-        if user.status == "pending_verification":
+        if user.status in UNVERIFIED_ACCOUNT_STATUSES:
             user.status = VERIFIED_STATUS
         await self.s.flush()
         await self._audit(user_id, RecoveryEvent.EMAIL_VERIFIED)
+        return user.status
 
     # ---------------------------------------------------- password  reset --
     async def request_password_reset(self, email: str) -> PendingEmail | None:
@@ -332,6 +403,13 @@ class AccountRecoveryService:
             # A suspended or deleting account gets the same silence an unknown
             # address gets. Telling the requester "that account is suspended"
             # would answer a question they have no standing to ask.
+            return None
+        if await self._seconds_until_resend(PasswordResetToken, user.id):
+            # SILENCE, not `RecoveryThrottled`. The route's whole contract is
+            # that every input produces the same answer; a 429 here would mean
+            # "this address has an account AND somebody just asked to reset it",
+            # which is strictly more than an unknown address discloses. The
+            # link already in the mailbox still works.
             return None
         ttl = self.settings.password_reset_token_ttl_minutes
         raw = await self._mint(PasswordResetToken, user.id, ttl)
@@ -380,7 +458,7 @@ class AccountRecoveryService:
 
         from app.services.auth.service import AuthService
 
-        await AuthService(self.s)._revoke_user_sessions(user_id)
+        await AuthService(self.s).revoke_all_sessions(user_id)
         await self.s.flush()
         await self._audit(user_id, RecoveryEvent.PASSWORD_RESET_COMPLETED)
         await self._audit(user_id, RecoveryEvent.SESSION_FAMILIES_REVOKED)
@@ -401,47 +479,76 @@ class AccountRecoveryService:
         hand the request path an account-existence oracle — and the deletion
         path stamps the key itself when it severs `user_id`, which is the only
         moment the key is actually needed.
+
+        `.inline()`, AND IT IS LOAD-BEARING. The request role's grant on this
+        table is `a` — INSERT and nothing else, so that the surface which writes
+        the security log cannot read it back. SQLAlchemy adds an implicit
+        `RETURNING id` for a server-generated primary key, RETURNING needs
+        SELECT, and the whole statement is then refused with `permission denied
+        for table security_event`. `.inline()` drops the RETURNING; the id is
+        generated by the column default and nothing here wants it.
+
+        That also rules out `session.add()`: the ORM needs the key back to put
+        the instance in its identity map, so it cannot write to an append-only
+        table at all.
         """
-        self.s.add(SecurityEvent(user_id=user_id, event_type=event.value))
+        await self.s.execute(
+            insert(SecurityEvent)
+            .values(user_id=user_id, event_type=event.value)
+            .inline()
+        )
+
+    def password_changed_notice(self, to: str) -> PendingEmail:
+        """The notice that follows a completed reset. Same shape as the rest.
+
+        Rendered here rather than at the route so the one rule that governs
+        every message in this subsystem — nothing about the account's money is
+        in it — is enforced in one file.
+        """
+        return PendingEmail(
+            to=to,
+            kind=TransactionalEmail.PASSWORD_CHANGED,
+            message=render_password_changed(),
+        )
 
     # ----------------------------------------------------------- delivery --
     def deliver(self, pending: PendingEmail | None) -> None:
-        """Send a pending message. CALL THIS AFTER THE COMMIT, never before.
+        """Send a pending message. AFTER THE COMMIT, AND OFF THE REQUEST.
 
-        A raised `EmailDeliveryFailed` reaches the caller: the customer asked
-        for a link, no link is coming, and telling them so is what makes them
-        ask again. The token is already committed and the next request
-        supersedes it.
+        Every call site schedules this as a background task, for three reasons
+        that happen to agree:
 
-        `None` is accepted and does nothing, so a non-enumerating route can
-        write one unconditional line rather than branching on an outcome it is
+        TIMING. `request_password_reset` must answer identically for an address
+        that has an account and one that does not. A provider round trip is
+        hundreds of milliseconds and a database miss is under one, so sending
+        inside the request would make the response time the enumeration oracle
+        that the response body was carefully written not to be.
+
+        TRANSACTIONS. Nothing holds a connection or a token row's lock across a
+        call that retries against somebody else's service.
+
+        FAILURE. A send that fails cannot un-commit the token, so there is
+        nothing for an exception to accomplish here and nowhere useful for it to
+        go — a background task's exception reaches a log, never the customer. It
+        is caught and logged as a warning: the token stands, and the customer
+        asks again once the floor lifts.
+
+        `None` does nothing, so a non-enumerating route can schedule delivery in
+        one unconditional line rather than branching on an outcome it is
         supposed to keep to itself.
-        """
-        if pending is None:
-            return
-        self.provider.send(pending.to, pending.kind, pending.message)
-
-    def notify_password_changed(self, to: str) -> None:
-        """Tell the customer their password changed. Never undo it if this fails.
-
-        The password IS changed and every session IS revoked by the time this
-        runs, both committed. If the provider is down, the alternatives are:
-        roll back a completed password change — leaving the customer holding a
-        new password that does not work and an old one they were told was
-        replaced — or deliver the change and lose the notification. The second
-        is plainly better, so the failure is swallowed and logged.
-
-        This is the one place in the recovery flow where a delivery failure is
-        deliberately not surfaced, and it is stated here so it does not read as
-        an oversight.
         """
         from app.integrations.email import EmailDeliveryFailed
 
+        if pending is None:
+            return
         try:
-            self.provider.send(
-                to, TransactionalEmail.PASSWORD_CHANGED, render_password_changed()
-            )
+            self.provider.send(pending.to, pending.kind, pending.message)
         except EmailDeliveryFailed as exc:
+            # The KIND and whether retrying could help. Not the recipient: an
+            # address in a log line is the personal value this whole subsystem
+            # is careful with everywhere else.
             log.warning(
-                "password_changed_notice_undelivered", transient=exc.transient
+                "recovery_email_undelivered",
+                kind=pending.kind.value,
+                transient=exc.transient,
             )
