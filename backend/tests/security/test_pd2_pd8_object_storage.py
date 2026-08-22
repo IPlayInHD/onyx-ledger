@@ -308,13 +308,25 @@ async def test_the_api_does_not_hand_the_object_key_back(client):
 # ---------------------------------------------------------------------------
 # PD-8 — the binary can be removed
 # ---------------------------------------------------------------------------
-def test_the_port_declares_a_delete():
+def test_the_port_declares_an_erasure_primitive():
     """A capability that does not exist on the port cannot be relied on by any
-    service, whatever a particular adapter happens to offer."""
+    service, whatever a particular adapter happens to offer.
+
+    Named `hard_erase` since B2A. The rename is not cosmetic: on a versioned
+    bucket a plain `delete` removes nothing, so a port that only promised
+    "delete" promised something that does not erase. PD-8 asked for binaries to
+    be reachable by a cascade; PD-10 is why the operation has to mean every
+    version of them.
+    """
     from app.domain.ports import ObjectStorage
 
-    assert hasattr(ObjectStorage, "delete"), (
-        "ObjectStorage has no delete; binaries stay unreachable (PD-8)"
+    assert hasattr(ObjectStorage, "hard_erase"), (
+        "ObjectStorage has no erasure primitive; binaries stay unreachable (PD-8)"
+    )
+    assert not hasattr(ObjectStorage, "delete"), (
+        "a soft `delete` is back alongside `hard_erase`; on a versioned bucket "
+        "it hides bytes instead of removing them, and it exists only to be "
+        "chosen by mistake (PD-10)"
     )
 
 
@@ -325,7 +337,7 @@ def test_deleting_an_object_removes_the_bytes():
     storage.put(bucket, key, b"synthetic document bytes")
     assert storage.get(bucket, key) == b"synthetic document bytes"
 
-    assert storage.delete(bucket, key) is DeleteOutcome.DELETED
+    assert storage.hard_erase(bucket, key) is DeleteOutcome.DELETED
     assert storage.get(bucket, key) == b"", "the bytes survived deletion"
 
 
@@ -338,7 +350,7 @@ def test_deleting_a_missing_object_is_success_not_failure():
     never finish being deleted.
     """
     storage = LocalObjectStorage()
-    outcome = storage.delete("documents", f"{uuid.uuid4()}/v2/{uuid.uuid4()}")
+    outcome = storage.hard_erase("documents", f"{uuid.uuid4()}/v2/{uuid.uuid4()}")
     assert outcome is DeleteOutcome.ALREADY_ABSENT
     assert outcome is not DeleteOutcome.RETRYABLE_FAILURE
 
@@ -349,9 +361,9 @@ def test_deletion_is_idempotent():
     storage.presign_put(bucket, key, "application/pdf", max_bytes=1024)
     storage.put(bucket, key, b"bytes")
 
-    first = storage.delete(bucket, key)
-    second = storage.delete(bucket, key)
-    third = storage.delete(bucket, key)
+    first = storage.hard_erase(bucket, key)
+    second = storage.hard_erase(bucket, key)
+    third = storage.hard_erase(bucket, key)
 
     assert first is DeleteOutcome.DELETED
     assert second is third is DeleteOutcome.ALREADY_ABSENT
@@ -365,7 +377,7 @@ def test_deleting_releases_the_upload_authorization():
     bucket, key = "documents", f"{uuid.uuid4()}/v2/{uuid.uuid4()}"
     storage.presign_put(bucket, key, "application/pdf", max_bytes=8)
     storage.put(bucket, key, b"12345678")
-    storage.delete(bucket, key)
+    storage.hard_erase(bucket, key)
 
     # Without a fresh authorization there is no ceiling to inherit, so a write
     # that the old 8-byte bound would have refused is now simply unbounded —
@@ -441,7 +453,7 @@ def test_the_document_service_deletes_through_the_port():
     from app.services.document_processing.service import DocumentService
 
     body = inspect.getsource(DocumentService.delete_document)
-    assert "self.storage.delete(" in body, (
+    assert "self.storage.hard_erase(" in body, (
         "DocumentService.delete_document does not call the storage port, so "
         "the binary survives the document (PD-8)"
     )

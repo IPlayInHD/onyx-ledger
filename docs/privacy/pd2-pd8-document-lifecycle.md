@@ -200,25 +200,34 @@ A tool for handling a privacy defect must not become one.
 `already_deleted` is the one thing beyond the state, and it is the caller's own
 retry telling it whether this call did the work.
 
-## Object versioning — `DEPLOYMENT_REVIEW_REQUIRED`
+## Object versioning — RESOLVED in B2A
 
 On a versioned S3 bucket, `DeleteObject` writes a delete marker and **the
-previous versions remain**. That is not erasure. Either versioning is off, or
-the adapter must enumerate and delete every version.
+previous versions remain**. That is not erasure. The choice was: turn
+versioning off, or enumerate and delete every version. B2A did the second, so
+versioning stays on and erasure still means the bytes are gone.
 
-The repository cannot see a deployed bucket configuration, and it will not
-pretend otherwise. What it *can* say, and what is checkable:
+`ObjectStorage.hard_erase` — the port's only erasure operation — lists every
+version and delete marker for exactly one key, filters the listing to an exact
+key match so a sibling under the same prefix is never touched, removes them by
+version id in batches, and then re-lists to confirm none remain. A delete
+marker is never treated as erasure, and an unconfirmed erasure is not recorded
+as one.
 
-- `get_object_storage()` returns `LocalObjectStorage()` unconditionally;
-- the S3 adapter exists only as a commented sketch;
-- across the whole of git history, on every branch, no commit has ever made
-  `get_object_storage` return an S3 adapter.
+**What this section used to say, corrected.** Until B2 it read
+"`get_object_storage()` returns `LocalObjectStorage()` unconditionally" and
+"the S3 adapter exists only as a commented sketch". Both were true when written
+and neither is true now: B2 wrote the adapter, made the provider a
+configuration choice, and made production refuse the in-memory store outright.
 
-So no code in this repository has ever written a byte to a persistent object
-store. That is a statement about the repository, not a guarantee about any
-environment. If a real provider is wired, versioning must be settled before it
-carries a document — recorded as **PD-10**, and written into the adapter sketch
-where whoever enables it will read it.
+The historical claim it rested on still stands and is worth keeping, because it
+bounds what any deployed environment can be holding: up to B2, no commit on any
+branch made `get_object_storage` return an S3 adapter, so no code in this
+repository had ever written a byte to a persistent object store. That is a
+statement about the repository, not a guarantee about any environment.
+
+What remains under **PD-10** is object-store encryption, TLS and backup
+configuration — `DEPLOYMENT_CONFIGURATION_REQUIRED`, and not closed by this.
 
 ## Historical legacy keys — `OPERATIONAL_REVIEW_REQUIRED`
 
@@ -345,8 +354,12 @@ tests above.
 
 1. **No orphan sweep.** The crash window in *Ordering* is reported, not
    prevented. Closing it needs either a durable job or a bucket listing.
-2. **Object versioning is unresolved** for any real provider — PD-10,
-   `DEPLOYMENT_REVIEW_REQUIRED`.
+2. **Object versioning is resolved** as of B2A. `hard_erase` enumerates every
+   version and delete marker for exactly one key, removes them by version id,
+   and re-lists to confirm none remain — so a versioned bucket is a supported
+   production configuration rather than a reason erasure cannot complete. What
+   PD-10 still covers is object-store encryption, TLS and backup configuration,
+   which stay `DEPLOYMENT_CONFIGURATION_REQUIRED`.
 3. **Historical legacy keys** in a deployed database need an operator
    migration — `OPERATIONAL_REVIEW_REQUIRED`.
 4. **No backup or PITR erasure claim.** A tombstoned document's binary is gone

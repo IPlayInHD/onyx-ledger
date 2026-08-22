@@ -360,7 +360,7 @@ class DocumentService:
 
         # 1. The binary. First, because it is the irreversible part and the one
         #    with no transaction to roll back.
-        storage_outcome = self.storage.delete(doc.bucket, doc.object_key)
+        storage_outcome = self.storage.hard_erase(doc.bucket, doc.object_key)
         if storage_outcome in (
             DeleteOutcome.RETRYABLE_FAILURE, DeleteOutcome.PERMANENT_FAILURE
         ):

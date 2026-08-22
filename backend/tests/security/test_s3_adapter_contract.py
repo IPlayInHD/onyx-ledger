@@ -22,10 +22,9 @@ from __future__ import annotations
 import boto3
 import pytest
 from botocore.config import Config
-from botocore.exceptions import ConnectTimeoutError
 from botocore.stub import ANY, Stubber
 
-from app.domain.ports import DeleteOutcome, UploadAuthorization
+from app.domain.ports import UploadAuthorization
 from app.integrations.storage import LocalObjectStorage, S3ObjectStorage
 
 BUCKET = "onyx-test-documents"
@@ -118,131 +117,15 @@ def test_get_on_a_missing_object_agrees_with_the_local_store(client):
 
 
 # ----------------------------------------------------------------- delete --
-def test_a_successful_delete_is_deleted(client):
-    store = S3ObjectStorage(client)
-    with Stubber(client) as stub:
-        stub.add_response("delete_object", {}, {"Bucket": BUCKET, "Key": KEY})
-        assert store.delete(BUCKET, KEY) is DeleteOutcome.DELETED
-
-
-def test_a_delete_marker_is_not_an_erasure(client):
-    """PD-10, detected from the response instead of warned about in a comment.
-
-    On a versioned bucket `delete_object` removes nothing: it writes a marker
-    and every previous version stays readable by anyone who can name it. The
-    provider reports success. If the adapter passed that through, the privacy
-    lifecycle would finalize the purge and the bytes would still be there —
-    the single configuration where "the delete succeeded" and "the document is
-    gone" come apart.
-
-    S3 says so in the response at no extra cost, so no HEAD is needed to
-    notice.
-    """
-    store = S3ObjectStorage(client)
-    with Stubber(client) as stub:
-        stub.add_response(
-            "delete_object", {"DeleteMarker": True, "VersionId": "v2"},
-            {"Bucket": BUCKET, "Key": KEY},
-        )
-        outcome = store.delete(BUCKET, KEY)
-    assert outcome is DeleteOutcome.PERMANENT_FAILURE
-    assert outcome not in (DeleteOutcome.DELETED, DeleteOutcome.ALREADY_ABSENT), (
-        "a delete marker was reported as erasure; the privacy lifecycle would "
-        "finalize a purge over surviving object versions"
-    )
-
-
-def test_a_missing_object_converges_instead_of_retrying_forever(client):
-    store = S3ObjectStorage(client)
-    with Stubber(client) as stub:
-        stub.add_client_error("delete_object", service_error_code="NoSuchKey")
-        assert store.delete(BUCKET, KEY) is DeleteOutcome.ALREADY_ABSENT
-
-
-def test_permission_denied_is_permanent(client):
-    store = S3ObjectStorage(client)
-    with Stubber(client) as stub:
-        stub.add_client_error("delete_object", service_error_code="AccessDenied")
-        assert store.delete(BUCKET, KEY) is DeleteOutcome.PERMANENT_FAILURE
-
-
-def test_a_timeout_is_retryable(client):
-    """A transport failure carries no provider code at all — the adapter must
-    not read `str(exc)` to find one, and must not treat the absence as success.
-    """
-    store = S3ObjectStorage(client)
-
-    def _timeout(*_args, **_kwargs):
-        raise ConnectTimeoutError(endpoint_url="https://s3.ca-central-1.amazonaws.com")
-
-    client.delete_object = _timeout
-    assert store.delete(BUCKET, KEY) is DeleteOutcome.RETRYABLE_FAILURE
-
-
-def test_a_server_error_is_retryable(client):
-    store = S3ObjectStorage(client)
-    with Stubber(client) as stub:
-        stub.add_client_error("delete_object", service_error_code="InternalError")
-        assert store.delete(BUCKET, KEY) is DeleteOutcome.RETRYABLE_FAILURE
-
-
-@pytest.mark.parametrize(
-    "code",
-    ["SomeCodeNobodyHasSeen", "ThrottledLikeThis", "", "TeapotError"],
-)
-def test_an_unrecognised_error_never_reports_erasure(client, code):
-    """THE central mapping rule.
-
-    The adapter cannot know every code a provider or an S3-compatible store
-    might return. What it can guarantee is the direction of the guess: an
-    unknown condition is not evidence that a customer's document was destroyed,
-    so it must never produce an outcome the lifecycle treats as erasure.
-    """
-    store = S3ObjectStorage(client)
-    with Stubber(client) as stub:
-        stub.add_client_error("delete_object", service_error_code=code)
-        outcome = store.delete(BUCKET, KEY)
-    assert outcome is DeleteOutcome.RETRYABLE_FAILURE
-    assert outcome not in (DeleteOutcome.DELETED, DeleteOutcome.ALREADY_ABSENT)
-
-
-def test_no_delete_path_raises_a_provider_exception(client):
-    """Provider exceptions must not escape the adapter (port contract).
-
-    A lifecycle that had to catch `ClientError` would be coupled to botocore,
-    and a lifecycle keyed on `str(e)` cannot be reasoned about at all.
-    """
-    store = S3ObjectStorage(client)
-    for code in ("AccessDenied", "NoSuchBucket", "SlowDown", "NoSuchKey"):
-        with Stubber(client) as stub:
-            stub.add_client_error("delete_object", service_error_code=code)
-            outcome = store.delete(BUCKET, KEY)  # must not raise
-        assert isinstance(outcome, DeleteOutcome)
-
-
-def test_a_provider_error_leaks_nothing_into_the_outcome(client):
-    """The closed outcome is the whole return value.
-
-    Entry 11A established that provider exception text carries the bucket, the
-    endpoint and sometimes an account hint. None of it may ride back to a
-    caller that will store the result in a privacy ledger.
-    """
-    store = S3ObjectStorage(client)
-    with Stubber(client) as stub:
-        stub.add_client_error(
-            "delete_object",
-            service_error_code="AccessDenied",
-            service_message=(
-                "User: arn:aws:sts::123456789012:assumed-role/onyx-api/i-0abc "
-                "is not authorized to perform s3:DeleteObject on "
-                "arn:aws:s3:::onyx-prod-documents/secret-key"
-            ),
-        )
-        outcome = store.delete(BUCKET, KEY)
-    rendered = f"{outcome!r} {outcome.value}"
-    for leaked in ("123456789012", "onyx-prod-documents", "assumed-role", "secret-key"):
-        assert leaked not in rendered, f"{leaked!r} escaped in the outcome"
-
+# MOVED. This file once held the single-object DELETE cases: success, delete
+# marker, NoSuchKey, AccessDenied, timeout, unrecognised code, no-exception,
+# no-leak. B2A replaced `delete` with `hard_erase`, which reasons about every
+# version of a key rather than the current one, so those cases now live in
+# `test_s3_hard_erase.py` against the operation that actually exists.
+#
+# Nothing was dropped in the move — including the parametrized
+# "an unrecognised error never reports erasure", which is the rule the whole
+# mapping rests on.
 
 # ------------------------------------------------------------ upload permit --
 def test_the_upload_permit_carries_the_size_ceiling(client):

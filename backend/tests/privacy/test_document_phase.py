@@ -282,11 +282,11 @@ class _FailingStorage:
         self._outcome = outcome
         self.calls: list[str] = []
 
-    def delete(self, bucket: str, key: str) -> DeleteOutcome:
+    def hard_erase(self, bucket: str, key: str) -> DeleteOutcome:
         self.calls.append(key)
         if key == self._doomed:
             return self._outcome
-        return self._real.delete(bucket, key)
+        return self._real.hard_erase(bucket, key)
 
 
 async def _run_phase_with_storage(uid, storage):
@@ -347,7 +347,7 @@ async def test_a_missing_object_converges_instead_of_failing_forever():
     conn = _owner()
     cur = conn.cursor()
     document_id, bucket, object_key = _document(cur, uid, with_extraction=False)
-    get_object_storage().delete(bucket, object_key)   # the crash's other half
+    get_object_storage().hard_erase(bucket, object_key)   # the crash's other half
     assert not _object_exists(bucket, object_key)
     assert _remaining(cur, uid) == 1, "the live row survived the crash, as designed"
 
@@ -418,7 +418,7 @@ async def test_a_crash_after_all_deletion_still_reaches_complete():
     token = _claim(cur, uid, "crasher")
     cur.execute("SELECT identity.start_lifecycle_phase(%s,%s,%s,'crasher')",
                 (str(uid), PHASE, str(token)))
-    get_object_storage().delete(bucket, object_key)
+    get_object_storage().hard_erase(bucket, object_key)
     cur.execute("SELECT identity.finalize_document_purge(%s,%s,%s,'crasher')",
                 (str(uid), document_id, str(token)))
     assert _remaining(cur, uid) == 0

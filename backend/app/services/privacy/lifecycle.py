@@ -906,7 +906,7 @@ class DocumentPurgeService:
 
         failure: str | None = None
         for document_id, bucket, object_key in outstanding:
-            result = self.storage.delete(bucket, object_key)
+            result = self.storage.hard_erase(bucket, object_key)
             if result not in (DeleteOutcome.DELETED, DeleteOutcome.ALREADY_ABSENT):
                 # One object that will not go must not stop the others, and
                 # must not let the phase finish. The closed outcome name is the

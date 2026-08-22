@@ -67,8 +67,31 @@ class ObjectStorage(Protocol):
     def put(self, bucket: str, key: str, data: bytes) -> None: ...
     def get(self, bucket: str, key: str) -> bytes: ...
 
-    def delete(self, bucket: str, key: str) -> DeleteOutcome:
-        """Remove one object. IDEMPOTENT: a missing object is not an error.
+    def hard_erase(self, bucket: str, key: str) -> DeleteOutcome:
+        """Remove one object AND EVERY VERSION OF IT. IDEMPOTENT.
+
+        SUCCESS MEANS, for the target key and no other:
+
+            no current version · no historical version · no delete marker
+
+        WHY THERE IS ONLY ONE ERASURE OPERATION. This was `delete`, and on a
+        versioned bucket `DeleteObject` deletes nothing — it writes a delete
+        marker and every previous version stays readable by anyone who can name
+        one. B2 made the adapter report that as a failure rather than let it
+        pass as erasure, which was right and left both callers stuck: the
+        privacy phase could never complete, and ordinary customer deletion
+        raised a 503 on every attempt, permanently.
+
+        Splitting this into a soft `delete` and a privacy `hard_erase` was the
+        obvious alternative and is worse. Both callers mean the same thing —
+        Entry 11A's document contract says the binary is PURGED when a customer
+        deletes it, not hidden — so a soft variant would exist only to be
+        chosen by mistake, and the mistake would be silent, durable, and
+        discovered by whoever eventually read the version history.
+
+        Retaining versions is a durability feature, and for these objects the
+        product does not use it: there is no undelete path anywhere, so the only
+        thing a retained version can do is outlive a promise that it was purged.
 
         PD-8: the port had no delete at all, so an uploaded binary was
         unreachable by any cascade — a document could be removed from the

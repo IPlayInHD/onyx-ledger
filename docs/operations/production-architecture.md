@@ -209,11 +209,26 @@ touched nothing. Point that code at a real bucket without writing the adapter
 and the privacy pipeline would record erasure that did not happen — which is a
 worse failure than an endpoint that refuses.
 
-So: writing `S3ObjectStorage` and wiring the factory to settings is a launch
-prerequisite, not a nice-to-have, and until it exists the privacy policy must
-not describe a document store the product does not have. The commented sketch
-also carries PD-10 unresolved: on a versioned bucket, `delete_object` writes a
-delete marker and previous versions remain, which is not erasure.
+**Both are now closed.** B2 wrote `S3ObjectStorage` and made the factory refuse
+the in-memory store in production; B2A closed PD-10.
+
+**Bucket versioning is SUPPORTED, and stays on.** It was the open question:
+`delete_object` on a versioned bucket removes nothing — it writes a delete
+marker and every previous version stays readable by anyone who can name one.
+B2 refused to call that erasure, which was correct and left the privacy phase
+unable to complete against the very bucket configuration this document
+recommends.
+
+Erasure is now version-aware. `ObjectStorage.hard_erase` enumerates every
+version and delete marker for exactly one key, removes them by version id, and
+then re-lists to confirm nothing remains — so "erased" means the bytes are gone,
+not hidden. There is one erasure operation rather than a soft and a hard
+variant, because both callers mean the same thing and a soft variant would
+exist only to be chosen by mistake.
+
+Versioning therefore keeps its durability value for the window before deletion,
+and costs nothing at deletion time. Turning it off is **not** required and
+should not be used as a way to sidestep erasure.
 
 ## 7. Secrets
 

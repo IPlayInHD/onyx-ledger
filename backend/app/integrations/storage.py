@@ -114,8 +114,14 @@ class LocalObjectStorage:
     def get(self, bucket: str, key: str) -> bytes:
         return _FAKE_BLOBS.get(f"{bucket}/{key}", b"")
 
-    def delete(self, bucket: str, key: str) -> DeleteOutcome:
+    def hard_erase(self, bucket: str, key: str) -> DeleteOutcome:
         """Remove one object, idempotently (PD-8).
+
+        Trivially a HARD erase: this store keeps one value per key and no
+        history, so popping it leaves no version and no marker behind. The
+        contract the port states is satisfied by construction rather than by
+        effort — which is exactly why it is not evidence about S3, and why
+        `test_s3_hard_erase.py` drives the real client contract instead.
 
         The distinction between DELETED and ALREADY_ABSENT is real information
         — it tells an operator whether a retry did the work or found it done —
@@ -311,63 +317,144 @@ class S3ObjectStorage:
                 close()
 
     # -- erasure ---------------------------------------------------------- #
-    def delete(self, bucket: str, key: str) -> DeleteOutcome:
-        """Remove one object and report, in the port's closed vocabulary, what
-        actually happened.
+    #: One `DeleteObjects` call carries at most this many version ids. The S3
+    #: limit is 1000; a key with more versions than that is paginated through.
+    _DELETE_BATCH = 1000
 
-        THE RULE THIS FUNCTION EXISTS FOR: no unrecognised condition may ever
-        produce a success outcome. `AccountLifecycleService` finalizes a purge
-        on `DELETED` or `ALREADY_ABSENT` and on nothing else, so a mapping that
-        guessed "probably fine" for an error it did not know would convert an
-        unknown provider state into a permanent, audited claim that a
-        customer's document had been erased. Everything unrecognised is
-        therefore `RETRYABLE_FAILURE`: the phase stays incomplete, the object
-        reference is kept, and the next run tries again.
+    def _versions(self, bucket: str, key: str) -> list[dict[str, str]]:
+        """Every version and delete marker for EXACTLY this key.
 
-        S3 RETURNS 204 FOR A MISSING KEY, so `DELETED` and `ALREADY_ABSENT`
-        cannot be distinguished without a preceding HEAD. Both are terminal
-        success for the lifecycle, and paying a round trip per object to
-        colour an operator's log line is not worth it — see
-        REMOTE_DELETE_CONFIRMATION_MODEL in the entry report.
+        `list_object_versions` takes a PREFIX, not a key, so `k` also returns
+        `k2` and `k/child`. Every entry is therefore filtered on an exact key
+        match before anything is deleted — the difference between erasing one
+        customer's document and erasing whatever else happens to sort under it.
 
-        A DELETE MARKER IS NOT AN ERASURE. On a versioned bucket
-        `delete_object` does not remove anything: it writes a marker and every
-        previous version remains readable by anyone who can name it. S3 says so
-        in the response, `DeleteMarker: true`, at no extra cost — so the one
-        configuration where "the provider said the delete succeeded" and "the
-        customer's bytes are gone" come apart is detected from the response we
-        already have, and reported as a failure rather than as erasure. That is
-        PD-10, which until now was a comment warning that this could happen.
+        Paginated with the key markers rather than a page count, because "how
+        many pages could there be" is not a question this should have an
+        opinion about.
+        """
+        found: list[dict[str, str]] = []
+        params: dict[str, Any] = {"Bucket": bucket, "Prefix": key}
+        while True:
+            page = self._c.list_object_versions(**params)
+            for field in ("Versions", "DeleteMarkers"):
+                for entry in page.get(field) or []:
+                    # EXACT key only. A prefix match is not an identity match.
+                    if entry.get("Key") == key and entry.get("VersionId"):
+                        found.append(
+                            {"Key": key, "VersionId": entry["VersionId"]}
+                        )
+            if not page.get("IsTruncated"):
+                return found
+            params["KeyMarker"] = page.get("NextKeyMarker")
+            params["VersionIdMarker"] = page.get("NextVersionIdMarker")
+
+    def hard_erase(self, bucket: str, key: str) -> DeleteOutcome:
+        """Erase the object and every version of it, then prove it is gone.
+
+        THE SHAPE, and why it is enumerate-first rather than delete-then-clean.
+        Calling `delete_object` first would, on a versioned bucket, create a
+        delete marker that then has to be cleaned up as well — manufacturing
+        one more thing to erase in order to discover that erasing is needed.
+        Enumerating first works identically on both bucket types: an
+        unversioned object is returned with `VersionId` `"null"`, and deleting
+        that version id removes it permanently. One code path, and no delete
+        marker is ever written.
+
+        CONFIRMATION IS A RE-ENUMERATION, not a count of successful deletes.
+        Two different things can leave a version behind — a delete that failed,
+        and a version written after the first listing — and only asking the
+        provider what remains catches both. S3 list-after-write is strongly
+        consistent, so the answer is authoritative rather than eventually
+        authoritative.
+
+        The confirmation is also what makes the batch error handling
+        conservative rather than clever: if the re-listing is empty, the object
+        is gone whatever individual entries reported, and if it is not empty
+        the outcome is a failure whatever they reported.
+
+        NOTHING UNRECOGNISED PRODUCES SUCCESS. Same rule as the rest of this
+        adapter: `AccountLifecycleService` finalizes a purge on `DELETED` or
+        `ALREADY_ABSENT` and on nothing else, so an unknown provider state has
+        to leave the phase incomplete and retryable.
         """
         try:
-            response = self._c.delete_object(Bucket=bucket, Key=key)
+            versions = self._versions(bucket, key)
         except Exception as exc:  # noqa: BLE001 - translated, never leaked
-            code = _error_code(exc)
-            if code in _ABSENT_CODES:
-                return DeleteOutcome.ALREADY_ABSENT
+            return self._failure("enumerate", exc)
+
+        if not versions:
+            return DeleteOutcome.ALREADY_ABSENT
+
+        permanent = False
+        for offset in range(0, len(versions), self._DELETE_BATCH):
+            batch = versions[offset:offset + self._DELETE_BATCH]
+            try:
+                response = self._c.delete_objects(
+                    Bucket=bucket,
+                    # Quiet=False: the per-entry errors are the point. A quiet
+                    # batch reports nothing and would make a partial failure
+                    # indistinguishable from a clean sweep until the
+                    # confirmation caught it.
+                    Delete={"Objects": batch, "Quiet": False},
+                )
+            except Exception as exc:  # noqa: BLE001 - translated, never leaked
+                outcome = self._failure("batch", exc)
+                if outcome is DeleteOutcome.PERMANENT_FAILURE:
+                    permanent = True
+                continue
+            for error in (response.get("Errors") or []):
+                code = str(error.get("Code") or "")
+                if code in _PERMANENT_CODES:
+                    permanent = True
+                log.warning(
+                    "object_storage_hard_erase_version_failed",
+                    provider_code=code or "UNKNOWN",
+                )
+
+        # The proof. Anything still listed means this is not an erasure,
+        # whatever the deletes reported.
+        try:
+            remaining = self._versions(bucket, key)
+        except Exception as exc:  # noqa: BLE001 - translated, never leaked
+            # Unconfirmed is not erased. The versions may well be gone; without
+            # a listing that says so there is nothing to record as complete.
+            return self._failure("confirm", exc)
+
+        if remaining:
             outcome = (
-                DeleteOutcome.PERMANENT_FAILURE
-                if code in _PERMANENT_CODES
+                DeleteOutcome.PERMANENT_FAILURE if permanent
                 else DeleteOutcome.RETRYABLE_FAILURE
             )
-            # The CODE, never the message, and never the key. The bucket and
-            # key together identify one customer's document; the outcome and
-            # the provider code are what an operator needs.
             log.warning(
-                "object_storage_delete_failed",
+                "object_storage_hard_erase_incomplete",
                 outcome=outcome.value,
-                provider_code=code or "TRANSPORT",
+                # A COUNT, not the version ids. How much is left is what an
+                # operator needs; which versions they are is a map back to one
+                # customer's document.
+                remaining_versions=len(remaining),
             )
             return outcome
-
-        if isinstance(response, dict) and response.get("DeleteMarker"):
-            log.warning(
-                "object_storage_delete_left_a_version",
-                outcome=DeleteOutcome.PERMANENT_FAILURE.value,
-                provider_code="VERSIONED_BUCKET",
-            )
-            return DeleteOutcome.PERMANENT_FAILURE
         return DeleteOutcome.DELETED
+
+    def _failure(self, stage: str, exc: Exception) -> DeleteOutcome:
+        """Classify a provider exception without letting any of it escape."""
+        code = _error_code(exc)
+        if code in _ABSENT_CODES:
+            # The bucket or key is not there, so neither are its versions.
+            return DeleteOutcome.ALREADY_ABSENT
+        outcome = (
+            DeleteOutcome.PERMANENT_FAILURE
+            if code in _PERMANENT_CODES
+            else DeleteOutcome.RETRYABLE_FAILURE
+        )
+        log.warning(
+            "object_storage_hard_erase_failed",
+            stage=stage,
+            outcome=outcome.value,
+            provider_code=code or "TRANSPORT",
+        )
+        return outcome
 
 
 # --------------------------------------------------------------------------- #

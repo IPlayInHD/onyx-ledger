@@ -235,4 +235,4 @@ def test_the_port_operations_are_the_ones_callers_use():
         name for name in vars(ObjectStorage)
         if not name.startswith("_") and callable(getattr(ObjectStorage, name, None))
     }
-    assert declared == {"presign_put", "put", "get", "delete"}, declared
+    assert declared == {"presign_put", "put", "get", "hard_erase"}, declared

@@ -287,7 +287,7 @@ async def test_a_retry_completes_after_the_object_is_already_gone(client):
     await _process_and_confirm(client, token, document_id)
 
     # Simulate the crash: the binary is gone, the database still says live.
-    assert get_object_storage().delete(bucket, key) is DeleteOutcome.DELETED
+    assert get_object_storage().hard_erase(bucket, key) is DeleteOutcome.DELETED
     with owner_cursor() as cur:
         cur.execute("SELECT deleted_at FROM docs.document WHERE id = %s",
                     (str(document_id),))
@@ -316,8 +316,11 @@ async def test_a_storage_failure_leaves_the_document_deletable(client, monkeypat
     def _refuse(self, bucket, key):  # noqa: ANN001, ARG001
         return DeleteOutcome.RETRYABLE_FAILURE
 
-    monkeypatch.setattr(
-        storage_module.LocalObjectStorage, "delete", _refuse, raising=False)
+    # `raising=True` on purpose. With `raising=False` a stale attribute name
+    # would create an unused attribute instead of replacing the real one, the
+    # store would behave normally, and this test would pass while patching
+    # nothing — which is what would have happened when B2A renamed `delete`.
+    monkeypatch.setattr(storage_module.LocalObjectStorage, "hard_erase", _refuse)
 
     failed = await client.delete(f"/api/v1/documents/{document_id}",
                                  headers=_headers(token))
@@ -357,13 +360,13 @@ async def test_one_tenant_cannot_delete_anothers_document(client, monkeypatch):
     document_b, bucket, key = await _upload(client, token_b)
 
     attempts: list[tuple[str, str]] = []
-    real_delete = storage_module.LocalObjectStorage.delete
+    real_erase = storage_module.LocalObjectStorage.hard_erase
 
     def _spy(self, bucket_, key_):  # noqa: ANN001
         attempts.append((bucket_, key_))
-        return real_delete(self, bucket_, key_)
+        return real_erase(self, bucket_, key_)
 
-    monkeypatch.setattr(storage_module.LocalObjectStorage, "delete", _spy)
+    monkeypatch.setattr(storage_module.LocalObjectStorage, "hard_erase", _spy)
 
     response = await client.delete(f"/api/v1/documents/{document_b}",
                                    headers=_headers(token_a))
