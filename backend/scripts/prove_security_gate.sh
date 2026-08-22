@@ -121,14 +121,64 @@ fi
 PASS=0; FAIL=0
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"; cleanup' EXIT
 
-# Admission state accumulates across suite runs — every run books leases and
-# rate counters in the same database. With fifteen cases the suite runs thirty
-# times here, and the global concurrency limiter eventually refuses work that a
-# fresh database would admit. Cleared alongside the ledger so each case starts
-# from a comparable state; both tables are rebuilt by the suite itself.
+# State that accumulates across suite runs, cleared before every one of them.
+#
+# ADMISSION. Every run books leases and rate counters in the same database.
+# With seventeen cases the suite runs thirty-four times here, and the global
+# concurrency limiter eventually refuses work a fresh database would admit.
+#
+# THE LIFECYCLE LEDGER, and this half was missing. Every suite run leaves
+# account_lifecycle rows behind, and `test_privacy_task_reentrancy` creates its
+# subject with `requested_at = now() - interval '10 years'` so that
+# `claim_account_lifecycle` — which orders oldest-first and takes `_BATCH = 10`
+# — reaches it in the four invocations the test makes. That defence works
+# against a backlog of NEWER rows. It does nothing about a backlog of the
+# test's OWN backdated rows, and every run adds roughly two and a half more.
+#
+# By case thirteen the gate had run the suite twenty-six times, and the case
+# reported
+#
+#   FAIL  PD-9 durable subject uniqueness — suite still failing after restore:
+#         AssertionError: the fixture never reached a settled state:
+#                         ('PURGING', 2, None)
+#
+# on an injection it had just correctly rejected. Nothing was wrong with the
+# invariant or with the product: the subject was simply queued behind sixty-odd
+# equally-old rows and four invocations claim forty. Measured — sixty backdated
+# claimable rows inserted into a database where the suite passes makes both
+# re-entrancy tests fail with exactly that signature, and clearing the ledger
+# makes them pass again.
+#
+# A gate whose verdict depends on how many cases ran before it is not a proof,
+# which is what the comment on the reset already said; the ledger just was not
+# part of it.
 SUITE_STATE_RESET="
   DELETE FROM admission.lease;
   DELETE FROM admission.rate_counter;
+  -- The no-delete triggers are the product invariant PD-9 exists to defend, so
+  -- they come straight back on below and the guard refuses to continue if they
+  -- did not.
+  ALTER TABLE identity.account_lifecycle DISABLE TRIGGER trg_account_lifecycle_no_delete;
+  ALTER TABLE identity.account_lifecycle_phase DISABLE TRIGGER trg_lifecycle_phase_no_delete;
+  DELETE FROM identity.account_lifecycle_phase;
+  DELETE FROM identity.account_lifecycle;
+  ALTER TABLE identity.account_lifecycle_phase ENABLE TRIGGER trg_lifecycle_phase_no_delete;
+  ALTER TABLE identity.account_lifecycle ENABLE TRIGGER trg_account_lifecycle_no_delete;
+  DO \$reset\$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM pg_trigger
+                WHERE tgname IN ('trg_account_lifecycle_no_delete',
+                                 'trg_lifecycle_phase_no_delete')
+                  AND NOT tgisinternal
+                  AND tgenabled = 'D') THEN
+      RAISE EXCEPTION 'state reset left a no-delete trigger disabled';
+    END IF;
+    IF EXISTS (SELECT 1 FROM identity.account_lifecycle)
+       OR EXISTS (SELECT 1 FROM identity.account_lifecycle_phase) THEN
+      RAISE EXCEPTION 'state reset did not empty the lifecycle ledger';
+    END IF;
+  END
+  \$reset\$;
 "
 
 # $1 label   $2 remove the invariant   $3 restore it
@@ -268,51 +318,18 @@ prove "PD-1 regression guard (new unguarded tenant table)" \
 # phase row for an account this cleanup would remove until the worker
 # re-entrancy tests did. Latent since 11B5C; found when the gate first ran far
 # enough to reach it.
-LEDGER_CLEANUP="${SUITE_STATE_RESET}
-  ALTER TABLE identity.account_lifecycle DISABLE TRIGGER trg_account_lifecycle_no_delete;
-  ALTER TABLE identity.account_lifecycle_phase DISABLE TRIGGER trg_lifecycle_phase_no_delete;
-  DELETE FROM identity.account_lifecycle a
-   WHERE a.ctid <> (SELECT min(b.ctid) FROM identity.account_lifecycle b
-                     WHERE b.user_id = a.user_id);
-  DELETE FROM identity.account_lifecycle a
-   WHERE NOT EXISTS (SELECT 1 FROM identity.user_account u WHERE u.id = a.user_id);
-  -- AND THE PHASE ROWS THOSE DELETES ORPHANED. Normally
-  -- fk_lifecycle_phase_subject ON DELETE CASCADE removes them for us — but the
-  -- uniqueness case drops account_lifecycle_pkey CASCADE, which takes that
-  -- foreign key with it, so during a restore the cascade is not there to run.
-  -- The ledger rows go, the phase rows stay, and rebuilding the foreign key
-  -- then fails with
-  --
-  --     insert or update on table "account_lifecycle_phase" violates foreign
-  --     key constraint "fk_lifecycle_phase_subject"
-  --
-  -- which killed the gate mid-run and left cases 15-16 with no verdict.
-  DELETE FROM identity.account_lifecycle_phase p
-   WHERE NOT EXISTS (SELECT 1 FROM identity.account_lifecycle l
-                      WHERE l.user_id = p.user_id);
-  ALTER TABLE identity.account_lifecycle_phase ENABLE TRIGGER trg_lifecycle_phase_no_delete;
-  ALTER TABLE identity.account_lifecycle ENABLE TRIGGER trg_account_lifecycle_no_delete;
-  -- GUARD ON THE GUARD. Everything after this point runs the security suite and
-  -- believes its result. A cleanup that left either protection disabled would
-  -- make every later case run against a weaker database than the one being
-  -- certified, and nothing downstream would notice.
-  DO \$do\$
-  BEGIN
-    IF EXISTS (SELECT 1 FROM pg_trigger
-                WHERE tgname IN ('trg_account_lifecycle_no_delete',
-                                 'trg_lifecycle_phase_no_delete')
-                  AND NOT tgisinternal
-                  AND tgenabled = 'D') THEN
-      RAISE EXCEPTION 'ledger cleanup left a no-delete trigger disabled';
-    END IF;
-    IF EXISTS (SELECT 1 FROM identity.account_lifecycle_phase p
-                WHERE NOT EXISTS (SELECT 1 FROM identity.account_lifecycle l
-                                   WHERE l.user_id = p.user_id)) THEN
-      RAISE EXCEPTION 'ledger cleanup left phase rows with no ledger row';
-    END IF;
-  END
-  \$do\$;
-"
+# WHAT USED TO BE HERE. A selective cleanup: de-duplicate the ledger by ctid,
+# drop rows whose account was removed, then drop the phase rows those deletes
+# orphaned. It existed because the uniqueness case drops
+# `account_lifecycle_pkey CASCADE`, the injected run then writes duplicate
+# user_ids, and the restore cannot rebuild a PRIMARY KEY over them.
+#
+# `SUITE_STATE_RESET` now empties both tables outright, which subsumes all
+# three deletes: no rows means no duplicates, so the rebuild below is
+# unconditionally safe rather than safe because three predicates were right.
+# Kept as a name because the two PD-9 restores read better for it, and
+# because what those restores need is exactly "the ledger is empty first".
+LEDGER_CLEANUP="${SUITE_STATE_RESET}"
 
 # ---- PD-9, Entry 11B3 -------------------------------------------------------
 # The deletion ledger must outlive the account it records. Each case restores
