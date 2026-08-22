@@ -175,6 +175,26 @@ async def test_the_digest_depends_on_the_secret():
     assert auth_subject_scope(address) == first
 
 
+#: Everything a production `Settings` needs BESIDES the secret under test.
+#:
+#: The two guards below each end with a control — "a real secret is accepted" —
+#: whose whole job is to prove the guard is not passing because every
+#: production Settings raises. That control breaks whenever production gains a
+#: new requirement, and it did: B2 made production refuse the in-memory object
+#: store, so a Settings carrying only good secrets stopped constructing and both
+#: guards failed on their own control line rather than on what they test.
+#:
+#: Keeping the rest of the production baseline here means the next requirement
+#: is added once, not hunted down in two assertions that look unrelated to it.
+PRODUCTION_BASELINE = {
+    "environment": "production",
+    "storage_provider": "s3",
+    "s3_region": "ca-central-1",
+    "s3_bucket_documents": "onyx-prod-documents",
+    "s3_bucket_legislation": "onyx-prod-legislation",
+}
+
+
 @pytest.mark.asyncio
 async def test_the_production_secret_default_is_refused_at_startup():
     """The dev default must not be able to reach production.
@@ -194,8 +214,9 @@ async def test_the_production_secret_default_is_refused_at_startup():
 
     # A real secret is accepted, so the test is not passing because every
     # production Settings raises. Both production-guarded secrets must be real
-    # now — jwt_secret is guarded too (see test_jwt_secret_production_guard).
-    Settings(environment="production",
+    # now — jwt_secret is guarded too (see test_jwt_secret_production_guard) —
+    # and the rest of the production baseline has to be satisfied too.
+    Settings(**PRODUCTION_BASELINE,
              jwt_secret="j" * 48,
              admission_identity_secret="x" * 48)
 
@@ -225,7 +246,7 @@ async def test_jwt_secret_production_guard():
                  admission_identity_secret="x" * 48)
 
     # Non-vacuous: a real jwt_secret is accepted in production.
-    Settings(environment="production",
+    Settings(**PRODUCTION_BASELINE,
              jwt_secret="j" * 48,
              admission_identity_secret="x" * 48)
 
