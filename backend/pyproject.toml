@@ -24,6 +24,7 @@ dependencies = [
     "httpx>=0.27",
     "pgvector>=0.3",
     "defusedxml>=0.7",              # XXE-safe XML parsing for government imports
+    "boto3>=1.34",                  # S3 object storage; botocore.stub drives its tests
 ]
 
 [project.optional-dependencies]
@@ -60,7 +61,8 @@ lock_tool_pip_tools = "7.6.0"
 
 # Overrides permitted to relax the strict mypy configuration. Anything else is a
 # policy violation and the test fails. `ignore_errors` is never permitted.
-permitted_mypy_overrides = ["celery", "celery.*", "workers.tasks.*"]
+permitted_mypy_overrides = ["celery", "celery.*", "workers.tasks.*",
+                            "boto3", "botocore", "botocore.*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -117,6 +119,17 @@ extra_checks = true
 # task bodies themselves are fully annotated and checked.
 [[tool.mypy.overrides]]
 module = ["celery", "celery.*"]
+ignore_missing_imports = true
+
+# boto3 and botocore ship no py.typed marker and no stub package (the
+# `boto3-stubs` family is a separate, very large third-party project). Narrowly
+# scoped to the import site: `S3ObjectStorage` takes the client as `Any` and is
+# itself fully annotated, and every value crossing back into the application is
+# converted at the boundary — `delete` returns a `DeleteOutcome`, `get` returns
+# `bytes`, `presign_put` returns an `UploadAuthorization`. Nothing untyped
+# escapes the adapter.
+[[tool.mypy.overrides]]
+module = ["boto3", "botocore", "botocore.*"]
 ignore_missing_imports = true
 
 # Celery's `@celery_app.task` is an untyped decorator, so mypy would report

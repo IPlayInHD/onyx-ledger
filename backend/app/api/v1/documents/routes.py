@@ -102,13 +102,19 @@ async def create_upload(
     async with admission_guard(
         OperationClass.DOCUMENT_UPLOAD, scope_id=user_scope(user_id)
     ):
-        doc, presigned = await DocumentService(session).create_upload(
+        doc, authorization = await DocumentService(session).create_upload(
             user_id, body.document_type_code, body.filename,
             body.mime_type, body.tax_year, declared_bytes=body.byte_size,
         )
+        # `upload_fields` carries the provider's signed policy — for S3 that is
+        # what enforces the size ceiling, so a client that posts the URL without
+        # the fields is refused by the bucket rather than quietly unbounded.
+        # Neither half is authorization TO this API: ownership is the row, and
+        # it was checked before this permit was minted.
         return {
             "document_id": str(doc.id), "status": doc.status,
-            "upload_url": presigned,
+            "upload_url": authorization.url,
+            "upload_fields": authorization.fields,
         }
 
 

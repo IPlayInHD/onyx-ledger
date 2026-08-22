@@ -69,6 +69,136 @@ def test_a_generated_key_carries_no_part_of_the_filename():
         assert token.lower() not in key.lower()
 
 
+#: Filenames chosen to break a key builder that concatenates. Traversal in both
+#: slash directions, a control character, an overlong name, and a Unicode
+#: right-to-left override — the classic way to make a display name lie about the
+#: extension it ends with.
+HOSTILE_FILENAMES = [
+    "../../../../etc/passwd",
+    "..\\..\\windows\\system32\\config\\sam",
+    "a/b/c/nested.pdf",
+    "trailing/",
+    "/absolute.pdf",
+    "nul\x00byte.pdf",
+    "carriage\rreturn.pdf",
+    "new\nline.pdf",
+    "\u202egnp.exe.pdf",
+    "\u0000\u0001\u0002.pdf",
+    "sp ace.pdf",
+    "%2e%2e%2fescaped.pdf",
+    "x" * 400 + ".pdf",
+    ".",
+    "..",
+]
+
+
+@pytest.mark.parametrize("filename", HOSTILE_FILENAMES)
+def test_no_filename_can_reach_the_key_builder(filename):
+    """The unit-level reason traversal is not a risk here: the builder takes
+    two UUIDs and there is no parameter a filename could arrive through.
+
+    This is stronger than sanitising. A sanitiser has to be right about every
+    encoding; a signature with nowhere to put the string has to be right once.
+    """
+    user_id, document_id = uuid.uuid4(), uuid.uuid4()
+    key = _opaque_object_key(user_id, document_id)
+    assert key == f"{user_id}/{OBJECT_KEY_VERSION}/{document_id}"
+    assert filename not in key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename", HOSTILE_FILENAMES)
+async def test_a_hostile_filename_cannot_shape_the_stored_key(client, filename):
+    """End to end: whatever the client sends, the stored key is three internal
+    identifiers and the object stays inside the caller's own prefix.
+
+    A key that escaped its prefix would be the real damage — `{user_id}/` is
+    what makes an account-level purge a single prefix operation, so an object
+    written outside it would survive the account that owns it.
+    """
+    token, user_id = await _register(client)
+    created = await client.post(
+        "/api/v1/documents",
+        json={"document_type_code": "T4", "filename": filename},
+        headers=_headers(token),
+    )
+    if created.status_code == 422:
+        # Refused outright is also a correct answer — but see
+        # `test_the_hostile_filename_set_is_not_all_rejected`, which stops this
+        # branch from quietly turning the whole parametrization into a no-op.
+        return
+    assert created.status_code == 201, created.text
+
+    document_id = created.json()["document_id"]
+    row = _stored_key(document_id)
+    assert row == f"{user_id}/{OBJECT_KEY_VERSION}/{document_id}"
+    assert ".." not in row and "\\" not in row
+    assert row.startswith(f"{user_id}/"), "the object escaped its owner's prefix"
+    assert row.count("/") == 2, f"the key gained a path segment: {row!r}"
+
+
+@pytest.mark.asyncio
+async def test_the_hostile_filename_set_is_not_all_rejected(client):
+    """Guards the parametrization above.
+
+    That test returns early on a 422, which is correct — refusing the input is
+    a fine answer. But if the route began refusing EVERY name in the set, every
+    case would take the early return and the key assertions would stop running
+    while the suite stayed green. So at least one hostile name must actually be
+    accepted and reach the assertion that the key is unaffected.
+    """
+    token, user_id = await _register(client)
+    accepted = []
+    for filename in HOSTILE_FILENAMES:
+        created = await client.post(
+            "/api/v1/documents",
+            json={"document_type_code": "T4", "filename": filename},
+            headers=_headers(token),
+        )
+        if created.status_code == 201:
+            accepted.append(filename)
+
+    assert accepted, (
+        "every hostile filename was refused, so the key assertions above never "
+        "ran; either loosen the set or drop the early return"
+    )
+    for filename in accepted:
+        assert filename not in _stored_key_for_user(user_id), filename
+
+
+def _stored_key_for_user(user_id) -> str:
+    """Every key this account owns, concatenated — cheap containment check."""
+    from tests.security.test_pd1_tenant_isolation import owner_cursor
+
+    with owner_cursor() as cur:
+        cur.execute("SELECT string_agg(object_key, '|') FROM docs.document "
+                    "WHERE user_id = %s", (str(user_id),))
+        return cur.fetchone()[0] or ""
+
+
+def _stored_key(document_id: str) -> str:
+    """The key as PERSISTED.
+
+    Read from the database rather than from a response, because the API
+    deliberately does not hand the object key back — see
+    `test_the_api_does_not_hand_the_object_key_back`.
+
+    Through `owner_cursor`, the same way every other assertion in this file
+    reads a document row. An earlier version of this helper opened a plain
+    `unit_of_work()`, which sets no tenant GUC — so RLS correctly hid the row
+    and the helper returned `None` for every filename the route accepted. The
+    test failed while the product was right, which is the wrong way round.
+    """
+    from tests.security.test_pd1_tenant_isolation import owner_cursor
+
+    with owner_cursor() as cur:
+        cur.execute("SELECT object_key FROM docs.document WHERE id = %s",
+                    (str(document_id),))
+        row = cur.fetchone()
+    assert row is not None, f"no document row for {document_id}"
+    return row[0]
+
+
 @pytest.mark.asyncio
 async def test_uploading_a_revealing_filename_produces_an_opaque_key(client):
     """The production path. The route still ACCEPTS a filename — clients send

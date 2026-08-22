@@ -914,6 +914,20 @@ class DocumentPurgeService:
                 # Entry 11A proved carries values a privacy store must not keep.
                 failure = f"STORAGE_{result.name}"
                 DELETION_PHASE[f"{phase.value}:storage_{result.name.lower()}"] += 1
+                # The phase row already records the failure code durably; this
+                # is the operational half — an erasure that needs another run is
+                # the one privacy event nobody should have to query for.
+                #
+                # The document id identifies WHICH object is stuck, which an
+                # operator needs. No bucket, no key, no subject: a key is
+                # `{user_id}/v2/{document_id}`, so logging it would put an
+                # account identifier in the log line.
+                log.warning(
+                    "privacy_erasure_retry_required",
+                    phase=phase.value,
+                    document_id=str(document_id),
+                    outcome=result.name,
+                )
                 continue
             await self.s.execute(
                 text("SELECT identity.finalize_document_purge(:u, :d, :t, :w)"),

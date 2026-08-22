@@ -4,8 +4,24 @@ keeps infrastructure swappable and the domain framework-free.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
+
+
+@dataclass(frozen=True, slots=True)
+class UploadAuthorization:
+    """One bounded, single-object upload permit: where to send the bytes, and
+    whatever the provider requires alongside them.
+
+    `fields` is not decoration. S3 can only enforce a maximum object size
+    through a POST policy's `content-length-range` condition, and that policy
+    travels in the form fields — so a permit reduced to a bare URL is a permit
+    with no ceiling, whatever the docstring above `max_bytes` claims.
+    """
+
+    url: str
+    fields: dict[str, str] = field(default_factory=dict)
 
 
 class DeleteOutcome(StrEnum):
@@ -25,6 +41,21 @@ class DeleteOutcome(StrEnum):
 
 
 class ObjectStorage(Protocol):
+    """Four operations, because four is what the callers use.
+
+    `presign_put` authorizes an upload, `put`/`get` move bytes for the
+    knowledge-ingestion path, and `delete` is the erasure primitive the privacy
+    lifecycle is built on. There is deliberately no `exists`, no `metadata` and
+    no `list`: an operation nobody calls is surface that still has to be
+    implemented correctly by every adapter, and gets it wrong unobserved.
+
+    `presign_get` USED TO BE HERE and had no callers anywhere in `app/` or
+    `workers/` — there is no download path. A download-URL minter with no call
+    site is not free: it is a way to hand out object access that no
+    authorization check sits in front of, waiting for someone to reach for it.
+    Removed rather than implemented a second time in the S3 adapter.
+    """
+
     # `max_bytes` is on the PORT, not just the adapter: bytes go straight to the
     # bucket without passing through the API, so the only place a size limit can
     # actually be enforced is the store. An implementation that ignored it would
@@ -32,8 +63,7 @@ class ObjectStorage(Protocol):
     # respect rather than one anything checks.
     def presign_put(
         self, bucket: str, key: str, content_type: str, *, max_bytes: int
-    ) -> str: ...
-    def presign_get(self, bucket: str, key: str) -> str: ...
+    ) -> UploadAuthorization: ...
     def put(self, bucket: str, key: str, data: bytes) -> None: ...
     def get(self, bucket: str, key: str) -> bytes: ...
 

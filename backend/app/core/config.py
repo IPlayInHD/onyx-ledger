@@ -131,9 +131,41 @@ class Settings(BaseSettings):
     admission_identity_secret: str = Field(default="dev-insecure-change-me")
 
     # --- object storage ---
+    #: WHICH ADAPTER SERVES DOCUMENT BYTES. `local` is the in-memory store used
+    #: by development and the test suite; `s3` is the production adapter.
+    #:
+    #: This field exists because the choice used to not be a choice:
+    #: `get_object_storage()` returned `LocalObjectStorage` unconditionally, so
+    #: a production deployment would have served customer documents out of one
+    #: process's heap — losing them on restart, never sharing them between
+    #: tasks, and, worst of the three, letting the privacy deletion phase report
+    #: erasure it had not performed anywhere durable.
+    #:
+    #: `_production_storage_is_real` below refuses `local` in production, and
+    #: the factory refuses it again. Two layers on purpose: a settings guard
+    #: protects a process that reads settings, and the factory protects one that
+    #: constructs a store some other way.
+    storage_provider: str = "local"
     s3_endpoint_url: str | None = None
+    #: Required in production. boto3 can infer a region from the environment,
+    #: and an inferred region silently pointing at the wrong bucket is exactly
+    #: the class of accident this file exists to make loud.
+    s3_region: str | None = None
+    #: Optional SSE algorithm (e.g. "aws:kms") applied to every PUT. Left unset
+    #: the bucket's own default encryption applies, which is the normal
+    #: production arrangement; setting it here is belt and braces for a bucket
+    #: whose default nobody can vouch for.
+    s3_sse_algorithm: str | None = None
+    #: KMS key id, only meaningful with `s3_sse_algorithm = "aws:kms"`.
+    s3_sse_kms_key_id: str | None = None
     s3_bucket_documents: str = "onyx-documents"
     s3_bucket_legislation: str = "onyx-legislation"   # TKMS raw imports + extracted text
+
+    #: NO STATIC CREDENTIALS LIVE HERE, deliberately. boto3 resolves credentials
+    #: through its own chain — task role, instance profile, web identity,
+    #: environment — and adding `aws_access_key_id` to this file would create a
+    #: place for a long-lived key to be committed to. There is no such field and
+    #: there should not be one.
 
     # --- ai ---
     llm_provider: str = "anthropic"
@@ -228,6 +260,59 @@ class Settings(BaseSettings):
                         f"{env_var} must be at least 32 characters; a short key "
                         "is brute-forceable"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _production_storage_is_real(self) -> Settings:
+        """Production must not serve customer documents from a process heap.
+
+        `LocalObjectStorage` keeps objects in two module-level dicts. In
+        production that would mean: bytes lost on every restart and every deploy,
+        invisible to any other task or worker, and — the reason this is a
+        privacy guard and not merely an availability one — a deletion phase that
+        pops a key out of a dict and truthfully reports `DELETED` while the
+        customer's document was never anywhere durable to begin with. An erasure
+        record that describes a store nobody wrote to is worse than no record.
+
+        So the value is checked at startup, where the failure is loud, rather
+        than trusted to a deployment checklist, where it is silent. Same
+        reasoning as `_production_secrets_are_real` above, and the same shape.
+
+        WHAT IS NOT CHECKED HERE: credentials. boto3 resolves them through its
+        own chain — task role, instance profile, web identity — and asserting
+        their presence at import time would either require static keys in
+        configuration (which is the thing to avoid) or duplicate a resolution
+        this process does not own. A missing credential surfaces as a
+        `PERMANENT_FAILURE` from the adapter, which the privacy lifecycle
+        already refuses to treat as erasure.
+        """
+        if self.environment != "production":
+            return self
+
+        if self.storage_provider != "s3":
+            raise ValueError(
+                f"ONYX_STORAGE_PROVIDER is {self.storage_provider!r} in "
+                "production; customer documents must not be served from an "
+                "in-memory store. Set it to 's3'."
+            )
+        if not self.s3_region:
+            raise ValueError(
+                "ONYX_S3_REGION must be set in production; an inferred region "
+                "can point at a bucket nobody intended"
+            )
+        for field, env_var in (
+            ("s3_bucket_documents", "ONYX_S3_BUCKET_DOCUMENTS"),
+            ("s3_bucket_legislation", "ONYX_S3_BUCKET_LEGISLATION"),
+        ):
+            # The DEFAULT is the problem, not emptiness: "onyx-documents" is a
+            # plausible bucket name, so a deployment that never set it would
+            # sail through a non-empty check and then read and write somebody
+            # else's bucket, or none.
+            if field not in self.model_fields_set:
+                raise ValueError(
+                    f"{env_var} must be set explicitly in production; the "
+                    "compiled default is a guess, not a bucket"
+                )
         return self
 
     @property

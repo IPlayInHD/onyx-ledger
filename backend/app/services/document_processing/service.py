@@ -26,7 +26,7 @@ from app.database.models import (
     IncomeSource,
     IncomeType,
 )
-from app.domain.ports import DeleteOutcome
+from app.domain.ports import DeleteOutcome, UploadAuthorization
 from app.integrations.storage import get_object_storage
 from app.services.admission.limits import MAX_DOCUMENT_BYTES
 from app.services.document_processing.ocr import FIELD_FACT, FIELD_TARGET, extract_fields
@@ -106,7 +106,7 @@ class DocumentService:
         self, user_id: uuid.UUID, doc_type_code: str, filename: str,
         mime_type: str | None = None, tax_year: int | None = None,
         declared_bytes: int | None = None,
-    ) -> tuple[Document, str]:
+    ) -> tuple[Document, UploadAuthorization]:
         """Register a document and authorize ONE bounded upload.
 
         The authorization carries the TIGHTER of the platform maximum and
@@ -153,11 +153,11 @@ class DocumentService:
         doc.object_key = _opaque_object_key(user_id, doc.id)
         self.s.add(doc)
         await self.s.flush()
-        presigned = self.storage.presign_put(
+        authorization = self.storage.presign_put(
             bucket, doc.object_key, mime_type or "application/octet-stream",
             max_bytes=min(declared_bytes or MAX_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES),
         )
-        return doc, presigned
+        return doc, authorization
 
     async def _lock_document(self, document_id: uuid.UUID) -> None:
         """Serialize the operations that can contradict each other.

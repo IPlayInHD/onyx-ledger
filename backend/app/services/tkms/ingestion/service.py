@@ -19,7 +19,8 @@ from app.core.config import get_settings
 from app.core.exceptions import Conflict, NotFound, ValidationError
 from app.database.models import ExtractedRule as ExtractedRuleRow
 from app.database.models import ImportJob, ParseResult, RawDocument
-from app.integrations.storage import LocalObjectStorage, get_object_storage
+from app.domain.ports import ObjectStorage
+from app.integrations.storage import get_object_storage
 from app.services.admission.limits import MAX_IMPORT_ROWS
 from app.services.tkms.parsers import build_default_registry
 from app.services.tkms.parsers.base import BaseParser
@@ -31,7 +32,7 @@ class ImportService:
         self,
         session: AsyncSession,
         *,
-        storage: LocalObjectStorage | None = None,
+        storage: ObjectStorage | None = None,
         registry: ParserRegistry | None = None,
     ) -> None:
         self.s = session
