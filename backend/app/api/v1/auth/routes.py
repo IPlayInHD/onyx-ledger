@@ -29,18 +29,36 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
-    body: RegisterRequest, request: Request, session: AsyncSession = Depends(db_anon)
+    body: RegisterRequest,
+    request: Request,
+    background: BackgroundTasks,
+    session: AsyncSession = Depends(db_anon),
 ) -> dict:
-    """Create an account.
+    """Create an account, and send it the link that makes it usable.
 
     Throttled on the same class as login. Registration is not a credential test,
     but it is unauthenticated, it writes two rows and computes an Argon2 hash,
     and — because it must say whether an address is already taken — an
     unthrottled version is a fast account-enumeration oracle. The throttle does
     not remove that disclosure; it bounds how quickly it can be harvested.
+
+    THE FIRST VERIFICATION LINK IS SENT HERE, and the reason is that the account
+    is unusable until somebody opens it. Leaving the first send to the resend
+    endpoint looked tidier and shipped a product whose verification screen said
+    "we sent a link" over a link nobody had sent — caught by the browser suite,
+    which waited fifteen seconds for a message that was never coming.
+
+    NOT charged against `ACCOUNT_RECOVERY`. That budget bounds how often a
+    caller can make Onyx mail somebody; here the caller is creating the mailbox
+    relationship, one message per account created, already bounded by the
+    registration throttle above. Charging both would mean an address that has
+    just registered cannot ask for a resend.
     """
     await admit_auth_attempt(source_ip=client_ip(request), subject=body.email)
     user = await AuthService(session).register(body.email, body.password)
+    service = AccountRecoveryService(session)
+    pending = await service.request_verification(user.id)
+    background.add_task(service.deliver, pending)
     return {"id": str(user.id), "email": user.email, "status": user.status}
 
 

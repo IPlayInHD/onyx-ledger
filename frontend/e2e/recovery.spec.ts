@@ -35,16 +35,12 @@ async function registerViaApi(api: APIRequestContext, email: string): Promise<vo
   expect(created.status(), 'register').toBe(201)
 }
 
+/** Redeem the link REGISTRATION ALREADY SENT.
+ *
+ *  Asking for another would be refused by the resend floor, and it is not what
+ *  a customer does either — they open the message that arrived.
+ */
 async function verifyViaApi(api: APIRequestContext, email: string): Promise<void> {
-  const loggedIn = await api.post(`${API}/api/v1/auth/login`, {
-    data: { email, password: PASSWORD },
-  })
-  expect(loggedIn.status(), 'login').toBe(200)
-  const { access_token } = (await loggedIn.json()) as { access_token: string }
-  const asked = await api.post(`${API}/api/v1/auth/verification`, {
-    headers: { authorization: `Bearer ${access_token}` },
-  })
-  expect(asked.status(), 'ask for link').toBe(202)
   const confirmed = await api.post(`${API}/api/v1/auth/verification/confirm`, {
     data: { token: tokenFrom(await waitForMessage(email, 'EMAIL_VERIFICATION')) },
   })
@@ -92,6 +88,19 @@ test.describe('email verification', () => {
     await expect(page).toHaveURL(/\/app/, { timeout: 30_000 })
     // The token is out of the address bar before anything else happens.
     expect(page.url()).not.toContain('token=')
+  })
+
+  test('registering sends the link the screen promises', async ({ request }) => {
+    /* The verification screen says "we sent a link to ...". It said that over a
+       link nobody had sent, because the first send was left to the resend
+       endpoint — caught by this suite waiting fifteen seconds for a message
+       that was never coming. Registration sends it now, and this is the
+       assertion that keeps it that way. */
+    const email = freshEmail('firstsend')
+    await registerViaApi(request, email)
+    const message = await waitForMessage(email, 'EMAIL_VERIFICATION')
+    expect(message.subject.toLowerCase()).toContain('confirm')
+    expect(tokenFrom(message).length).toBeGreaterThan(20)
   })
 
   test('a spent link says so without saying why', async ({ page, request }) => {

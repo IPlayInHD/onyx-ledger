@@ -167,14 +167,13 @@ async function seedPersona(
   // CONFIRM THE ADDRESS. Registration creates `pending_verification`, and
   // every write below is refused for an account in that state — so this is a
   // precondition of the persona, not a test of verification. It goes through
-  // the real endpoints and the real message rather than a shortcut, because a
+  // the real endpoint and the real message rather than a shortcut, because a
   // shortcut here would take the whole browser suite off the path customers
   // actually walk.
-  const asked = await postPaced(api, `${API}/api/v1/auth/verification`, {
-    data: undefined,
-    headers,
-  })
-  expect(asked.status(), 'ask for verification link').toBe(202)
+  //
+  // No resend request: REGISTRATION ALREADY SENT THE LINK. Asking for another
+  // would be refused by the resend floor, and it would spend a second slice of
+  // the auth budget this suite is already paced by.
   const confirmed = await postPaced(api, `${API}/api/v1/auth/verification/confirm`, {
     data: { token: tokenFrom(await waitForMessage(email, 'EMAIL_VERIFICATION')) },
   })
@@ -238,10 +237,22 @@ async function seedPersona(
  * Sign-in and sign-up share this because they share the budget — the new-user
  * journey was failing for exactly the reason the persona runs were, and one
  * flow tolerating pacing while its twin did not was the bug, not the design.
+ *
+ * `landsOn` is where success PUTS you, and it is a parameter because the two
+ * flows no longer agree: signing in reaches the product, while registering
+ * reaches the verification screen — a new account has not confirmed its
+ * address and Onyx will not show anybody their tax position until it has.
+ * Hard-coding `/app` made the sign-up journey report "did not reach the
+ * product" over a screen that was doing exactly the right thing.
  */
 async function submitAuthForm(
   page: Page,
-  { path, email, button }: { path: string; email: string; button: RegExp },
+  {
+    path,
+    email,
+    button,
+    landsOn = /\/app/,
+  }: { path: string; email: string; button: RegExp; landsOn?: RegExp },
 ) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await page.goto(path)
@@ -257,7 +268,7 @@ async function submitAuthForm(
     // race has already settled.
     const landed = await Promise.race([
       page
-        .waitForURL(/\/app/, { timeout: 25_000 })
+        .waitForURL(landsOn, { timeout: 25_000 })
         .then(() => true)
         .catch(() => false),
       page
@@ -272,7 +283,9 @@ async function submitAuthForm(
     const message = (await page.locator('body').innerText()).toLowerCase()
     const throttled = /pacing|too many|try again in|rate limit/.test(message)
     if (!throttled) {
-      throw new Error(`${path} did not reach the product: ${message.slice(0, 300)}`)
+      throw new Error(
+        `${path} did not reach ${landsOn}: ${message.slice(0, 300)}`,
+      )
     }
     // The pacing message states its own wait ("try again in about N seconds").
     // Honouring what the service asked for is what a real client does, and it
@@ -381,6 +394,7 @@ test.describe('new user journey', () => {
       path: '/sign-up',
       email,
       button: /create|sign up/i,
+      landsOn: /\/verify-email/,
     })
     await expect(page).toHaveURL(/\/verify-email/)
     await expect(page.getByRole('heading', { name: /confirm your email/i })).toBeVisible()

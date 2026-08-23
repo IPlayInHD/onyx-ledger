@@ -65,7 +65,13 @@ def _set_status(user_id: uuid.UUID, status: str) -> None:
 
 
 async def _register_pending(client) -> tuple[str, str, uuid.UUID]:
-    """A registered, UNVERIFIED account: email, access token, id."""
+    """A registered, UNVERIFIED account: email, access token, id.
+
+    A VERIFICATION LINK IS ALREADY WAITING when this returns — registration
+    sends the first one, because an account is unusable until somebody opens
+    it. Tests read that message rather than asking for another, which is both
+    what a customer does and what the resend floor allows.
+    """
     email = f"rec_{uuid.uuid4().hex[:12]}@example.com"
     created = await client.post(
         "/api/v1/auth/register", json={"email": email, "password": PASSWORD})
@@ -77,7 +83,8 @@ async def _register_pending(client) -> tuple[str, str, uuid.UUID]:
     return email, signed_in.json()["access_token"], uuid.UUID(created.json()["id"])
 
 
-async def _ask_for_verification(client, token: str) -> None:
+async def _resend_verification(client, token: str) -> None:
+    """Ask for ANOTHER link. Only valid past the resend floor."""
     sent = await client.post(
         "/api/v1/auth/verification", headers={"Authorization": f"Bearer {token}"})
     assert sent.status_code == 202, sent.text
@@ -103,9 +110,45 @@ async def _reset_token_for(client, email: str) -> str:
 # §11 — verification
 # --------------------------------------------------------------------------- #
 
+async def test_registering_sends_the_first_link_without_being_asked(client):
+    """§9. An account is unusable until somebody opens the link, so the link
+    goes out with the account.
+
+    Leaving the first send to the resend endpoint looked tidier and shipped a
+    verification screen that said "we sent a link" over a link nobody had sent.
+    The browser suite caught it by waiting fifteen seconds for a message that
+    was never coming; this is the cheap assertion that keeps it fixed.
+    """
+    email = f"firstsend_{uuid.uuid4().hex[:10]}@example.com"
+    created = await client.post(
+        "/api/v1/auth/register", json={"email": email, "password": PASSWORD})
+    assert created.status_code == 201, created.text
+
+    messages = captured_emails(to=email, kind=TransactionalEmail.EMAIL_VERIFICATION)
+    assert len(messages) == 1, "registration sent no verification link"
+    assert "?token=" in messages[0].message.text
+
+
+async def test_a_failed_registration_sends_nothing(client):
+    """The other half. A duplicate registration is refused, and refusing it
+    must not mail the ACCOUNT THAT ALREADY EXISTS — which would let anybody
+    with an address send its owner mail by trying to register it."""
+    email = f"dupsend_{uuid.uuid4().hex[:10]}@example.com"
+    assert (await client.post(
+        "/api/v1/auth/register", json={"email": email, "password": PASSWORD})
+    ).status_code == 201
+    before = len(captured_emails(to=email))
+
+    refused = await client.post(
+        "/api/v1/auth/register", json={"email": email, "password": PASSWORD})
+    assert refused.status_code == 409, refused.text
+    assert len(captured_emails(to=email)) == before, (
+        "a refused registration mailed the existing account"
+    )
+
+
 async def test_a_valid_link_verifies_the_account(client):
     email, token, _uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
 
     done = await client.post(
         "/api/v1/auth/verification/confirm",
@@ -122,7 +165,6 @@ async def test_a_valid_link_verifies_the_account(client):
 async def test_a_verification_link_works_exactly_once(client):
     """§30-A. Replay is the whole reason `used_at` exists."""
     email, token, _uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
     raw = _link_token(email, TransactionalEmail.EMAIL_VERIFICATION)
 
     first = await client.post("/api/v1/auth/verification/confirm", json={"token": raw})
@@ -135,7 +177,6 @@ async def test_a_verification_link_works_exactly_once(client):
 async def test_an_expired_verification_link_is_refused(client):
     """§30-B."""
     email, token, uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
     raw = _link_token(email, TransactionalEmail.EMAIL_VERIFICATION)
 
     _age_tokens("email_verification_token", uid, minutes=60 * 25)
@@ -157,7 +198,6 @@ async def test_an_invalid_verification_token_is_refused(client, presented):
 async def test_a_modified_verification_token_is_refused(client):
     """One flipped character. The digest is over the whole value."""
     email, token, _uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
     raw = _link_token(email, TransactionalEmail.EMAIL_VERIFICATION)
     tampered = ("a" if raw[0] != "a" else "b") + raw[1:]
 
@@ -170,12 +210,11 @@ async def test_resending_supersedes_the_previous_link(client):
     """§26. Three clicks on "resend" must not leave three live credentials in a
     mailbox, each working until it expires on its own."""
     email, token, uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
     first = _link_token(email, TransactionalEmail.EMAIL_VERIFICATION)
 
     # Past the resend floor, so the second request actually mints.
     _age_tokens("email_verification_token", uid, minutes=10)
-    await _ask_for_verification(client, token)
+    await _resend_verification(client, token)
     second = _link_token(email, TransactionalEmail.EMAIL_VERIFICATION)
     assert second != first
 
@@ -193,15 +232,19 @@ async def test_an_already_verified_account_is_answered_the_same_and_mints_nothin
 
     again = await client.post(
         "/api/v1/auth/verification", headers={"Authorization": f"Bearer {token}"})
-    assert again.status_code == 202, again.text
+    assert again.status_code == 202, again.text  # not throttled: nothing to send
     assert len(captured_emails(
         to=email, kind=TransactionalEmail.EMAIL_VERIFICATION)) == before
 
 
 async def test_a_second_resend_inside_the_floor_is_refused(client):
-    """§10. Admission bounds the minute; this bounds the hour."""
+    """§10. Admission bounds the minute; this bounds the hour.
+
+    Registration has just sent a link, so asking again immediately is exactly
+    the case the floor exists for — and it is the one a customer creates by
+    pressing "send it again" the moment the page appears.
+    """
     _email, token, _uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
 
     too_soon = await client.post(
         "/api/v1/auth/verification", headers={"Authorization": f"Bearer {token}"})
@@ -218,7 +261,6 @@ async def test_a_verification_link_cannot_revive_a_suspended_account(client, sta
     """§30-E. The link is minted while the account is fine and redeemed after it
     is not — which is exactly the sequence an operator's suspension creates."""
     email, token, uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
     raw = _link_token(email, TransactionalEmail.EMAIL_VERIFICATION)
 
     _set_status(uid, status)
@@ -436,7 +478,6 @@ async def test_a_verification_token_is_not_a_reset_token(client):
     """Single purpose. The two tables are structurally identical, so nothing but
     the lookup's table keeps a verification link from setting a password."""
     email, token, _uid = await _register_pending(client)
-    await _ask_for_verification(client, token)
     raw = _link_token(email, TransactionalEmail.EMAIL_VERIFICATION)
 
     refused = await client.post(

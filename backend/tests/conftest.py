@@ -107,36 +107,47 @@ def token_from_link(message) -> str:
     return found.group(1)
 
 
-async def verify_account(client, email: str, token: str) -> None:
-    """Take a freshly registered account from pending_verification to active.
+def verification_messages(email: str):
+    """Verification messages for one address, oldest first.
 
-    Drives the same two endpoints a customer does: ask for the link, read it
-    out of the capture provider's outbox, redeem it.
+    CASE-INSENSITIVE on the recipient, because the outbox holds the address the
+    ACCOUNT stores and that is not always the string the caller typed:
+    pydantic's `EmailStr` lowercases the domain. An exact comparison reported
+    "no message captured" for an address that had one, which is a confusing way
+    to learn about a normalization the product documents.
 
-    The outbox is scoped BY RECIPIENT, never by position. `captured_emails()[-1]`
-    would make every test depend on whatever ran before it, which is the
-    isolation failure this repository has hit repeatedly; addresses here are
-    per-test and unique, so filtering by one is exact.
+    Scoped BY RECIPIENT, never by position. `captured_emails()[-1]` would make
+    every test depend on whatever ran beside it, which is the isolation failure
+    this repository has hit repeatedly; addresses here are unique per test.
     """
     from app.domain.ports import TransactionalEmail
     from app.integrations.email import captured_emails
 
-    sent = await client.post(
-        "/api/v1/auth/verification", headers={"Authorization": f"Bearer {token}"}
-    )
-    assert sent.status_code == 202, sent.text
-
-    # CASE-INSENSITIVE on the recipient, because the outbox holds the address
-    # the ACCOUNT stores and that is not always the string the caller typed:
-    # pydantic's `EmailStr` lowercases the domain. A helper that compared
-    # exactly reported "no message captured" for an address that had one, which
-    # is a confusing way to learn about a normalization the product documents.
     wanted = email.casefold()
-    messages = [
+    return [
         m for m in captured_emails(kind=TransactionalEmail.EMAIL_VERIFICATION)
         if m.to.casefold() == wanted
     ]
-    assert messages, f"no verification message captured for {email}"
+
+
+async def verify_account(client, email: str, token: str) -> None:
+    """Take a freshly registered account from pending_verification to active.
+
+    USES THE LINK REGISTRATION ALREADY SENT. Asking for another would be
+    refused by the resend floor — correctly — and it is also not what a
+    customer does: they open the message that arrived.
+
+    `token` is only needed for the fallback, for a caller whose account was
+    made some other way and has no message waiting.
+    """
+    messages = verification_messages(email)
+    if not messages:
+        sent = await client.post(
+            "/api/v1/auth/verification", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert sent.status_code == 202, sent.text
+        messages = verification_messages(email)
+    assert messages, f"no verification message for {email}"
 
     confirmed = await client.post(
         "/api/v1/auth/verification/confirm",
