@@ -22,6 +22,7 @@ const SignUp = lazy(() => import('@/pages/SignUp'))
 const VerifyEmail = lazy(() => import('@/pages/VerifyEmail'))
 const ForgotPassword = lazy(() => import('@/pages/ForgotPassword'))
 const ResetPassword = lazy(() => import('@/pages/ResetPassword'))
+const LegalAcceptance = lazy(() => import('@/pages/LegalAcceptance'))
 const Onboarding = lazy(() => import('@/pages/Onboarding'))
 const Overview = lazy(() => import('@/pages/Overview'))
 const Position = lazy(() => import('@/pages/Position'))
@@ -61,7 +62,41 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (status === 'unverified') {
     return <Navigate to="/verify-email" replace state={{ from: location.pathname }} />
   }
+  // Signed in and verified, with agreement to the current documents
+  // outstanding. Its own destination for the same reason verification has one:
+  // the customer clears it themselves, and a generic refusal would send them
+  // to support over a checkbox.
+  if (status === 'legal-outstanding') {
+    return <Navigate to="/legal/accept" replace state={{ from: location.pathname }} />
+  }
   return <AppShell>{children}</AppShell>
+}
+
+/**
+ * The acceptance screen needs a SESSION but must not need legal standing —
+ * gating it on the state it exists to clear would make that state permanent.
+ * An anonymous visitor still goes to sign-in; everyone signed in gets through,
+ * including a customer who has already accepted everything and navigated here
+ * on purpose (the screen then reports that and moves them along).
+ */
+function RequireLegalSession({ children }: { children: ReactNode }) {
+  const { status } = useAuth()
+  const location = useLocation()
+
+  if (status === 'restoring') {
+    return (
+      <div className="shell-container py-9">
+        <LoadingBlock label="Restoring your session" />
+      </div>
+    )
+  }
+  if (status === 'anonymous') {
+    return <Navigate to="/sign-in" replace state={{ from: location.pathname }} />
+  }
+  if (status === 'unverified') {
+    return <Navigate to="/verify-email" replace />
+  }
+  return <>{children}</>
 }
 
 function Fallback() {
@@ -90,6 +125,9 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/trust" element={<TrustCentre />} />
         <Route path="/legal" element={<LegalIndex />} />
+        {/* BEFORE the `:documentId` route, or `/legal/accept` would be read
+            as a document called "accept" and render a 404. */}
+        <Route path="/legal/accept" element={<RequireLegalSession><LegalAcceptance /></RequireLegalSession>} />
         <Route path="/legal/:documentId" element={<LegalDocument />} />
 
         {/* product */}

@@ -92,6 +92,31 @@ export const recoveryApi = {
     }),
 }
 
+/* ----------------------------------------------------------------- legal -- */
+
+export type LegalState = S['LegalState']
+export type LegalDocumentState = S['LegalDocumentState']
+
+export const legalApi = {
+  /** Every document and where this account stands with each.
+   *
+   *  Reachable while the legal gate is blocking, by design: it is how the
+   *  screen learns WHICH document changed. */
+  state: () => request<LegalState>('/legal/state'),
+
+  /** Record acceptance of one document at one version.
+   *
+   *  The version is the one the server said was current — never a constant in
+   *  this bundle. A frontend that shipped its own version number is exactly
+   *  the failure the backend registry exists to prevent: a durable record
+   *  saying somebody accepted 2.0 while their browser rendered 1.9. */
+  accept: (documentType: string, documentVersion: string) =>
+    request<LegalDocumentState>('/legal/acceptances', {
+      method: 'POST',
+      body: { document_type: documentType, document_version: documentVersion },
+    }),
+}
+
 /* --------------------------------------------------------------- profile -- */
 
 export type TaxProfile = S['TaxProfileOut']

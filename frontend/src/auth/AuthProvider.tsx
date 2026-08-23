@@ -40,7 +40,12 @@ export interface SessionUser {
  * Not `authenticated`: the product surface is refused by the backend, so
  * rendering it would fill the screen with failed requests.
  */
-type Status = 'restoring' | 'authenticated' | 'unverified' | 'anonymous'
+type Status =
+  | 'restoring'
+  | 'authenticated'
+  | 'unverified'
+  | 'legal-outstanding'
+  | 'anonymous'
 
 interface AuthState {
   status: Status
@@ -58,6 +63,13 @@ interface AuthState {
    *  opens without making the customer sign in again. */
   recheck: () => Promise<void>
 }
+
+/* `legal-outstanding` is a FIFTH state and, like `unverified`, it is signed in.
+   The credentials were accepted and the account is verified; what is missing is
+   agreement to the current documents, which the customer clears themselves on a
+   screen the gate deliberately leaves reachable. Folding it into `anonymous`
+   would send them to a sign-in form that succeeds and changes nothing; folding
+   it into `authenticated` would render the product over an API answering 403. */
 
 /* Restoring a session may wait out a real throttle. The bound is generous
    because the alternative is showing the sign-in screen to someone who is
@@ -105,6 +117,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
         if (knownEmail) setPendingEmail(knownEmail)
         setStatus('unverified')
+        return
+      }
+      if (error instanceof ApiError && error.isLegalAcceptanceRequired) {
+        // Tokens are KEPT. They are valid, the account is verified, and the
+        // acceptance endpoints need them — this is a signed-in state with one
+        // thing outstanding, not a failed session.
+        setUser(null)
+        setStatus('legal-outstanding')
         return
       }
       throw error

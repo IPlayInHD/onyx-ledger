@@ -1147,6 +1147,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/legal/acceptances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Document
+         * @description Record that this account accepts one document at one version.
+         *
+         *     THE ACCOUNT IS THE BEARER TOKEN'S and the time is the database's. Neither
+         *     appears in the request schema, so there is no field to spoof and no check
+         *     to forget — accepting on somebody else's behalf is not refused, it is
+         *     unrepresentable.
+         *
+         *     200 rather than 201, because this is idempotent and the second call creates
+         *     nothing. Returning 201 twice would claim two records exist where one does.
+         *
+         *     The response is the resulting STATE, read back after the write. A client
+         *     that receives it knows the row is durable, which is the one thing this
+         *     subsystem must never lie about: nothing here reports an acceptance that was
+         *     not written, because the answer is derived from the write rather than from
+         *     the request that asked for it.
+         */
+        post: operations["accept_document_api_v1_legal_acceptances_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/legal/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Legal State
+         * @description Every document, and where this account stands with each.
+         *
+         *     THE WHOLE SET, not just the outstanding ones. A settings screen showing
+         *     "you accepted the Terms on 3 March" needs the accepted ones too, and a
+         *     client that had to ask twice would render half a page while it waited.
+         *
+         *     `application_access_blocked` is computed here rather than left to the
+         *     client. A client deriving it would be a second implementation of the
+         *     gate's rule, and the two would eventually disagree — with the client's
+         *     answer being the one the customer sees.
+         */
+        get: operations["legal_state_api_v1_legal_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recommendations": {
         parameters: {
             query?: never;
@@ -2554,6 +2617,60 @@ export interface components {
             journal_id: string;
             /** Thread Count */
             thread_count: number;
+        };
+        /**
+         * LegalAcceptanceRequest
+         * @description Accept one document at one version.
+         *
+         *     Two fields, and both are things the client legitimately knows: which
+         *     document it is showing, and which version it showed. The server decides
+         *     everything that follows from them.
+         */
+        LegalAcceptanceRequest: {
+            /** Document Type */
+            document_type: string;
+            /** Document Version */
+            document_version: string;
+        };
+        /**
+         * LegalDocumentState
+         * @description One document, and where the caller stands with it.
+         */
+        LegalDocumentState: {
+            /** Acceptance Outstanding */
+            acceptance_outstanding: boolean;
+            /** Accepted At */
+            accepted_at?: string | null;
+            /** Accepted Version */
+            accepted_version?: string | null;
+            /** Current Version */
+            current_version: string;
+            /** Document Type */
+            document_type: string;
+            /**
+             * Effective Date
+             * Format: date
+             */
+            effective_date: string;
+            /** Requires Acceptance */
+            requires_acceptance: boolean;
+            /** Review Status */
+            review_status: string;
+        };
+        /**
+         * LegalState
+         * @description Every document, and whether the application is currently reachable.
+         *
+         *     `application_access_blocked` is stated rather than left for the client to
+         *     derive by scanning the list. A client that computed it itself would be a
+         *     second implementation of the gate's rule, and the two would eventually
+         *     disagree — with the client's version being the one the customer sees.
+         */
+        LegalState: {
+            /** Application Access Blocked */
+            application_access_blocked: boolean;
+            /** Documents */
+            documents: components["schemas"]["LegalDocumentState"][];
         };
         /**
          * LeverInput
@@ -5511,6 +5628,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_document_api_v1_legal_acceptances_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LegalAcceptanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalDocumentState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    legal_state_api_v1_legal_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegalState"];
                 };
             };
         };

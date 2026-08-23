@@ -2159,6 +2159,115 @@
         "title": "JournalLinkOut",
         "type": "object"
       },
+      "LegalAcceptanceRequest": {
+        "additionalProperties": false,
+        "description": "Accept one document at one version.\n\nTwo fields, and both are things the client legitimately knows: which\ndocument it is showing, and which version it showed. The server decides\neverything that follows from them.",
+        "properties": {
+          "document_type": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Document Type",
+            "type": "string"
+          },
+          "document_version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Document Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_type",
+          "document_version"
+        ],
+        "title": "LegalAcceptanceRequest",
+        "type": "object"
+      },
+      "LegalDocumentState": {
+        "description": "One document, and where the caller stands with it.",
+        "properties": {
+          "acceptance_outstanding": {
+            "title": "Acceptance Outstanding",
+            "type": "boolean"
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "accepted_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Version"
+          },
+          "current_version": {
+            "title": "Current Version",
+            "type": "string"
+          },
+          "document_type": {
+            "title": "Document Type",
+            "type": "string"
+          },
+          "effective_date": {
+            "format": "date",
+            "title": "Effective Date",
+            "type": "string"
+          },
+          "requires_acceptance": {
+            "title": "Requires Acceptance",
+            "type": "boolean"
+          },
+          "review_status": {
+            "title": "Review Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_type",
+          "current_version",
+          "effective_date",
+          "requires_acceptance",
+          "review_status",
+          "acceptance_outstanding"
+        ],
+        "title": "LegalDocumentState",
+        "type": "object"
+      },
+      "LegalState": {
+        "description": "Every document, and whether the application is currently reachable.\n\n`application_access_blocked` is stated rather than left for the client to\nderive by scanning the list. A client that computed it itself would be a\nsecond implementation of the gate's rule, and the two would eventually\ndisagree \u2014 with the client's version being the one the customer sees.",
+        "properties": {
+          "application_access_blocked": {
+            "title": "Application Access Blocked",
+            "type": "boolean"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/LegalDocumentState"
+            },
+            "title": "Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents",
+          "application_access_blocked"
+        ],
+        "title": "LegalState",
+        "type": "object"
+      },
       "LeverInput-Input": {
         "additionalProperties": false,
         "description": "A lever named by CODE with declared parameters.\n\n`model_config` forbids extra fields, so a request carrying `field`, `patch`,\n`formula`, or any other mutation shape is rejected by the schema before it\nreaches the domain parser \u2014 and, just as importantly, such a field never\nappears in the OpenAPI document as something a caller might supply.",
@@ -7782,6 +7891,80 @@
         "summary": "Replay-verify a sealed result",
         "tags": [
           "ioe"
+        ]
+      }
+    },
+    "/api/v1/legal/acceptances": {
+      "post": {
+        "description": "Record that this account accepts one document at one version.\n\nTHE ACCOUNT IS THE BEARER TOKEN'S and the time is the database's. Neither\nappears in the request schema, so there is no field to spoof and no check\nto forget \u2014 accepting on somebody else's behalf is not refused, it is\nunrepresentable.\n\n200 rather than 201, because this is idempotent and the second call creates\nnothing. Returning 201 twice would claim two records exist where one does.\n\nThe response is the resulting STATE, read back after the write. A client\nthat receives it knows the row is durable, which is the one thing this\nsubsystem must never lie about: nothing here reports an acceptance that was\nnot written, because the answer is derived from the write rather than from\nthe request that asked for it.",
+        "operationId": "accept_document_api_v1_legal_acceptances_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalAcceptanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalDocumentState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Accept Document",
+        "tags": [
+          "legal"
+        ]
+      }
+    },
+    "/api/v1/legal/state": {
+      "get": {
+        "description": "Every document, and where this account stands with each.\n\nTHE WHOLE SET, not just the outstanding ones. A settings screen showing\n\"you accepted the Terms on 3 March\" needs the accepted ones too, and a\nclient that had to ask twice would render half a page while it waited.\n\n`application_access_blocked` is computed here rather than left to the\nclient. A client deriving it would be a second implementation of the\ngate's rule, and the two would eventually disagree \u2014 with the client's\nanswer being the one the customer sees.",
+        "operationId": "legal_state_api_v1_legal_state_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Legal State",
+        "tags": [
+          "legal"
         ]
       }
     },

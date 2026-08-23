@@ -95,6 +95,25 @@ export class ApiError extends Error {
     )
   }
 
+  /** Signed in, verified, and has not accepted the current legal documents.
+   *
+   *  A FOURTH DISTINCT 403, and it needs its own screen for the same reason
+   *  verification did: the customer can clear it themselves in under a minute,
+   *  and showing them a suspension page instead would send somebody to support
+   *  over a checkbox. */
+  get isLegalAcceptanceRequired(): boolean {
+    return (
+      this.status === 403 &&
+      this.problemType === 'https://onyx.ledger/errors/legal-acceptance-required'
+    )
+  }
+
+  /** The document moved while the tab was open. Carries the current version in
+   *  the response body; the client must re-read before accepting again. */
+  get isLegalVersionStale(): boolean {
+    return this.problemType === 'https://onyx.ledger/errors/legal-version-stale'
+  }
+
   /** A recovery link was already sent recently. Carries `retryAfterSeconds`. */
   get isRecoveryThrottled(): boolean {
     return this.problemType === 'https://onyx.ledger/errors/recovery-throttled'
