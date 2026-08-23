@@ -409,9 +409,9 @@ async def test_an_existing_session_stops_authorizing_normal_endpoints(client):
 @pytest.mark.asyncio
 async def test_refresh_is_denied_and_sessions_are_revoked(client):
     email = f"refresh_{uuid.uuid4().hex[:10]}@example.com"
-    assert (await client.post("/api/v1/auth/register",
-                              json={"email": email, "password": PASSWORD})
-            ).status_code == 201
+    await register_verified(client, email, PASSWORD)
+    # Signed in again for a pair this test owns: `register_verified` leaves a
+    # session behind and this test is about what happens to refresh tokens.
     login = await client.post("/api/v1/auth/login",
                               json={"email": email, "password": PASSWORD})
     tokens = login.json()

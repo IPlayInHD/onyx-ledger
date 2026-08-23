@@ -36,18 +36,19 @@ from app.integrations.storage import (
     StorageMisconfigured,
     build_object_storage,
 )
+from tests.production_settings import production_settings
 
-PROD = {
-    "environment": "production",
-    "jwt_secret": "j" * 40,
-    "admission_identity_secret": "a" * 40,
-}
-S3_PROD = PROD | {
-    "storage_provider": "s3",
-    "s3_region": "ca-central-1",
-    "s3_bucket_documents": "onyx-prod-documents",
-    "s3_bucket_legislation": "onyx-prod-legislation",
-}
+#: A production configuration with the storage provider REMOVED, so it falls
+#: back to its compiled default — which is the deployment mistake being guarded
+#: against: somebody who never set the variable, not somebody who set it empty.
+PROD = production_settings(storage_provider=None)
+
+#: The same configuration with storage set correctly. Everything ELSE
+#: production requires comes from the shared baseline, so a guard added by a
+#: future entry does not make this file fail on a subject it knows nothing
+#: about — which is exactly what B3's email guard did to the four assertions
+#: below before `tests/production_settings.py` existed.
+S3_PROD = production_settings()
 
 
 # ------------------------------------------------- guard one: configuration --
@@ -59,7 +60,7 @@ def test_production_refuses_the_in_memory_store():
 
 def test_production_requires_an_explicit_region():
     with pytest.raises(ValidationError) as caught:
-        Settings(**(PROD | {"storage_provider": "s3"}))
+        Settings(**production_settings(s3_region=None))
     assert "ONYX_S3_REGION" in str(caught.value)
 
 
@@ -75,10 +76,8 @@ def test_production_requires_each_bucket_to_be_named(omitted, expected):
     the variable would pass any non-empty check and then read and write a
     bucket nobody chose — or none.
     """
-    config = dict(S3_PROD)
-    del config[omitted]
     with pytest.raises(ValidationError) as caught:
-        Settings(**config)
+        Settings(**production_settings(**{omitted: None}))
     assert expected in str(caught.value)
 
 

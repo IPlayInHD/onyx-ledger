@@ -121,6 +121,23 @@ def _lifecycle_state(cur, user: uuid.UUID) -> str | None:
     return row[0] if row else None
 
 
+def _function_source(module_source: str, name: str) -> str:
+    """The source of exactly one function, at any nesting depth.
+
+    Used by the structural assertions below. Slicing on "the next `def`" is the
+    obvious alternative and is what broke: inserting an unrelated function
+    between two others silently changed what a test was reading.
+    """
+    import ast
+
+    tree = ast.parse(module_source)
+    lines = module_source.splitlines(keepends=True)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) and node.name == name:
+            return "".join(lines[node.lineno - 1 : node.end_lineno])
+    raise AssertionError(f"{name} no longer exists; this test is about it")
+
+
 def test_the_cutoff_is_held_on_the_request_transaction_itself():
     """The invariant the whole file rests on, pinned where it can be broken.
 
@@ -149,8 +166,14 @@ def test_the_cutoff_is_held_on_the_request_transaction_itself():
     deps = (backend / "app" / "api" / "deps.py").read_text()
     lifecycle = (backend / "app" / "services" / "privacy" / "lifecycle.py").read_text()
 
-    body = deps[deps.index("async def db_authed("):]
-    body = body[:body.index("async def db_authed_lifecycle_exempt")]
+    # SLICED BY THE PARSER, not by searching for the name of whatever function
+    # happens to come next. This read from `db_authed` to the literal string
+    # "async def db_authed_lifecycle_exempt", so B3 adding
+    # `db_authed_unverified_ok` between them silently widened the slice to two
+    # functions and the one-unit-of-work assertion counted both — a failure
+    # about a dependency this test has no opinion on. `ast` knows where a
+    # function ends.
+    body = _function_source(deps, "db_authed")
     assert "unit_of_work(" in body and "assert_may_act" in body, (
         "db_authed no longer applies the lifecycle cutoff")
     assert body.index("assert_may_act") < body.index("yield session"), (
@@ -161,8 +184,7 @@ def test_the_cutoff_is_held_on_the_request_transaction_itself():
         "db_authed opens more than one unit of work; the advisory lock would "
         "not span the request the cutoff is protecting")
 
-    check = lifecycle[lifecycle.index("async def assert_may_act"):]
-    check = check[:check.index("async def request_deletion")]
+    check = _function_source(lifecycle, "assert_may_act")
     assert "pg_advisory_xact_lock_shared" in check, (
         "the cutoff no longer takes the shared lifecycle lock, so a deletion "
         "can commit underneath an in-flight analysis")

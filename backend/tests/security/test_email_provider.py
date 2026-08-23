@@ -24,30 +24,16 @@ from app.integrations.email import (
     build_email_provider,
     captured_emails,
 )
+from tests.production_settings import production_settings
 
 MESSAGE = RenderedEmail(subject="s", text="t", html="<p>h</p>")
 TO = "recipient@example.ca"
 SENDER = "no-reply@onyx.example.ca"
 
-#: Everything a production Settings needs besides the email fields under test.
-#: Same reason as `PRODUCTION_BASELINE` in test_admission_preauth: a control
-#: that constructs a production Settings breaks whenever production gains a
-#: requirement, and hunting it down in five assertions is worse than naming it.
-NON_EMAIL_PRODUCTION = {
-    "environment": "production",
-    "jwt_secret": "j" * 48,
-    "admission_identity_secret": "x" * 48,
-    "storage_provider": "s3",
-    "s3_region": "ca-central-1",
-    "s3_bucket_documents": "onyx-prod-documents",
-    "s3_bucket_legislation": "onyx-prod-legislation",
-}
-REAL_EMAIL = {
-    "email_provider": SES_PROVIDER,
-    "email_sender_address": SENDER,
-    "ses_region": "ca-central-1",
-    "app_public_url": "https://app.onyx.example.ca",
-}
+#: A complete production configuration. Overrides below name only the email
+#: field under test; everything else comes from `tests/production_settings.py`,
+#: so a guard added by a future entry cannot make this file fail on a subject
+#: it knows nothing about.
 
 
 def _ses(client) -> SesEmailProvider:
@@ -232,8 +218,7 @@ def test_production_refuses_the_capture_provider():
     send as a success while every locked-out customer stayed locked out — the
     failure is invisible from inside the system and total from outside it.
     """
-    settings = Settings(**NON_EMAIL_PRODUCTION, **{**REAL_EMAIL,
-                                                   "email_provider": SES_PROVIDER})
+    settings = Settings(**production_settings())
     # Reach past the settings validator to prove the BUILDER refuses too: the
     # two layers must both hold, because a Settings can be constructed in a
     # test, a script or a worker without going through production validation.
@@ -246,8 +231,7 @@ def test_production_settings_will_not_even_construct_with_capture():
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError, match="ONYX_EMAIL_PROVIDER"):
-        Settings(**NON_EMAIL_PRODUCTION, **{**REAL_EMAIL,
-                                            "email_provider": CAPTURE_PROVIDER})
+        Settings(**production_settings(email_provider=CAPTURE_PROVIDER))
 
 
 @pytest.mark.parametrize(
@@ -262,9 +246,8 @@ def test_production_refuses_an_incomplete_email_configuration(missing, expected)
     """Fail closed at startup, not at the first customer who forgets a password."""
     from pydantic import ValidationError
 
-    config = {**NON_EMAIL_PRODUCTION, **REAL_EMAIL, missing: None}
     with pytest.raises(ValidationError, match=expected):
-        Settings(**config)
+        Settings(**production_settings(**{missing: None}))
 
 
 def test_production_requires_an_https_public_url():
@@ -273,14 +256,13 @@ def test_production_requires_an_https_public_url():
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError, match="https"):
-        Settings(**NON_EMAIL_PRODUCTION, **{**REAL_EMAIL,
-                                            "app_public_url": "http://app.onyx.ca"})
+        Settings(**production_settings(app_public_url="http://app.onyx.ca"))
 
 
 def test_a_complete_production_email_configuration_is_accepted():
     """The control: every assertion above is "production refuses this", which
     a Settings that refused everything would satisfy completely."""
-    settings = Settings(**NON_EMAIL_PRODUCTION, **REAL_EMAIL)
+    settings = Settings(**production_settings())
     assert settings.is_production
     assert settings.email_provider == SES_PROVIDER
 

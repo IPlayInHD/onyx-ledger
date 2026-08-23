@@ -230,6 +230,61 @@ Versioning therefore keeps its durability value for the window before deletion,
 and costs nothing at deletion time. Turning it off is **not** required and
 should not be used as a way to sidestep erasure.
 
+## 6b. Transactional email
+
+SES v2, one verified sending identity per environment, reached through the
+normal AWS credential chain. No static access keys in configuration — the same
+rule §7 applies to everything else.
+
+Onyx sends exactly three messages, and the set is closed in code
+(`TransactionalEmail`): confirm your address, reset your password, your
+password was changed. There is no marketing surface and no generic
+"send an email" operation, because the first thing to arrive in one would be
+something nobody reviewed against the rule below.
+
+**No customer financial data in any message.** Not minimised — absent. Email
+sits unencrypted in somebody else's mailbox, gets forwarded, is indexed by the
+provider and quoted into replies, so none of the three carries a figure, a tax
+position, a document name, a province or a filing status. The recipient's own
+address is the only personal value any of them contains, and it is already in
+the envelope.
+
+**Production must not capture its own mail.** `CaptureEmailProvider` appends to
+an in-process list and opens no socket. A deployment that selected it would
+accept registrations, mint verification tokens, file the messages in a list and
+report success — nothing errors, and the only signal is customers who cannot
+get in and cannot say why. Two layers refuse it: `Settings` will not construct
+in production with `ONYX_EMAIL_PROVIDER=capture`, and `build_email_provider`
+refuses it again if a Settings is built some other way.
+
+The same validator requires a sender identity, a region, and an **https**
+`ONYX_APP_PUBLIC_URL`. That last one is not cosmetic: verification and reset
+links are built from it and from nothing else — never from the `Host` header,
+which is attacker-supplied and is the classic reset-poisoning vector — and a
+plain-http origin would put a single-use credential in a URL that travels in
+cleartext.
+
+**Sending never blocks a request or holds a transaction.** Every send is
+scheduled after the response: mint the token, commit, then hand the message to
+the provider. That ordering is chosen for three reasons that agree — a failed
+send leaves a committed token the customer replaces by asking again (the other
+order puts a live link in an inbox for a row that was rolled back); no
+multi-second provider call happens with a connection and a row lock held; and
+the password-reset request answers in the same measurable time whether or not
+the address has an account, which is what keeps its careful wording from being
+undone by a stopwatch.
+
+**Not provisioned here.** This describes what the application requires. Buying
+the domain, verifying the sending identity, moving out of the SES sandbox,
+setting up SPF/DKIM/DMARC and requesting a sending quota are deployment work
+and are not done — `LIVE_EMAIL_DELIVERY = NOT_PROVISIONED`. The application is
+production-capable and fails closed without the configuration, which is the
+part that belongs in the repository.
+
+DKIM and DMARC are worth calling out as more than deliverability hygiene: a
+domain that anybody can send as is a domain whose password-reset notices
+anybody can forge, and this product's mail is exactly the mail worth forging.
+
 ## 7. Secrets
 
 AWS Secrets Manager, one path per environment, rotation enabled where the

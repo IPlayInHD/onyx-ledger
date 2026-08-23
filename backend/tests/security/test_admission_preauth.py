@@ -18,6 +18,7 @@ from app.database.session import unit_of_work
 from app.services.admission.identity import auth_subject_scope, source_ip_scope
 from app.services.admission.policy import UNWIRED_BY_DESIGN, OperationClass, ScopeType
 from app.services.admission.service import AdmissionService
+from tests.production_settings import production_settings
 
 PASSWORD = "supersecret1"
 
@@ -175,30 +176,16 @@ async def test_the_digest_depends_on_the_secret():
     assert auth_subject_scope(address) == first
 
 
-#: Everything a production `Settings` needs BESIDES the secret under test.
+#: Everything a production `Settings` needs besides the secret under test.
 #:
 #: The two guards below each end with a control — "a real secret is accepted" —
 #: whose whole job is to prove the guard is not passing because every
 #: production Settings raises. That control breaks whenever production gains a
-#: new requirement, and it did: B2 made production refuse the in-memory object
-#: store, so a Settings carrying only good secrets stopped constructing and both
-#: guards failed on their own control line rather than on what they test.
-#:
-#: Keeping the rest of the production baseline here means the next requirement
-#: is added once, not hunted down in two assertions that look unrelated to it.
-#: It happened again in B3, which made production refuse the capture email
-#: provider — same shape, same two controls, one place to fix.
-PRODUCTION_BASELINE = {
-    "environment": "production",
-    "storage_provider": "s3",
-    "s3_region": "ca-central-1",
-    "s3_bucket_documents": "onyx-prod-documents",
-    "s3_bucket_legislation": "onyx-prod-legislation",
-    "email_provider": "ses",
-    "email_sender_address": "no-reply@onyx.example.ca",
-    "ses_region": "ca-central-1",
-    "app_public_url": "https://app.onyx.example.ca",
-}
+#: new requirement, which is why the baseline now lives in one shared place
+#: rather than in each file that happens to construct one.
+PRODUCTION_BASELINE = production_settings(
+    jwt_secret=None, admission_identity_secret=None
+)
 
 
 @pytest.mark.asyncio
