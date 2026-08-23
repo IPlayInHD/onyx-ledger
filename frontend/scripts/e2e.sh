@@ -28,6 +28,27 @@ CAPTURE_DIR="${ONYX_E2E_CAPTURE_DIR:-/tmp/onyx_e2e_mail}"
 rm -rf "$CAPTURE_DIR"
 mkdir -p "$CAPTURE_DIR"
 
+# THE SOURCE-ADDRESS AUTH BUDGET, RAISED FOR THIS HOST ONLY.
+#
+# This is the NAT case the policy already describes in as many words: one
+# address legitimately carrying many people. The whole persona suite registers,
+# signs in and confirms from a single loopback address, so to the limiter it
+# looks like one very determined person — and the suite spends minutes waiting
+# out a limit that exists to stop credential stuffing, which it is not doing.
+#
+# What is raised and what is NOT:
+#
+#   raised    the SOURCE-ADDRESS allowance, through the validated settings seam
+#             the policy registry documents for exactly this
+#   unchanged the PER-IDENTITY allowance, which is the limit that actually
+#             bounds guessing at one account — every persona has its own
+#             address, so it is never the one being hit
+#
+# The real limits are proved where they belong: `tests/integration/
+# test_admission_auth.py` and `tests/security/test_admission_preauth.py` run
+# against the compiled defaults and would fail if either were weakened. Nothing
+# here reaches production, which reads its own environment.
+
 cleanup() {
   if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" 2>/dev/null; then
     kill "$API_PID" 2>/dev/null || true
@@ -61,6 +82,7 @@ echo ">> starting backend on :$API_PORT"
   PYTHONPATH=. \
   ONYX_DATABASE_URL="${ONYX_DATABASE_URL:-postgresql+asyncpg://onyx_test@localhost:5432/onyx_b01}" \
   ONYX_EMAIL_CAPTURE_DIR="$CAPTURE_DIR" \
+  ONYX_RATE_LIMIT_AUTH_PER_SOURCE_IP_PER_MINUTE="${ONYX_E2E_AUTH_SOURCE_BUDGET:-300}" \
   exec python3 -m uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG" 2>&1
 ) &
 API_PID=$!
