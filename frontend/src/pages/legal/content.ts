@@ -188,7 +188,7 @@ const PRIVACY = draft({
     {
       heading: 'What Onyx Ledger collects',
       bullets: [
-        'Your email address. It identifies the account and is how the service would reach you.',
+        'Your email address. It identifies the account, and the service uses it to send you a link confirming the address, a link if you ask to reset your password, and a notice when your password changes. It is not used for anything else, and no message the service sends contains tax information.',
         'Your password, stored only as an Argon2id hash. The password itself is never written to the database, to logs, or to audit records.',
         'The tax facts you enter: income amounts and their kinds, registered-account contributions and balances you record, expenses, your province of residence, and circumstances such as marital status and dependants where the rules turn on them.',
         'Documents you upload, the fields extracted from them, and your confirmation of those fields. Files are held in object storage; their contents are not copied into the application database.',
@@ -565,7 +565,7 @@ const SECURITY = draft({
       heading: 'What you can do',
       bullets: [
         'Use a password unique to Onyx Ledger.',
-        'Keep the email address on the account current — it is how the service would reach you about a security matter.',
+        'Keep the email address on the account current — it is how the service reaches you about a security matter, and how you recover access if you forget your password.',
         'Sign out on a device you share with anyone else.',
         'Report anything that looks wrong, including anything you can see that you believe you should not be able to.',
       ],
