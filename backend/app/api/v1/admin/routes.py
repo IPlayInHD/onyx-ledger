@@ -5,9 +5,8 @@ import uuid
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import client_ip, current_admin_id, db_admin, db_anon
+from app.api.deps import AdminSession, AnonSession, client_ip, current_admin_id
 from app.core.exceptions import ValidationError
 from app.core.security.jwt import create_admin_token
 from app.database.models import RuleChangeRequest, TaxRule, TaxRuleVersion
@@ -32,7 +31,7 @@ class IngestionJob(BaseModel):
 
 @router.post("/auth/login")
 async def admin_login(
-    body: AdminLogin, request: Request, session: AsyncSession = Depends(db_anon)
+    body: AdminLogin, request: Request, session: AnonSession
 ) -> dict:
     """Operator login.
 
@@ -48,8 +47,8 @@ async def admin_login(
 @router.post("/ingestion/jobs", status_code=status.HTTP_201_CREATED)
 async def create_ingestion_job(
     body: IngestionJob,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     """Raw dataset -> Extract -> Validate -> Transform -> DRAFT rule versions +
     a pending four-eyes change request per rule.
@@ -74,8 +73,8 @@ async def create_ingestion_job(
 @router.post("/change-requests/{change_request_id}/approve")
 async def approve_change_request(
     change_request_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     cr = await AdminService(session).approve(admin_id, change_request_id)
     return {"id": str(cr.id), "status": cr.status, "reviewed_by": str(cr.reviewed_by)}
@@ -84,8 +83,8 @@ async def approve_change_request(
 @router.post("/rules/{version_id}/publish")
 async def publish_rule(
     version_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     """Activate an approved rule version.
 
@@ -109,8 +108,8 @@ async def publish_rule(
 @router.get("/rules")
 async def list_rule_versions(
     tax_year: int,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> list[dict]:
     result = await session.execute(
         select(TaxRule.code, TaxRuleVersion.id, TaxRuleVersion.tax_year, TaxRuleVersion.status)
@@ -123,8 +122,8 @@ async def list_rule_versions(
 
 @router.get("/change-requests")
 async def list_change_requests(
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> list[dict]:
     rows = await session.scalars(
         select(RuleChangeRequest).where(RuleChangeRequest.status == "pending")

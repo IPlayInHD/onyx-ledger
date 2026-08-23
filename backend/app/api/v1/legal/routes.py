@@ -24,9 +24,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed_legal_exempt
+from app.api.deps import LegalExemptSession, current_user_id
 from app.schemas.legal import (
     LegalAcceptanceRequest,
     LegalDocumentState,
@@ -53,8 +52,8 @@ def _rendered(state: DocumentState) -> LegalDocumentState:
 
 @router.get("/state", response_model=LegalState)
 async def legal_state(
+    session: LegalExemptSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed_legal_exempt),
 ) -> LegalState:
     """Every document, and where this account stands with each.
 
@@ -81,8 +80,8 @@ async def legal_state(
 )
 async def accept_document(
     body: LegalAcceptanceRequest,
+    session: LegalExemptSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed_legal_exempt),
 ) -> LegalDocumentState:
     """Record that this account accepts one document at one version.
 

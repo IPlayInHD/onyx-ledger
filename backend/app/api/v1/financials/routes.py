@@ -3,9 +3,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed
+from app.api.deps import AuthedSession, current_user_id
 from app.schemas import (
     ExpenseIn,
     IncomeIn,
@@ -23,8 +22,8 @@ router = APIRouter(prefix="/financials", tags=["financials"])
 @router.post("/income", response_model=IncomeOut, status_code=status.HTTP_201_CREATED)
 async def add_income(
     body: IncomeIn,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> IncomeOut:
     """Record an income source.
 
@@ -46,8 +45,8 @@ async def add_income(
              status_code=status.HTTP_201_CREATED)
 async def add_registered_account(
     body: RegisteredAccountIn,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> RegisteredAccountOut:
     """Record an actual RRSP/FHSA contribution for a tax year — a fact the
     baseline analysis reads, as opposed to a scenario lever, which models a
@@ -64,9 +63,9 @@ async def add_registered_account(
 
 @router.get("/registered-accounts", response_model=list[RegisteredAccountOut])
 async def list_registered_accounts(
+    session: AuthedSession,
     tax_year: int = Query(..., ge=1900, le=2200),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> list[RegisteredAccountOut]:
     rows = await FinancialService(session).list_registered_accounts(user_id, tax_year)
     return [RegisteredAccountOut.model_validate(r) for r in rows]
@@ -74,9 +73,9 @@ async def list_registered_accounts(
 
 @router.get("/income", response_model=list[IncomeOut])
 async def list_income(
+    session: AuthedSession,
     tax_year: int = Query(..., ge=1900, le=2200),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> list[IncomeOut]:
     rows = await FinancialService(session).list_income(user_id, tax_year)
     return [IncomeOut.model_validate(r) for r in rows]
@@ -85,8 +84,8 @@ async def list_income(
 @router.post("/expenses", status_code=status.HTTP_201_CREATED)
 async def add_expense(
     body: ExpenseIn,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     async with admission_guard(
         OperationClass.NORMAL_WRITE, scope_id=user_scope(user_id)
@@ -100,9 +99,9 @@ async def add_expense(
 @router.delete("/income/{income_id}", status_code=status.HTTP_200_OK)
 async def delete_income(
     income_id: uuid.UUID,
+    session: AuthedSession,
     tax_year: int = Query(..., ge=1900, le=2200),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Delete one owned income source.
 
@@ -132,9 +131,9 @@ async def delete_income(
 @router.delete("/expenses/{expense_id}", status_code=status.HTTP_200_OK)
 async def delete_expense(
     expense_id: uuid.UUID,
+    session: AuthedSession,
     tax_year: int = Query(..., ge=1900, le=2200),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Delete one owned expense. Same contract as `delete_income`."""
     async with admission_guard(

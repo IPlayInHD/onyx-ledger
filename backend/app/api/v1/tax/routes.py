@@ -4,9 +4,8 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed
+from app.api.deps import AuthedSession, current_user_id
 from app.database.models import TaxRule, TaxRuleVersion
 
 router = APIRouter(prefix="/tax", tags=["tax"])
@@ -14,9 +13,9 @@ router = APIRouter(prefix="/tax", tags=["tax"])
 
 @router.get("/rules")
 async def list_published_rules(
+    session: AuthedSession,
     tax_year: int = Query(..., ge=1900, le=2200),
     _user: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> list[dict]:
     """Published tax rules in force for a year (the versioned KB, read-only)."""
     result = await session.execute(

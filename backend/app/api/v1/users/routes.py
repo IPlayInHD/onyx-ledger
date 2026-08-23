@@ -3,9 +3,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed
+from app.api.deps import AuthedSession, current_user_id
 from app.core.exceptions import NotFound
 from app.database.models import TaxProfile, UserAccount
 from app.schemas import TaxProfileIn, TaxProfileOut
@@ -16,7 +15,8 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/me")
 async def get_me(
-    user_id: uuid.UUID = Depends(current_user_id), session: AsyncSession = Depends(db_authed)
+    session: AuthedSession,
+    user_id: uuid.UUID = Depends(current_user_id),
 ) -> dict:
     user = await session.get(UserAccount, user_id)
     if user is None:
@@ -26,7 +26,8 @@ async def get_me(
 
 @router.get("/me/tax-profile", response_model=TaxProfileOut)
 async def get_tax_profile(
-    user_id: uuid.UUID = Depends(current_user_id), session: AsyncSession = Depends(db_authed)
+    session: AuthedSession,
+    user_id: uuid.UUID = Depends(current_user_id),
 ) -> TaxProfileOut:
     prof = await session.get(TaxProfile, user_id)
     if prof is None:
@@ -37,8 +38,8 @@ async def get_tax_profile(
 @router.put("/me/tax-profile", response_model=TaxProfileOut)
 async def upsert_tax_profile(
     body: TaxProfileIn,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> TaxProfileOut:
     # The route delegates: the mutation and its freshness event belong in the
     # service, so an import or an administrative write cannot skip invalidation

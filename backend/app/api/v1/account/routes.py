@@ -9,9 +9,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed_lifecycle_exempt
+from app.api.deps import LifecycleExemptSession, current_user_id
 from app.services.privacy import AccountLifecycleService
 
 router = APIRouter(prefix="/account", tags=["account"])
@@ -19,8 +18,8 @@ router = APIRouter(prefix="/account", tags=["account"])
 
 @router.post("/deletion", status_code=status.HTTP_202_ACCEPTED)
 async def request_account_deletion(
+    session: LifecycleExemptSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed_lifecycle_exempt),
 ) -> dict:
     """Request deletion of the CALLER'S OWN account.
 
@@ -43,8 +42,8 @@ async def request_account_deletion(
 
 @router.get("/deletion")
 async def get_account_deletion_status(
+    session: LifecycleExemptSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed_lifecycle_exempt),
 ) -> dict:
     """The caller's own deletion status.
 

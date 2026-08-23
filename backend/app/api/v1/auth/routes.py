@@ -3,14 +3,13 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    AnonSession,
+    AuthedSession,
+    UnverifiedOkSession,
     client_ip,
     current_user_id,
-    db_anon,
-    db_authed,
-    db_authed_unverified_ok,
 )
 from app.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenPair
 from app.schemas.recovery import (
@@ -32,7 +31,7 @@ async def register(
     body: RegisterRequest,
     request: Request,
     background: BackgroundTasks,
-    session: AsyncSession = Depends(db_anon),
+    session: AnonSession,
 ) -> dict:
     """Create an account and send it a verification link.
 
@@ -72,7 +71,7 @@ async def register(
 
 @router.post("/login", response_model=TokenPair)
 async def login(
-    body: LoginRequest, request: Request, session: AsyncSession = Depends(db_anon)
+    body: LoginRequest, request: Request, session: AnonSession
 ) -> TokenPair:
     """Exchange credentials for a token pair.
 
@@ -86,7 +85,7 @@ async def login(
 
 @router.post("/refresh", response_model=TokenPair)
 async def refresh(
-    body: RefreshRequest, request: Request, session: AsyncSession = Depends(db_anon)
+    body: RefreshRequest, request: Request, session: AnonSession
 ) -> TokenPair:
     """Rotate a refresh token.
 
@@ -102,8 +101,8 @@ async def refresh(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> None:
     await AuthService(session).logout(user_id)
 
@@ -137,8 +136,8 @@ async def logout(
 async def send_verification(
     request: Request,
     background: BackgroundTasks,
+    session: UnverifiedOkSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed_unverified_ok),
 ) -> RecoveryAccepted:
     """Send, or re-send, this account's verification link.
 
@@ -169,7 +168,7 @@ async def send_verification(
 async def confirm_verification(
     body: EmailVerificationRequest,
     request: Request,
-    session: AsyncSession = Depends(db_anon),
+    session: AnonSession,
 ) -> VerificationResult:
     """Complete verification by presenting a link's token.
 
@@ -197,7 +196,7 @@ async def request_password_reset(
     body: PasswordResetRequest,
     request: Request,
     background: BackgroundTasks,
-    session: AsyncSession = Depends(db_anon),
+    session: AnonSession,
 ) -> RecoveryAccepted:
     """Ask for a reset link.
 
@@ -223,7 +222,7 @@ async def complete_password_reset(
     body: PasswordResetCompletion,
     request: Request,
     background: BackgroundTasks,
-    session: AsyncSession = Depends(db_anon),
+    session: AnonSession,
 ) -> None:
     """Set a new password from a reset link, and end every existing session.
 

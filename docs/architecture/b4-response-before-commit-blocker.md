@@ -1,5 +1,10 @@
 # Entry B4 — PRODUCTION_DEFECT: a success can reach the client before its commit
 
+> **CLOSED by B5.** The cause was not what the two refuted hypotheses below
+> guessed, and not what the "why it was not fixed" section proposed either.
+> Both corrections are recorded at the end rather than edited away, because a
+> wrong diagnosis that is quietly deleted gets made again.
+
 Found while certifying B4. The legal-acceptance subsystem is not the cause and
 is not the only victim: **every write endpoint in this application can return a
 success response before the transaction behind it has committed.**
@@ -114,5 +119,35 @@ the failure mode that matters most.
 
 ## Status
 
-**OPEN.** Launch-blocking in the author's judgement: it predates B4, survived
-B1–B3 certification unnoticed, and affects the whole write surface.
+**CLOSED by B5** at the request-lifecycle level, for every route.
+
+## What B5 found that this document got wrong
+
+**The third hypothesis was also wrong.** This document proposed buffering the
+response until the write was durable. That was unnecessary. FastAPI already
+offers the boundary: `Depends(..., scope="function")` puts a `yield` dependency
+on the exit stack that `fastapi/routing.py` closes BEFORE `await response(...)`,
+rather than the one it closes after. No buffering, no middleware, no per-route
+commits.
+
+**The mechanism was in the framework, not the middleware.** `fastapi/routing.py`
+sends the response *inside* the request-scoped dependency stack on purpose, so a
+dependency can stay open while a `StreamingResponse` streams. That is why
+neither middleware style changed anything: the pure-ASGI experiment recorded
+here measured worse, and on the real application it measured identical.
+
+**Measured on the real application**, registration with a 150 ms commit:
+
+| | before | after |
+|---|---|---|
+| immediate sign-in after a 201 | 12/12 refused | 0/12 refused |
+| ordering | `RESPONSE_START` → `COMMIT_STARTED` | `COMMIT_STARTED` → `COMMIT_FINISHED` → `RESPONSE_START` |
+| verification email | sent before the commit | sent after the commit |
+
+The second row of that table is a defect this document never noticed: the
+verification link was leaving before the row backing its token existed.
+
+The guard is `tests/security/test_request_transaction_boundary.py`, which drives
+a real uvicorn server on a real socket — `ASGITransport` and `TestClient` both
+report green against the broken architecture, which is why nothing caught this
+for four entries.

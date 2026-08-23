@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_admin_id, db_admin
+from app.api.deps import AdminSession, current_admin_id
 from app.core.exceptions import ValidationError
 from app.database.models import (
     ChangeItem,
@@ -73,8 +73,8 @@ class RollbackBody(BaseModel):
 @router.post("/imports", status_code=status.HTTP_201_CREATED)
 async def create_import(
     body: ImportBody,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     """Ingest a legislation document and run the governed pipeline.
 
@@ -124,8 +124,8 @@ async def create_import(
 @router.post("/imports/{job_id}/reparse")
 async def reparse_import(
     job_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
     parser_name: str | None = None,
     parser_version: str | None = None,
 ) -> dict:
@@ -165,8 +165,8 @@ async def reparse_import(
 
 @router.get("/imports")
 async def list_imports(
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
     limit: int = 50,
 ) -> list[dict]:
     await AdminService(session).require_permission(admin_id, "tkms.read")
@@ -179,8 +179,8 @@ async def list_imports(
 @router.get("/imports/{job_id}")
 async def get_import(
     job_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     await AdminService(session).require_permission(admin_id, "tkms.read")
     job = await session.get(ImportJob, job_id)
@@ -201,8 +201,8 @@ async def get_import(
 @router.get("/imports/{job_id}/extracted")
 async def get_extracted(
     job_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> list[dict]:
     await AdminService(session).require_permission(admin_id, "tkms.read")
     rows = await session.scalars(
@@ -220,8 +220,8 @@ async def get_extracted(
 @router.get("/imports/{job_id}/validation")
 async def get_validation(
     job_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     await AdminService(session).require_permission(admin_id, "tkms.read")
     report = await _latest_report(session, job_id)
@@ -242,8 +242,8 @@ async def get_validation(
 @router.get("/versions/{version_id}/compare")
 async def get_compare(
     version_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     await AdminService(session).require_permission(admin_id, "tkms.read")
     report = await session.scalar(
@@ -271,8 +271,8 @@ async def get_compare(
 @router.post("/versions/{version_id}/submit")
 async def submit_version(
     version_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     cr = await GovernanceService(session).submit_for_review(admin_id, version_id)
     return {"version_id": str(version_id), "change_request_id": str(cr.id), "status": "pending_review"}
@@ -281,8 +281,8 @@ async def submit_version(
 @router.post("/versions/{version_id}/approve")
 async def approve_version(
     version_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     cr = await GovernanceService(session).approve(admin_id, version_id)
     return {"version_id": str(version_id), "change_request_id": str(cr.id), "status": "approved"}
@@ -292,8 +292,8 @@ async def approve_version(
 async def reject_version(
     version_id: uuid.UUID,
     body: RejectBody,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     cr = await GovernanceService(session).reject(
         admin_id, version_id, reason=body.reason, discard=body.discard
@@ -304,8 +304,8 @@ async def reject_version(
 @router.post("/versions/{version_id}/publish")
 async def publish_version(
     version_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     """Publish an approved version and reindex the knowledge base.
 
@@ -329,8 +329,8 @@ async def publish_version(
 async def request_rollback(
     rule_id: uuid.UUID,
     body: RollbackBody,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     rec = await RollbackService(session).request(admin_id, body.to_version_id, reason=body.reason)
     return {"rollback_id": str(rec.id), "status": rec.status}
@@ -339,8 +339,8 @@ async def request_rollback(
 @router.post("/rollbacks/{rollback_id}/approve")
 async def approve_rollback(
     rollback_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     rec = await RollbackService(session).approve(admin_id, rollback_id)
     return {"rollback_id": str(rec.id), "status": rec.status,
@@ -351,8 +351,8 @@ async def approve_rollback(
 @router.get("/versions/{version_id}/trace")
 async def trace_version(
     version_id: uuid.UUID,
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     await AdminService(session).require_permission(admin_id, "tkms.read")
     return await TraceabilityService(session).trace(version_id)
@@ -360,8 +360,8 @@ async def trace_version(
 
 @router.get("/rules/search")
 async def search_rules(
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
     tax_year: int | None = None,
     status_: str | None = None,
     q: str | None = None,
@@ -386,8 +386,8 @@ async def search_rules(
 
 @router.get("/parsers")
 async def list_parsers(
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> list[dict]:
     await AdminService(session).require_permission(admin_id, "tkms.read")
     return build_default_registry().available()
@@ -395,8 +395,8 @@ async def list_parsers(
 
 @router.get("/dead-letters")
 async def list_dead_letters(
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> list[dict]:
     await AdminService(session).require_permission(admin_id, "tkms.import")
     rows = await session.scalars(
@@ -411,8 +411,8 @@ async def list_dead_letters(
 
 @router.get("/stats")
 async def stats(
+    session: AdminSession,
     admin_id: uuid.UUID = Depends(current_admin_id),
-    session: AsyncSession = Depends(db_admin),
 ) -> dict:
     await AdminService(session).require_permission(admin_id, "tkms.read")
     # `Row` is tuple-like but not a `tuple` to the type checker, so the pairs are

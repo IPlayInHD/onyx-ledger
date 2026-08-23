@@ -13,9 +13,8 @@ import uuid
 from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import assert_account_active, current_user_id, db_authed
+from app.api.deps import AuthedSession, assert_account_active, current_user_id
 from app.core.exceptions import NotFound
 from app.schemas.assurance import TaxAssuranceOut
 from app.schemas.before_you_act import BeforeYouActComparisonOut
@@ -125,13 +124,13 @@ async def create_scenario(
 
 @router.get("/scenarios", response_model=list[ScenarioSummaryOut])
 async def list_scenarios(
+    session: AuthedSession,
     include_archived: bool = Query(
         False, description="Archived scenarios are hidden, not deleted."
     ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> list[ScenarioSummaryOut]:
     rows = await IoeReadRepository(session, user_id).list_scenarios(
         include_archived=include_archived, limit=limit, offset=offset
@@ -214,8 +213,8 @@ async def unarchive_scenario(
 async def compare_scenarios(
     left_id: uuid.UUID,
     right_id: uuid.UUID,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> ScenarioComparisonOut:
     loaded = await ScenarioComparisonService(session, user_id).compare(left_id, right_id)
     return presentation.comparison_detail(loaded)
@@ -236,6 +235,7 @@ async def compare_scenarios(
 )
 async def get_before_you_act_comparison(
     scenario_id: uuid.UUID,
+    session: AuthedSession,
     include_unchanged: bool = Query(
         False,
         description=(
@@ -244,7 +244,6 @@ async def get_before_you_act_comparison(
         ),
     ),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> BeforeYouActComparisonOut:
     loaded = await BeforeYouActService(session, user_id).comparison_for(scenario_id)
     return before_you_act_presentation.comparison_detail(
@@ -267,6 +266,7 @@ async def get_before_you_act_comparison(
     ),
 )
 async def get_tax_assurance(
+    session: AuthedSession,
     tax_year: int = Query(..., ge=2000, le=2100),
     as_of: date | None = Query(
         None,
@@ -276,7 +276,6 @@ async def get_tax_assurance(
         ),
     ),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> TaxAssuranceOut:
     # The clock is read HERE, at the boundary, and injected. The derivation
     # itself never consults it, which is what keeps the map reproducible.
@@ -302,8 +301,8 @@ async def get_tax_assurance(
 )
 async def create_decision_journal(
     body: CreateDecisionJournalRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> DecisionJournalDetailOut:
     service = DecisionJournalService(session, user_id)
     journal = await service.create(
@@ -320,8 +319,8 @@ async def create_decision_journal(
     summary="List decision threads, newest first",
 )
 async def list_decision_journals(
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> list[DecisionJournalSummaryOut]:
     loaded = await DecisionJournalService(session, user_id).list_journals()
     return [journal_presentation.journal_summary(entry) for entry in loaded]
@@ -340,8 +339,8 @@ async def list_decision_journals(
 )
 async def get_decision_journal(
     journal_id: uuid.UUID,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> DecisionJournalDetailOut:
     return journal_presentation.journal_detail(
         await DecisionJournalService(session, user_id).detail(journal_id)
@@ -362,8 +361,8 @@ async def get_decision_journal(
 async def record_decision(
     journal_id: uuid.UUID,
     body: RecordDecisionRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> DecisionJournalDetailOut:
     service = DecisionJournalService(session, user_id)
     await service.record_decision(
@@ -387,8 +386,8 @@ async def record_decision(
 async def report_decision_action(
     journal_id: uuid.UUID,
     body: ReportActionRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> DecisionJournalDetailOut:
     service = DecisionJournalService(session, user_id)
     await service.report_action(
@@ -409,8 +408,8 @@ async def report_decision_action(
 )
 async def get_portfolio(
     run_id: uuid.UUID,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> StrategyPortfolioOut:
     repo = IoeReadRepository(session, user_id)
     run = await repo.get_run(run_id)
@@ -437,8 +436,8 @@ async def get_portfolio(
 )
 async def get_projections(
     run_id: uuid.UUID,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> ProjectionResponse:
     return await ProjectionQueryService(session, user_id).for_run(run_id)
 
@@ -458,8 +457,8 @@ async def get_projections(
 async def get_integrity(
     entity_type: str,
     entity_id: uuid.UUID,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> IntegrityOut:
     row = await IoeReadRepository(session, user_id).integrity_target(
         _entity_type(entity_type), entity_id
@@ -540,6 +539,7 @@ __all__ = ["router"]
     ),
 )
 async def get_opportunity_lifecycle(
+    session: AuthedSession,
     tax_year: int = Query(..., ge=2000, le=2100),
     as_of: date | None = Query(
         None,
@@ -549,7 +549,6 @@ async def get_opportunity_lifecycle(
         ),
     ),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> OpportunityLifecycleOut:
     # The clock is read HERE, at the boundary, and injected into both the
     # Assurance derivation and the lifecycle join.
@@ -575,6 +574,7 @@ async def get_opportunity_lifecycle(
     ),
 )
 async def get_retention_changes(
+    session: AuthedSession,
     tax_year: int = Query(..., ge=2000, le=2100),
     as_of: date | None = Query(
         None,
@@ -584,7 +584,6 @@ async def get_retention_changes(
         ),
     ),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> RetentionChangesOut:
     evaluation_date = as_of or datetime.now(tz=UTC).date()
     changes, baseline = await RetentionService(session, user_id).changes_for(
@@ -609,10 +608,10 @@ async def get_retention_changes(
 )
 async def acknowledge_retention_changes(
     body: AcknowledgeChangesRequest,
+    session: AuthedSession,
     tax_year: int = Query(..., ge=2000, le=2100),
     as_of: date | None = Query(None),
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> RetentionCheckpointOut:
     evaluation_date = as_of or datetime.now(tz=UTC).date()
     checkpoint = await RetentionService(session, user_id).acknowledge(

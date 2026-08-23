@@ -5,9 +5,8 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed
+from app.api.deps import AuthedSession, current_user_id
 from app.core.exceptions import Conflict, ValidationError
 from app.database.models import Document, ExtractionField
 from app.services.admission import OperationClass, admission_guard
@@ -67,8 +66,8 @@ class ConfirmRequest(BaseModel):
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_upload(
     body: UploadRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Register a document and hand back a presigned upload URL.
 
@@ -120,9 +119,10 @@ async def create_upload(
 
 @router.post("/{document_id}/process")
 async def process(
-    document_id: uuid.UUID, body: ProcessRequest,
+    document_id: uuid.UUID,
+    body: ProcessRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Extract fields from an uploaded document.
 
@@ -164,9 +164,10 @@ async def process(
 
 @router.post("/{document_id}/confirm")
 async def confirm(
-    document_id: uuid.UUID, body: ConfirmRequest,
+    document_id: uuid.UUID,
+    body: ConfirmRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Turn a confirmed extraction into income/expense rows.
 
@@ -184,8 +185,8 @@ async def confirm(
 @router.delete("/{document_id}", status_code=status.HTTP_200_OK)
 async def delete_document(
     document_id: uuid.UUID,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Delete one owned document: binary, extraction and all.
 
@@ -218,8 +219,8 @@ async def delete_document(
 
 @router.get("")
 async def list_documents(
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> list[dict]:
     rows = await session.scalars(
         select(Document).where(Document.user_id == user_id, Document.deleted_at.is_(None))

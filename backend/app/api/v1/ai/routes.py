@@ -5,9 +5,8 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user_id, db_authed
+from app.api.deps import AuthedSession, current_user_id
 from app.core.exceptions import NotFound
 from app.database.models import AiConversation, AiMessage
 from app.schemas.explanation import ExplanationEnvelopeOut, ExplanationType
@@ -26,8 +25,8 @@ class AskRequest(BaseModel):
 
 @router.post("/conversations", status_code=status.HTTP_201_CREATED)
 async def create_conversation(
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Open an empty conversation.
 
@@ -46,9 +45,10 @@ async def create_conversation(
 
 @router.post("/conversations/{conversation_id}/messages")
 async def ask(
-    conversation_id: uuid.UUID, body: AskRequest,
+    conversation_id: uuid.UUID,
+    body: AskRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """Ask within an existing conversation.
 
@@ -69,8 +69,8 @@ async def ask(
 @router.post("/ask", status_code=status.HTTP_201_CREATED)
 async def ask_new(
     body: AskRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> dict:
     """One-shot: starts a new conversation and answers."""
     async with admission_guard(
@@ -82,8 +82,8 @@ async def ask_new(
 @router.get("/conversations/{conversation_id}/messages")
 async def list_messages(
     conversation_id: uuid.UUID,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> list[dict]:
     conv = await session.get(AiConversation, conversation_id)
     if not conv or conv.user_id != user_id:
@@ -131,8 +131,8 @@ class ExplanationRequest(BaseModel):
 )
 async def create_explanation(
     body: ExplanationRequest,
+    session: AuthedSession,
     user_id: uuid.UUID = Depends(current_user_id),
-    session: AsyncSession = Depends(db_authed),
 ) -> ExplanationEnvelopeOut:
     async with admission_guard(
         OperationClass.AI_EXPLAIN, scope_id=user_scope(user_id)

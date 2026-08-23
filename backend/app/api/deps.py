@@ -2,11 +2,45 @@
 
 The access token identifies the user; the UoW sets `app.user_id` so PostgreSQL
 RLS and the audit triggers see the actor.
+
+THE HTTP TRANSACTION CONTRACT (B5). One rule, and every route inherits it:
+
+    a client that can observe a success response can observe the write
+
+Which is to say the commit finishes BEFORE the response head leaves. That is
+not free, and it is not what FastAPI does by default. `fastapi/routing.py`
+sends the response INSIDE the exit stack that holds request-scoped `yield`
+dependencies:
+
+    async with AsyncExitStack() as request_stack:      # dependencies live here
+        async with AsyncExitStack() as function_stack:
+            response = await f(request)
+        await response(scope, receive, send)           # response sent HERE
+    # request_stack closes here — a commit in teardown lands AFTER the client
+
+That ordering is deliberate on FastAPI's part: a dependency has to stay open
+while a `StreamingResponse` streams. It is also, for an application that
+commits in teardown, a promise of durability the database has not yet made.
+Measured before the fix, with a 150 ms commit: twelve registrations out of
+twelve returned 201 and were then refused at sign-in, and the verification
+email went out before the row backing its token existed.
+
+`scope="function"` is FastAPI's own answer — it puts the dependency on the
+inner stack, which closes before `await response(...)`. So every session
+dependency below is exported ONLY as an `Annotated` alias carrying that scope.
+Routes name the alias; nobody writes the scope, and nobody can forget it.
+`tests/security/test_request_transaction_boundary.py` fails if a route ever
+takes a session any other way.
+
+WHAT THIS DOES NOT COVER, deliberately. A service that opens its own
+`unit_of_work` with `async with` commits inside the handler's own frame and was
+never at risk. Workers own their transactions outright. Neither is touched.
 """
 from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from typing import Annotated
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -152,6 +186,41 @@ async def db_admin(admin_id: uuid.UUID = Depends(current_admin_id)) -> AsyncIter
     # actor recorded in the audit trail; admin plane touches non-RLS tables.
     async with unit_of_work(user_id=admin_id, actor_type="admin") as session:
         yield session
+
+
+# --------------------------------------------------------------- sessions --
+#
+# THE ONLY SUPPORTED WAY FOR A ROUTE TO TAKE A DATABASE SESSION.
+#
+# Each alias pins `scope="function"`, which is what makes the commit land
+# before the response head. Writing `Depends(db_authed)` in a route signature
+# would still work and would silently reopen the durability hole, so the guard
+# test refuses it rather than trusting everyone to remember.
+
+#: Authenticated, verified, legally current, not deleting. The ordinary one.
+AuthedSession = Annotated[AsyncSession, Depends(db_authed, scope="function")]
+
+#: Authenticated but not yet verified — only the endpoints that clear that.
+UnverifiedOkSession = Annotated[
+    AsyncSession, Depends(db_authed_unverified_ok, scope="function")
+]
+
+#: Authenticated with outstanding legal acceptance — only the endpoints that
+#: clear that.
+LegalExemptSession = Annotated[
+    AsyncSession, Depends(db_authed_legal_exempt, scope="function")
+]
+
+#: Authenticated while the account is deleting — status and re-request only.
+LifecycleExemptSession = Annotated[
+    AsyncSession, Depends(db_authed_lifecycle_exempt, scope="function")
+]
+
+#: No principal. Registration, recovery links, public configuration.
+AnonSession = Annotated[AsyncSession, Depends(db_anon, scope="function")]
+
+#: The admin plane, on its own principal namespace.
+AdminSession = Annotated[AsyncSession, Depends(db_admin, scope="function")]
 
 
 def client_ip(request: Request) -> str | None:
