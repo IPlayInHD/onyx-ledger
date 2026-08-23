@@ -84,6 +84,116 @@ async def _uid(client, token: str) -> uuid.UUID:
     return uuid.UUID(decode_access_token(token)["sub"])
 
 
+def _set_status(user_id: uuid.UUID, status: str) -> None:
+    """Put the account into an operator-set state, out of band."""
+    conn = _owner()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE identity.user_account SET status = %s WHERE id = %s",
+                (status, str(user_id)),
+            )
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# §11, §15 — what the legal exemption relaxes, and what it does NOT
+# --------------------------------------------------------------------------- #
+#
+# `db_authed_legal_exempt` is named in the deletion-cutoff allow-list that
+# `tests/unit/test_lifecycle_boundaries.py` enforces over every authenticated
+# route. That entry is a CLAIM — that the dependency relaxes the legal check
+# and nothing else — and a docstring is not evidence for it. These four tests
+# are the evidence: each removes a different reason to be refused and requires
+# the two legal endpoints to keep refusing.
+
+LEGAL_ROUTES = [
+    ("GET", "/api/v1/legal/state"),
+    ("POST", "/api/v1/legal/acceptances"),
+]
+
+
+async def _call(client, method: str, path: str, token: str):
+    if method == "GET":
+        return await client.get(path, headers=_auth(token))
+    return await client.post(
+        path,
+        headers=_auth(token),
+        json={
+            "document_type": LegalDocumentType.TERMS.value,
+            "document_version": CURRENT,
+        },
+    )
+
+
+@pytest.mark.parametrize(("method", "path"), LEGAL_ROUTES)
+async def test_a_deleting_account_is_refused_the_legal_endpoints(client, method, path):
+    """THE CUTOFF STILL APPLIES. An account that asked to be deleted must not
+    write a new row anywhere, and an acceptance is a row — one dated after the
+    cutoff, which a purge bounded on the request time would leave behind."""
+    email = f"legal_del_{uuid.uuid4().hex[:10]}@example.com"
+    token = await register_verified(client, email, PASSWORD)
+
+    asked = await client.post("/api/v1/account/deletion", headers=_auth(token))
+    assert asked.status_code in (200, 202), asked.text
+
+    refused = await _call(client, method, path, token)
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["type"].endswith("deletion-in-progress"), refused.text
+
+
+@pytest.mark.parametrize("status", ["suspended", "closed"])
+async def test_a_suspended_account_is_refused_the_legal_endpoints(client, status):
+    """Asking a suspended customer to accept new Terms would be a false
+    promise: accepting them would change nothing about why they are refused."""
+    _, token = await _pending_account(client)
+    _set_status(await _uid(client, token), status)
+
+    for method, path in LEGAL_ROUTES:
+        refused = await _call(client, method, path, token)
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["type"].endswith("account-not-active"), refused.text
+
+
+async def test_an_unverified_account_is_refused_the_legal_endpoints(client):
+    """Confirming an address comes FIRST. Two blockers on one customer at once
+    is how they end up unable to tell which screen they are looking at."""
+    email = f"legal_unv_{uuid.uuid4().hex[:10]}@example.com"
+    created = await client.post(
+        "/api/v1/auth/register", json={"email": email, "password": PASSWORD})
+    assert created.status_code == 201, created.text
+    signed_in = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": PASSWORD})
+    token = signed_in.json()["access_token"]
+
+    for method, path in LEGAL_ROUTES:
+        refused = await _call(client, method, path, token)
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["type"].endswith("email-verification-required"), refused.text
+
+
+async def test_the_exemption_relaxes_the_legal_check_and_nothing_else(client):
+    """The other half of the claim: with every OTHER reason absent, an account
+    whose only problem is outstanding acceptance reaches both endpoints. A
+    dependency that refused here would make the state permanent."""
+    _, token = await _pending_account(client)
+
+    state = await client.get("/api/v1/legal/state", headers=_auth(token))
+    assert state.status_code == 200, state.text
+    assert state.json()["application_access_blocked"] is True
+
+    accepted = await client.post(
+        "/api/v1/legal/acceptances",
+        headers=_auth(token),
+        json={
+            "document_type": LegalDocumentType.TERMS.value,
+            "document_version": CURRENT,
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+
 # --------------------------------------------------------------------------- #
 # §8, §9 — the state contract and the happy path
 # --------------------------------------------------------------------------- #

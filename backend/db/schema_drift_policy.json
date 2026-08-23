@@ -1879,16 +1879,6 @@
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },
     {
-      "key": "modify_type|admin|admin_user|email",
-      "kind": "modify_type",
-      "schema": "admin",
-      "table": "admin_user",
-      "object": "email",
-      "detail": "CITEXT->String",
-      "class": "TYPE_AFFINITY",
-      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
-    },
-    {
       "key": "modify_type|admin|admin_user|status",
       "kind": "modify_type",
       "schema": "admin",
@@ -2739,16 +2729,6 @@
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },
     {
-      "key": "modify_type|identity|login_event|email_tried",
-      "kind": "modify_type",
-      "schema": "identity",
-      "table": "login_event",
-      "object": "email_tried",
-      "detail": "CITEXT->String",
-      "class": "TYPE_AFFINITY",
-      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
-    },
-    {
       "key": "modify_type|identity|login_event|event_type",
       "kind": "modify_type",
       "schema": "identity",
@@ -2775,16 +2755,6 @@
       "table": "mfa_method",
       "object": "method_type",
       "detail": "TEXT->String",
-      "class": "TYPE_AFFINITY",
-      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
-    },
-    {
-      "key": "modify_type|identity|user_account|email",
-      "kind": "modify_type",
-      "schema": "identity",
-      "table": "user_account",
-      "object": "email",
-      "detail": "CITEXT->String",
       "class": "TYPE_AFFINITY",
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },
@@ -5194,6 +5164,36 @@
       "schema": "identity",
       "table": "account_lifecycle",
       "object": "ck_account_lifecycle_state",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|legal_acceptance|legal_acceptance_document_type_check",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "legal_acceptance",
+      "object": "legal_acceptance_document_type_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|legal_acceptance|legal_acceptance_document_version_check",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "legal_acceptance",
+      "object": "legal_acceptance_document_version_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|identity|legal_acceptance|uq_legal_acceptance_user_document_version",
+      "kind": "remove_constraint",
+      "schema": "identity",
+      "table": "legal_acceptance",
+      "object": "uq_legal_acceptance_user_document_version",
       "detail": "",
       "class": "RAW_SQL_MANAGED_CHECK",
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
@@ -8709,6 +8709,16 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|identity|legal_acceptance|ix_legal_acceptance_user_time",
+      "kind": "remove_index",
+      "schema": "identity",
+      "table": "legal_acceptance",
+      "object": "ix_legal_acceptance_user_time",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|identity|login_event|brin_login_event",
       "kind": "remove_index",
       "schema": "identity",
@@ -9883,6 +9893,16 @@
       "kind": "remove_table_comment",
       "schema": "identity",
       "table": "deletion_subject",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|identity|legal_acceptance|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "identity",
+      "table": "legal_acceptance",
       "object": "<table_comment>",
       "detail": "",
       "class": "TABLE_COMMENT_METADATA",

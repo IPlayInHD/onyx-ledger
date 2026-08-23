@@ -33,8 +33,25 @@ WORKERS = BACKEND / "workers" / "tasks"
 #: suspension and closure all still apply. It exists because the resend-
 #: verification endpoint is the one thing an unverified account must be able to
 #: reach, and `db_authed` refuses exactly that.
+#:
+#: `db_authed_legal_exempt` belongs here for the same reason and on the same
+#: terms. It calls the same `assert_may_act` with `require_legal_acceptance=
+#: False`, which relaxes the legal-standing check and nothing else — the
+#: deletion cutoff, the shared lifecycle lock, verification, suspension and
+#: closure all still apply. It exists because the two endpoints that CLEAR
+#: outstanding acceptance cannot themselves be refused for having outstanding
+#: acceptance, or the state is permanent.
+#:
+#: WHAT WOULD MAKE THIS A WEAKENING, so a later reader can check rather than
+#: trust: a dependency here that does not reach `assert_may_act`, or one that
+#: passes anything other than `require_verified` / `require_legal_acceptance`
+#: to it. Neither is true of the three below, and the deletion cutoff is
+#: decided before either flag is consulted.
 _CUTOFF_DEPENDENCIES = frozenset({
-    "db_authed", "db_authed_unverified_ok", "assert_account_active",
+    "db_authed",
+    "db_authed_unverified_ok",
+    "db_authed_legal_exempt",
+    "assert_account_active",
 })
 
 #: The only user-facing routes allowed to work for a deleting account, and why.
