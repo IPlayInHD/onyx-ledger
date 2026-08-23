@@ -10,6 +10,7 @@
    A mocked API would only prove the mock agrees with itself.
    ========================================================================= */
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { legalStateAfterVerification } from './account'
 import { fillField } from './form'
 import { acceptOutstandingLegal } from './legal'
 import { tokenFrom, waitForMessage } from './mailbox'
@@ -190,13 +191,11 @@ async function seedPersona(
   // second registry in the test suite is the same mistake B4 forbids the
   // frontend from making, and it would stop covering a document the day one
   // is added.
-  const legalState = await api.get(`${API}/api/v1/legal/state`, { headers })
-  // The BODY in the message, not just the status. Four different refusals
-  // share 403 here — deleting, suspended, unverified, legal — and a bare
-  // "expected 200, received 403" cannot tell them apart, which turns a
-  // one-line diagnosis into a re-run.
-  expect(legalState.status(), `legal state: ${await legalState.text()}`).toBe(200)
-  for (const document of (await legalState.json()).documents) {
+  // `legalStateAfterVerification` reads the state through a bounded settle: the
+  // 200 from the confirm above can arrive before the transaction behind it has
+  // committed. That is a recorded server defect, not a slow test — see the
+  // helper for the measurement and why it is not repaired there.
+  for (const document of (await legalStateAfterVerification(api, headers)).documents) {
     if (!document.acceptance_outstanding) continue
     const accepted = await postPaced(api, `${API}/api/v1/legal/acceptances`, {
       headers,

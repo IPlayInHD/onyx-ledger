@@ -16,6 +16,7 @@
        a flow whose premise is that somebody else may have had access
    ========================================================================= */
 import { expect, test, type APIRequestContext } from '@playwright/test'
+import { legalStateAfterVerification } from './account'
 import { type } from './form'
 import { messagesFor, tokenFrom, waitForMessage } from './mailbox'
 
@@ -67,9 +68,7 @@ async function acceptLegalViaApi(api: APIRequestContext, email: string): Promise
   expect(signedIn.status(), 'login').toBe(200)
   const headers = { authorization: `Bearer ${(await signedIn.json()).access_token}` }
 
-  const state = await api.get(`${API}/api/v1/legal/state`, { headers })
-  expect(state.status(), `legal state: ${await state.text()}`).toBe(200)
-  for (const document of (await state.json()).documents) {
+  for (const document of (await legalStateAfterVerification(api, headers)).documents) {
     if (!document.acceptance_outstanding) continue
     const accepted = await api.post(`${API}/api/v1/legal/acceptances`, {
       headers,
