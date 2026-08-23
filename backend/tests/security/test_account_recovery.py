@@ -688,3 +688,53 @@ async def test_the_recovery_limit_is_tighter_than_the_login_limit(client):
     auth = POLICIES[OperationClass.AUTH_ATTEMPT]
     assert recovery.rate_allowance < auth.rate_allowance
     assert recovery.source_rate_allowance < auth.source_rate_allowance
+
+
+# --------------------------------------------------------------------------- #
+# §7 — email address handling
+# --------------------------------------------------------------------------- #
+
+async def test_recovery_finds_the_account_whatever_case_was_typed(client):
+    """AUDITED, NOT INVENTED. The existing handling is: pydantic's `EmailStr`
+    strips surrounding whitespace and lowercases the domain, and the column is
+    PostgreSQL `citext`, so the local part's case does not matter either.
+
+    That is what makes this work, and it matters more here than anywhere else
+    in the product: somebody who cannot remember their password is not going to
+    remember whether they capitalised their own name when they signed up.
+
+    No normalization is added on top. Anything more aggressive — stripping
+    dots, cutting `+tags` — would silently merge addresses that really are
+    different people at some providers.
+    """
+    local = f"Mixed.Case_{uuid.uuid4().hex[:8]}"
+    registered_as = f"{local}@Example.COM"
+    await register_verified(client, registered_as, PASSWORD)
+
+    # Typed back differently, and with the stray spaces a paste usually brings.
+    typed = f"  {local.lower()}@example.com  "
+    asked = await client.post("/api/v1/auth/password-reset", json={"email": typed})
+    assert asked.status_code == 202, asked.text
+
+    delivered = captured_emails(kind=TransactionalEmail.PASSWORD_RESET)
+    addresses = {m.to.lower() for m in delivered}
+    assert f"{local.lower()}@example.com" in addresses, (
+        "a reset for an address typed in a different case found no account"
+    )
+
+
+async def test_a_duplicate_registration_is_refused_the_same_way_whatever_case(client):
+    """Deterministic duplicate handling: the partial unique index is on a
+    citext column, so a second registration cannot create a shadow account
+    that only differs by capitalisation — and the service answers 409 rather
+    than letting the index raise."""
+    local = f"dupe_{uuid.uuid4().hex[:8]}"
+    first = await client.post(
+        "/api/v1/auth/register",
+        json={"email": f"{local}@example.com", "password": PASSWORD})
+    assert first.status_code == 201, first.text
+
+    second = await client.post(
+        "/api/v1/auth/register",
+        json={"email": f"{local.upper()}@EXAMPLE.COM", "password": PASSWORD})
+    assert second.status_code == 409, second.text
