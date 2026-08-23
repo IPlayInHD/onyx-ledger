@@ -219,6 +219,67 @@ async def accept_required_legal(client, token: str) -> None:
     assert not after.json()["application_access_blocked"], after.text
 
 
+async def grant_required_legal(session, user_id) -> None:
+    """Satisfy the B4 legal gate for an account created DIRECTLY in the database.
+
+    Most integration suites do not register through the API — they insert a
+    `UserAccount`, forge an access token and call the endpoint under test. That
+    account has accepted nothing, so B4's gate refuses every authenticated
+    request with 403 and the test fails on a `KeyError` for a field the error
+    body never had.
+
+    WRITING THE ROWS DIRECTLY IS THE RIGHT SHAPE HERE, not a shortcut. These
+    tests already construct their account out of band; establishing its legal
+    standing the same way keeps the precondition in one place instead of
+    bolting a registration flow onto a test about retention or the IOE. The
+    suites that DO exercise the real endpoints — `register_verified` and the
+    B4 acceptance tests — are the ones that prove the flow works.
+
+    Reads the required set from the registry rather than naming documents, so
+    a document moved into `requires_acceptance` is covered here automatically.
+
+    IT SETS `app.user_id` AROUND ITS OWN INSERTS, and restores it afterwards.
+    The callers build their account in a SYSTEM unit of work, where the GUC is
+    deliberately unset — so the table's `WITH CHECK (user_id =
+    ref.current_app_user())` refuses the row, which is the policy working
+    exactly as intended rather than something to route around. A separate
+    transaction is not an option either: the account row is not committed yet,
+    so the foreign key would not resolve.
+
+    Restoring matters. Leaving the GUC set would silently turn the rest of the
+    caller's system transaction into a tenant-scoped one, and the next
+    statement would start obeying RLS policies the fixture never meant to be
+    under — a fixture that changes the meaning of the test around it.
+    """
+    from sqlalchemy import text
+
+    from app.database.models import LegalAcceptance
+    from app.domain.legal import documents_requiring_acceptance
+
+    previous = await session.scalar(
+        text("SELECT current_setting('app.user_id', true)")
+    )
+    await session.execute(
+        text("SELECT set_config('app.user_id', :uid, true)"),
+        {"uid": str(user_id)},
+    )
+    try:
+        for document in documents_requiring_acceptance():
+            session.add(
+                LegalAcceptance(
+                    user_id=user_id,
+                    document_type=document.type.value,
+                    document_version=document.version,
+                )
+            )
+        await session.flush()
+    finally:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :uid, true)"),
+            {"uid": previous or ""},
+        )
+
+
 def owner_dsn() -> str:
     """Owner-role DSN for the database the harness actually provisioned.
 

@@ -47,7 +47,7 @@ from app.database.models import (
 from app.database.session import unit_of_work
 from app.services.analysis.service import AnalysisService
 from app.services.privacy.lifecycle import AccountLifecycleService
-from tests.conftest import owner_dsn
+from tests.conftest import grant_required_legal, owner_dsn
 
 INCOME = Decimal("91000")
 EXPENSE = Decimal("2500")
@@ -78,6 +78,7 @@ async def _user_with_sources() -> uuid.UUID:
         user = UserAccount(email=f"h2e_{uuid.uuid4().hex[:8]}@test.ca", status="active")
         s.add(user)
         await s.flush()
+        await grant_required_legal(s, user.id)
         uid = user.id
         income_type_id = (await s.scalar(
             select(IncomeType).where(IncomeType.code == "employment"))).id

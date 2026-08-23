@@ -27,7 +27,7 @@ from app.database.session import unit_of_work
 from app.services.ioe.domain.scenario import ScenarioSpec, StaleReason
 from app.services.ioe.scenario.freshness_service import ScenarioFreshnessService
 from app.services.ioe.scenario.service import ScenarioService
-from tests.conftest import frozen_snapshot
+from tests.conftest import frozen_snapshot, grant_required_legal
 
 RRSP = "INCREASE_RRSP_DEDUCTION"
 API = "/api/v1/ioe"
@@ -54,6 +54,7 @@ async def _user_with_analysis(employment: str = "95000") -> tuple[uuid.UUID, uui
         u = UserAccount(email=f"p6_{uuid.uuid4().hex[:8]}@test.ca", status="active")
         s.add(u)
         await s.flush()
+        await grant_required_legal(s, u.id)
         uid = u.id
         income_type = await s.scalar(
             select(IncomeType).where(IncomeType.code == "employment")

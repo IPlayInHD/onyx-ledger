@@ -38,7 +38,7 @@ from app.database.session import unit_of_work
 from app.schemas.assurance import TAX_ASSURANCE_SCHEMA_VERSION
 from app.services.ioe.orchestrator import OptimizationOrchestrator
 from app.services.privacy.lifecycle import AccountLifecycleService
-from tests.conftest import frozen_snapshot
+from tests.conftest import frozen_snapshot, grant_required_legal
 
 API = "/api/v1/ioe/assurance"
 TAX_YEAR = 2025
@@ -72,6 +72,7 @@ async def _user_with_analysis(employment: str = "95000"):
             email=f"assure_{uuid.uuid4().hex[:8]}@test.ca", status="active")
         s.add(account)
         await s.flush()
+        await grant_required_legal(s, account.id)
         uid = account.id
         income_type_id = (await s.scalar(
             select(IncomeType).where(IncomeType.code == "employment"))).id

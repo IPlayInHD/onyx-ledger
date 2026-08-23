@@ -45,7 +45,7 @@ from app.services.ioe.freshness_relay import FreshnessRelay
 from app.services.ioe.orchestrator import OptimizationOrchestrator
 from app.services.ioe.scenario.freshness_service import ScenarioFreshnessService
 from app.services.ioe.scenario.service import ScenarioService
-from tests.conftest import frozen_snapshot
+from tests.conftest import frozen_snapshot, grant_required_legal
 
 RRSP = "INCREASE_RRSP_DEDUCTION"
 
@@ -73,6 +73,7 @@ async def _user_with_analysis() -> tuple[uuid.UUID, uuid.UUID]:
         u = UserAccount(email=f"ev_{uuid.uuid4().hex[:8]}@test.ca", status="active")
         s.add(u)
         await s.flush()
+        await grant_required_legal(s, u.id)
         uid = u.id
         itype = await s.scalar(select(IncomeType).where(IncomeType.code == "employment"))
         type_id = itype.id

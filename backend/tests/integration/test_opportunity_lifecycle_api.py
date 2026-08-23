@@ -49,7 +49,7 @@ from app.services.privacy.lifecycle import AccountLifecycleService
 from app.services.state_graph.assurance import derive_assurance_map
 from app.services.state_graph.contracts import NodeFreshness
 from app.services.state_graph.service import TaxStateGraphService
-from tests.conftest import frozen_snapshot
+from tests.conftest import frozen_snapshot, grant_required_legal
 
 API = "/api/v1/ioe/opportunity-lifecycle"
 JOURNAL_API = "/api/v1/ioe/decision-journal"
@@ -95,6 +95,7 @@ async def _user_with_analysis() -> tuple[uuid.UUID, uuid.UUID]:
             email=f"lc_{uuid.uuid4().hex[:8]}@test.ca", status="active")
         s.add(account)
         await s.flush()
+        await grant_required_legal(s, account.id)
         uid = account.id
         income_type_id = (await s.scalar(
             select(IncomeType).where(IncomeType.code == "employment"))).id

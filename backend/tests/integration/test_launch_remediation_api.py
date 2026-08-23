@@ -24,6 +24,7 @@ from app.database.models import (
     UserAccount,
 )
 from app.database.session import unit_of_work
+from tests.conftest import grant_required_legal
 
 API = "/api/v1"
 
@@ -45,6 +46,7 @@ async def _user(province: str = "ON", employment: str = "80000") -> uuid.UUID:
         u = UserAccount(email=f"rem_{uuid.uuid4().hex[:10]}@test.ca", status="active")
         s.add(u)
         await s.flush()
+        await grant_required_legal(s, u.id)
         uid = u.id
         itype = await s.scalar(select(IncomeType).where(IncomeType.code == "employment"))
         type_id = itype.id
