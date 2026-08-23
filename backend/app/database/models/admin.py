@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import CITEXT, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, created_at_col, updated_at_col, uuid_pk
@@ -15,7 +15,33 @@ class AdminUser(Base):
     __table_args__ = {"schema": "admin"}
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    # CITEXT, NOT String, AND IT IS A CORRECTNESS FIX RATHER THAN TIDYING.
+    #
+    # The column has been `citext` since the schema was written, so the unique
+    # index and any hand-written SQL compare addresses case-insensitively. The
+    # ORM mapping said `String`, which made SQLAlchemy bind the parameter as
+    # varchar — and PostgreSQL resolves `citext = varchar` by casting the citext
+    # side DOWN to text, so every ORM lookup keyed on email was case SENSITIVE
+    # while the database it sat on was not.
+    #
+    # Measured, not inferred: with the same row stored as `Person@Example.com`,
+    # a raw text-parameter query for `person@example.com` matched and the ORM
+    # query did not.
+    #
+    # Three things were wrong because of it, and B3 made the third serious:
+    #
+    #   login          — `Person@x.ca` could not sign in as `person@x.ca`
+    #   registration   — the duplicate pre-check missed, so the citext unique
+    #                    index raised an IntegrityError: a 500 where the
+    #                    service means to answer 409
+    #   password reset — a customer typing their own address in a different
+    #                    case got NO EMAIL AND NO ERROR, because the endpoint
+    #                    is non-enumerating by design and silence is its
+    #                    correct answer for an address it does not recognise
+    #
+    # The last one has no failure signal at all from the outside, which is why
+    # it is fixed here rather than worked around at each call site.
+    email: Mapped[str] = mapped_column(CITEXT, unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="active")
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)

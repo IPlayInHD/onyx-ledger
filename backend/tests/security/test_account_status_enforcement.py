@@ -249,3 +249,64 @@ async def test_suspension_beats_unverified_when_an_account_is_both(client):
     refused = await client.get("/api/v1/users/me", headers=_headers(token))
     assert refused.status_code == 403
     assert refused.json()["type"].endswith("account-not-active"), refused.json()
+
+
+# ---------------------------------------------------------------------------
+# Email lookup is case-insensitive, everywhere it decides identity
+# ---------------------------------------------------------------------------
+
+async def test_every_identity_lookup_is_case_insensitive(client):
+    """A REGRESSION GUARD for a measured defect, not a style preference.
+
+    `identity.user_account.email` has been `citext` since the schema was
+    written, so the unique index and any hand-written SQL compare addresses
+    case-insensitively. The ORM mapped it as `String`, which made SQLAlchemy
+    bind the parameter as varchar — and PostgreSQL resolves `citext = varchar`
+    by casting the citext side DOWN to text. Every ORM lookup keyed on email
+    was therefore case sensitive against a database that was not.
+
+    Three surfaces were affected and they are tested together because they
+    have to agree; a fix that repaired one and not the others would leave an
+    account that can register but not sign in.
+
+    The third is why this is a security test. The password-reset endpoint is
+    non-enumerating, so silence IS its correct answer for an address it does
+    not recognise — which means a customer typing their own address in a
+    different case got no email, no error, and no way to tell the difference
+    between "we don't know you" and "we mis-compared".
+    """
+    from app.domain.ports import TransactionalEmail
+    from app.integrations.email import captured_emails
+
+    local = f"Case.Guard_{uuid.uuid4().hex[:8]}"
+    registered_as = f"{local}@Example.com"
+    stored = f"{local}@example.com"  # EmailStr lowercases the domain only
+
+    created = await client.post(
+        "/api/v1/auth/register", json={"email": registered_as, "password": PASSWORD})
+    assert created.status_code == 201, created.text
+    assert created.json()["email"] == stored
+
+    # 1. REGISTRATION refuses a duplicate that differs only in case, and does it
+    #    as a 409 from the service rather than as an integrity error from the
+    #    index — which would surface as a 500.
+    duplicate = await client.post(
+        "/api/v1/auth/register",
+        json={"email": f"{local.upper()}@EXAMPLE.COM", "password": PASSWORD})
+    assert duplicate.status_code == 409, duplicate.text
+
+    # 2. LOGIN finds the account whatever case was typed.
+    signed_in = await client.post(
+        "/api/v1/auth/login",
+        json={"email": f"{local.lower()}@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 200, signed_in.text
+
+    # 3. PASSWORD RESET finds it too, and the proof is a message rather than a
+    #    status code — the status is 202 either way, by design.
+    asked = await client.post(
+        "/api/v1/auth/password-reset",
+        json={"email": f"{local.upper()}@example.com"})
+    assert asked.status_code == 202, asked.text
+    assert captured_emails(to=stored, kind=TransactionalEmail.PASSWORD_RESET), (
+        "no reset message: the lookup missed an account that exists"
+    )

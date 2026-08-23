@@ -711,15 +711,24 @@ async def test_recovery_finds_the_account_whatever_case_was_typed(client):
     registered_as = f"{local}@Example.COM"
     await register_verified(client, registered_as, PASSWORD)
 
+    # The one normalization the product performs, asserted rather than assumed:
+    # the domain is lowercased and the local part is left exactly as typed.
+    # Writing this down is what turned a silent recovery failure into a
+    # measured defect — the ORM mapped a `citext` column as `String`, so every
+    # email lookup was case SENSITIVE against a database that was not.
+    stored = captured_emails(kind=TransactionalEmail.EMAIL_VERIFICATION)[-1].to
+    assert stored == f"{local}@example.com", stored
+
     # Typed back differently, and with the stray spaces a paste usually brings.
-    typed = f"  {local.lower()}@example.com  "
+    typed = f"  {local.lower()}@EXAMPLE.com  "
     asked = await client.post("/api/v1/auth/password-reset", json={"email": typed})
     assert asked.status_code == 202, asked.text
 
-    delivered = captured_emails(kind=TransactionalEmail.PASSWORD_RESET)
-    addresses = {m.to.lower() for m in delivered}
-    assert f"{local.lower()}@example.com" in addresses, (
-        "a reset for an address typed in a different case found no account"
+    addresses = {m.to for m in captured_emails(kind=TransactionalEmail.PASSWORD_RESET)}
+    assert stored in addresses, (
+        "a reset requested with a different capitalisation found no account, so "
+        "the customer got silence — which this endpoint cannot distinguish from "
+        "an address that has no account"
     )
 
 

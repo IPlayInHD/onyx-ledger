@@ -1195,6 +1195,23 @@
         "title": "DecisionJournalSummaryOut",
         "type": "object"
       },
+      "EmailVerificationRequest": {
+        "additionalProperties": false,
+        "description": "Present a verification link's token.\n\nNo account identifier: possession of the token IS the claim, and accepting\na user id alongside it would create a second, weaker way to say which\naccount is being verified.",
+        "properties": {
+          "token": {
+            "maxLength": 512,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "EmailVerificationRequest",
+        "type": "object"
+      },
       "EvidenceContextOut": {
         "description": "Governed evidence semantics beside the journal.\n\n`sealed_readiness` is what the sealed scenario recorded and will never\nchange. `current_observed_readiness` is the same certified primitive over\nthe documents held NOW \u2014 labeled current because it moves. Neither is\nverification that the reported action occurred.",
         "properties": {
@@ -2326,6 +2343,7 @@
         "type": "object"
       },
       "LoginRequest": {
+        "additionalProperties": false,
         "properties": {
           "email": {
             "format": "email",
@@ -3055,6 +3073,46 @@
         "title": "OptimizationRunOut",
         "type": "object"
       },
+      "PasswordResetCompletion": {
+        "additionalProperties": false,
+        "description": "Present a link's token and choose a new password.",
+        "properties": {
+          "new_password": {
+            "maxLength": 200,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 512,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "PasswordResetCompletion",
+        "type": "object"
+      },
+      "PasswordResetRequest": {
+        "additionalProperties": false,
+        "description": "Ask for a reset link. Answered identically whatever the address is.",
+        "properties": {
+          "email": {
+            "format": "email",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "PasswordResetRequest",
+        "type": "object"
+      },
       "PortfolioExclusionOut": {
         "description": "Why something is NOT recommended \u2014 itself a result, never hidden.",
         "properties": {
@@ -3388,7 +3446,20 @@
         "title": "RecordDecisionRequest",
         "type": "object"
       },
+      "RecoveryAccepted": {
+        "description": "The one answer every message-sending recovery endpoint gives.\n\nA FIXED STRING, not a rendered outcome. The moment this carries a field\nthat varies \u2014 \"sent\": true, an address, a masked address, a count \u2014 the\nendpoint starts answering \"does this address have an account?\", which is\nthe single thing these routes exist not to answer.",
+        "properties": {
+          "detail": {
+            "default": "If that address has an account, a message is on its way. Check your inbox, including spam.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "RecoveryAccepted",
+        "type": "object"
+      },
       "RefreshRequest": {
+        "additionalProperties": false,
         "properties": {
           "refresh_token": {
             "title": "Refresh Token",
@@ -3402,6 +3473,7 @@
         "type": "object"
       },
       "RegisterRequest": {
+        "additionalProperties": false,
         "properties": {
           "email": {
             "format": "email",
@@ -4894,6 +4966,20 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "VerificationResult": {
+        "description": "What a completed verification tells the client.\n\n`status` so the SPA can drop its \"unverified\" banner without a second\nround trip. It is the account's own status, which the caller just changed\nand is entitled to see.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "VerificationResult",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -5616,6 +5702,83 @@
         ]
       }
     },
+    "/api/v1/auth/password-reset": {
+      "post": {
+        "description": "Ask for a reset link.\n\nNON-ENUMERATING, and the handler is written so that it cannot accidentally\nstop being so. There is one `return` and it is unconditional; the service\nanswers `None` for every address it will not mail \u2014 unknown, suspended,\nclosed, deleting, or asked for too recently \u2014 and `deliver(None)` does\nnothing. No branch in this function can observe which of those happened, so\nno future edit can leak it by adding a field to one arm.\n\n202 rather than 200: the honest status for \"your request is accepted and\nsomething may happen later\", and identical either way.",
+        "operationId": "request_password_reset_api_v1_auth_password_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Password Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password-reset/confirm": {
+      "post": {
+        "description": "Set a new password from a reset link, and end every existing session.\n\nAnonymous for the same reason as verification: the link is clicked wherever\nthe mail was opened, and the token is the claim.\n\n204 and no body. Returning a token pair here would be convenient and wrong\n\u2014 it would hand a session to whoever holds the link, in the one flow whose\npremise is that somebody else may have had access. The customer signs in\nwith the password they just chose, which also proves they know it.",
+        "operationId": "complete_password_reset_api_v1_auth_password_reset_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetCompletion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Password Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/refresh": {
       "post": {
         "description": "Rotate a refresh token.\n\nAlso a credential surface: a stolen or guessed refresh token is presented\nhere. The identity scope is keyed on the presented TOKEN rather than on an\nemail, because that is the only identity claim the request carries \u2014 it\nbounds how fast one token can be hammered, while the address scope bounds\nhammering with a rotating supply of them.",
@@ -5697,6 +5860,75 @@
           }
         },
         "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verification": {
+      "post": {
+        "description": "Send, or re-send, this account's verification link.\n\nAUTHENTICATED, and that is what makes it safe to offer at all. An anonymous\n\"send verification to this address\" endpoint is an enumeration oracle and an\nemail-flood amplifier pointed at anybody whose address you can guess; this\none can only ever mail the account whose token was presented.\n\n`db_authed_unverified_ok` rather than `db_authed`: this is the endpoint that\nclears the unverified state, so it is the one that cannot require it to be\nclear already. Suspension, closure and the deletion cutoff all still apply.\n\nThrottled on `ACCOUNT_RECOVERY` keyed on the ACCOUNT, not the address \u2014 the\naddress would have to be read from the user table before the limiter ran,\nand they are one to one anyway.\n\n202, and the same body whatever happened. An account that is already\nverified mints nothing and sends nothing, and says so no differently.",
+        "operationId": "send_verification_api_v1_auth_verification_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send Verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/verification/confirm": {
+      "post": {
+        "description": "Complete verification by presenting a link's token.\n\nANONYMOUS on purpose: the link is clicked in whatever browser opened the\nmail, which is routinely not the one holding a session. Possession of the\ntoken is the entire claim, and requiring a bearer token as well would break\nthe common case to add nothing \u2014 an attacker holding the token does not\nalso need to be signed in.\n\nThrottled on `AUTH_ATTEMPT` keyed on the presented token, exactly as\n`/refresh` is and for the same reason: this is a credential surface, and the\ncredential is the only identity claim the request carries.",
+        "operationId": "confirm_verification_api_v1_auth_verification_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Verification",
         "tags": [
           "auth"
         ]

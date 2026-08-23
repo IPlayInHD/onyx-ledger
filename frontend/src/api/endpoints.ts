@@ -45,15 +45,18 @@ export const authApi = {
 
 /** What every message-sending recovery endpoint answers.
  *
+ *  Taken from the GENERATED contract, like everything else in this file, so a
+ *  backend change to the shape fails the typecheck here rather than rendering
+ *  `undefined` at a customer.
+ *
  *  ONE SHAPE, and it must stay one shape. The password-reset request answers
  *  identically for an address with an account and one without; a field that
  *  varied between them would turn this endpoint into the account-enumeration
  *  oracle the whole flow is written to avoid. The UI renders the copy it was
  *  given and never infers anything from it.
  */
-export interface RecoveryAccepted {
-  detail: string
-}
+export type RecoveryAccepted = S['RecoveryAccepted']
+export type VerificationResult = S['VerificationResult']
 
 export const recoveryApi = {
   /** Send, or re-send, this account's verification link. Authenticated: it can
@@ -64,7 +67,7 @@ export const recoveryApi = {
   /** Redeem a verification link. ANONYMOUS, because the link is opened in
    *  whatever browser read the mail — routinely not the one holding a session. */
   confirmVerification: (token: string) =>
-    request<{ status: string }>('/auth/verification/confirm', {
+    request<VerificationResult>('/auth/verification/confirm', {
       method: 'POST',
       body: { token },
       anonymous: true,

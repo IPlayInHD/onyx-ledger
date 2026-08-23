@@ -126,7 +126,16 @@ async def verify_account(client, email: str, token: str) -> None:
     )
     assert sent.status_code == 202, sent.text
 
-    messages = captured_emails(to=email, kind=TransactionalEmail.EMAIL_VERIFICATION)
+    # CASE-INSENSITIVE on the recipient, because the outbox holds the address
+    # the ACCOUNT stores and that is not always the string the caller typed:
+    # pydantic's `EmailStr` lowercases the domain. A helper that compared
+    # exactly reported "no message captured" for an address that had one, which
+    # is a confusing way to learn about a normalization the product documents.
+    wanted = email.casefold()
+    messages = [
+        m for m in captured_emails(kind=TransactionalEmail.EMAIL_VERIFICATION)
+        if m.to.casefold() == wanted
+    ]
     assert messages, f"no verification message captured for {email}"
 
     confirmed = await client.post(

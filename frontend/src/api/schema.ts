@@ -326,6 +326,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Password Reset
+         * @description Ask for a reset link.
+         *
+         *     NON-ENUMERATING, and the handler is written so that it cannot accidentally
+         *     stop being so. There is one `return` and it is unconditional; the service
+         *     answers `None` for every address it will not mail — unknown, suspended,
+         *     closed, deleting, or asked for too recently — and `deliver(None)` does
+         *     nothing. No branch in this function can observe which of those happened, so
+         *     no future edit can leak it by adding a field to one arm.
+         *
+         *     202 rather than 200: the honest status for "your request is accepted and
+         *     something may happen later", and identical either way.
+         */
+        post: operations["request_password_reset_api_v1_auth_password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Password Reset
+         * @description Set a new password from a reset link, and end every existing session.
+         *
+         *     Anonymous for the same reason as verification: the link is clicked wherever
+         *     the mail was opened, and the token is the claim.
+         *
+         *     204 and no body. Returning a token pair here would be convenient and wrong
+         *     — it would hand a session to whoever holds the link, in the one flow whose
+         *     premise is that somebody else may have had access. The customer signs in
+         *     with the password they just chose, which also proves they know it.
+         */
+        post: operations["complete_password_reset_api_v1_auth_password_reset_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
@@ -372,6 +430,72 @@ export interface paths {
          *     not remove that disclosure; it bounds how quickly it can be harvested.
          */
         post: operations["register_api_v1_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Verification
+         * @description Send, or re-send, this account's verification link.
+         *
+         *     AUTHENTICATED, and that is what makes it safe to offer at all. An anonymous
+         *     "send verification to this address" endpoint is an enumeration oracle and an
+         *     email-flood amplifier pointed at anybody whose address you can guess; this
+         *     one can only ever mail the account whose token was presented.
+         *
+         *     `db_authed_unverified_ok` rather than `db_authed`: this is the endpoint that
+         *     clears the unverified state, so it is the one that cannot require it to be
+         *     clear already. Suspension, closure and the deletion cutoff all still apply.
+         *
+         *     Throttled on `ACCOUNT_RECOVERY` keyed on the ACCOUNT, not the address — the
+         *     address would have to be read from the user table before the limiter ran,
+         *     and they are one to one anyway.
+         *
+         *     202, and the same body whatever happened. An account that is already
+         *     verified mints nothing and sends nothing, and says so no differently.
+         */
+        post: operations["send_verification_api_v1_auth_verification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Verification
+         * @description Complete verification by presenting a link's token.
+         *
+         *     ANONYMOUS on purpose: the link is clicked in whatever browser opened the
+         *     mail, which is routinely not the one holding a session. Possession of the
+         *     token is the entire claim, and requiring a bearer token as well would break
+         *     the common case to add nothing — an attacker holding the token does not
+         *     also need to be signed in.
+         *
+         *     Throttled on `AUTH_ATTEMPT` keyed on the presented token, exactly as
+         *     `/refresh` is and for the same reason: this is a credential surface, and the
+         *     credential is the only identity claim the request carries.
+         */
+        post: operations["confirm_verification_api_v1_auth_verification_confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1997,6 +2121,18 @@ export interface components {
             subject_opportunity_code: string | null;
         };
         /**
+         * EmailVerificationRequest
+         * @description Present a verification link's token.
+         *
+         *     No account identifier: possession of the token IS the claim, and accepting
+         *     a user id alongside it would create a second, weaker way to say which
+         *     account is being verified.
+         */
+        EmailVerificationRequest: {
+            /** Token */
+            token: string;
+        };
+        /**
          * EvidenceContextOut
          * @description Governed evidence semantics beside the journal.
          *
@@ -2836,6 +2972,27 @@ export interface components {
             workflow_status: string;
         };
         /**
+         * PasswordResetCompletion
+         * @description Present a link's token and choose a new password.
+         */
+        PasswordResetCompletion: {
+            /** New Password */
+            new_password: string;
+            /** Token */
+            token: string;
+        };
+        /**
+         * PasswordResetRequest
+         * @description Ask for a reset link. Answered identically whatever the address is.
+         */
+        PasswordResetRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /**
          * PortfolioExclusionOut
          * @description Why something is NOT recommended — itself a result, never hidden.
          */
@@ -2961,6 +3118,22 @@ export interface components {
              * Format: uuid
              */
             request_id: string;
+        };
+        /**
+         * RecoveryAccepted
+         * @description The one answer every message-sending recovery endpoint gives.
+         *
+         *     A FIXED STRING, not a rendered outcome. The moment this carries a field
+         *     that varies — "sent": true, an address, a masked address, a count — the
+         *     endpoint starts answering "does this address have an account?", which is
+         *     the single thing these routes exist not to answer.
+         */
+        RecoveryAccepted: {
+            /**
+             * Detail
+             * @default If that address has an account, a message is on its way. Check your inbox, including spam.
+             */
+            detail: string;
         };
         /** RefreshRequest */
         RefreshRequest: {
@@ -3514,6 +3687,18 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * VerificationResult
+         * @description What a completed verification tells the client.
+         *
+         *     `status` so the SPA can drop its "unverified" banner without a second
+         *     round trip. It is the account's own status, which the caller just changed
+         *     and is entitled to see.
+         */
+        VerificationResult: {
+            /** Status */
+            status: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -4022,6 +4207,70 @@ export interface operations {
             };
         };
     };
+    request_password_reset_api_v1_auth_password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_password_reset_api_v1_auth_password_reset_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetCompletion"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     refresh_api_v1_auth_refresh_post: {
         parameters: {
             query?: never;
@@ -4077,6 +4326,59 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_verification_api_v1_auth_verification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryAccepted"];
+                };
+            };
+        };
+    };
+    confirm_verification_api_v1_auth_verification_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailVerificationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationResult"];
                 };
             };
             /** @description Validation Error */

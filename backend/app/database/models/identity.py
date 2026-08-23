@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import INET, UUID
+from sqlalchemy.dialects.postgresql import CITEXT, INET, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, created_at_col, updated_at_col, uuid_pk
@@ -15,7 +15,33 @@ class UserAccount(Base):
     __table_args__ = {"schema": "identity"}
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    email: Mapped[str] = mapped_column(String, nullable=False)
+    # CITEXT, NOT String, AND IT IS A CORRECTNESS FIX RATHER THAN TIDYING.
+    #
+    # The column has been `citext` since the schema was written, so the unique
+    # index and any hand-written SQL compare addresses case-insensitively. The
+    # ORM mapping said `String`, which made SQLAlchemy bind the parameter as
+    # varchar — and PostgreSQL resolves `citext = varchar` by casting the citext
+    # side DOWN to text, so every ORM lookup keyed on email was case SENSITIVE
+    # while the database it sat on was not.
+    #
+    # Measured, not inferred: with the same row stored as `Person@Example.com`,
+    # a raw text-parameter query for `person@example.com` matched and the ORM
+    # query did not.
+    #
+    # Three things were wrong because of it, and B3 made the third serious:
+    #
+    #   login          — `Person@x.ca` could not sign in as `person@x.ca`
+    #   registration   — the duplicate pre-check missed, so the citext unique
+    #                    index raised an IntegrityError: a 500 where the
+    #                    service means to answer 409
+    #   password reset — a customer typing their own address in a different
+    #                    case got NO EMAIL AND NO ERROR, because the endpoint
+    #                    is non-enumerating by design and silence is its
+    #                    correct answer for an address it does not recognise
+    #
+    # The last one has no failure signal at all from the outside, which is why
+    # it is fixed here rather than worked around at each call site.
+    email: Mapped[str] = mapped_column(CITEXT, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending_verification")
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -66,7 +92,8 @@ class LoginEvent(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("identity.user_account.id", ondelete="SET NULL")
     )
-    email_tried: Mapped[str | None] = mapped_column(String)
+    # Also `citext` in the schema — see the note on `UserAccount.email`.
+    email_tried: Mapped[str | None] = mapped_column(CITEXT)
     event_type: Mapped[str] = mapped_column(String, nullable=False)
     ip_address: Mapped[str | None] = mapped_column(INET)
     user_agent: Mapped[str | None] = mapped_column(Text)
