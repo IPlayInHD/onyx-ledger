@@ -14,6 +14,8 @@
    minutes producing artefacts nobody asked for.
    ========================================================================= */
 import { expect, test } from '@playwright/test'
+import { seedUsableAccount } from './account'
+import { type } from './form'
 
 const API = process.env.ONYX_E2E_API ?? 'http://127.0.0.1:8099'
 const PASSWORD = 'supersecret1'
@@ -24,15 +26,10 @@ const OUT = 'visual'
  *  product photographs beautifully and tells you nothing. */
 async function seed(request: import('@playwright/test').APIRequestContext) {
   const email = `e2e_visual_${Date.now()}@test.ca`
-  const registered = await request.post(`${API}/api/v1/auth/register`, {
-    data: { email, password: PASSWORD },
-  })
-  expect(registered.status()).toBe(201)
-  const loggedIn = await request.post(`${API}/api/v1/auth/login`, {
-    data: { email, password: PASSWORD },
-  })
-  const { access_token } = (await loggedIn.json()) as { access_token: string }
-  const headers = { authorization: `Bearer ${access_token}` }
+  // Past email confirmation AND the legal gate. Without both, every write
+  // below is refused and the capture run photographs `/verify-email` twelve
+  // times under twelve product-screen names.
+  const { headers } = await seedUsableAccount(request, email, PASSWORD)
 
   await request.put(`${API}/api/v1/users/me/tax-profile`, {
     headers,
@@ -126,8 +123,8 @@ test('capture the product for design review', async ({ page, request }, testInfo
   )
 
   await page.goto('/sign-in')
-  await page.getByLabel(/email/i).fill(email)
-  await page.getByLabel(/password/i).fill(PASSWORD)
+  await type(page, /email/i, email)
+  await type(page, /password/i, PASSWORD)
   await page.getByRole('button', { name: /sign in/i }).click()
   await page.waitForURL(/\/app/, { timeout: 30_000 })
 

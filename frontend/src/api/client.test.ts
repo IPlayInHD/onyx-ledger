@@ -124,6 +124,80 @@ describe('request', () => {
     }
   })
 
+  /* ------------------------------------------------------------ legal -- */
+
+  it('recognises the legal gate as its own refusal, not a generic 403', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            type: 'https://onyx.ledger/errors/legal-acceptance-required',
+            detail: 'Review and accept the current terms to continue using Onyx.',
+          },
+          403,
+        ),
+      ),
+    )
+
+    try {
+      await request('/analysis')
+      expect.unreachable('should have thrown')
+    } catch (error) {
+      const api = error as ApiError
+      // The whole point of the distinction: this 403 has a screen the customer
+      // can act on, and a suspended account's 403 does not. Reading them the
+      // same way sends somebody who only needs to tick a box to a dead end.
+      expect(api.isLegalAcceptanceRequired).toBe(true)
+      expect(api.isVerificationRequired).toBe(false)
+      expect(api.isLegalVersionStale).toBe(false)
+    }
+  })
+
+  it('does not read the legal type as the gate when the status is not 403', async () => {
+    // Defence against a body-shaped answer from something that is not the
+    // gate — a cached page, a proxy, a replayed body. Routing a 200 or a 500
+    // to the acceptance screen would strand the customer there.
+    const error = new ApiError({
+      status: 500,
+      message: 'boom',
+      problemType: 'https://onyx.ledger/errors/legal-acceptance-required',
+    })
+    expect(error.isLegalAcceptanceRequired).toBe(false)
+  })
+
+  it('recognises a stale document version as its own conflict', async () => {
+    // A FRESH Response per call: a body can only be read once, so a single
+    // shared mock would hand the second caller a spent stream and the client
+    // would see an error with no type at all.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse(
+            {
+              type: 'https://onyx.ledger/errors/legal-version-stale',
+              detail: 'This document has been updated since your last visit.',
+            },
+            409,
+          ),
+        ),
+      ),
+    )
+
+    try {
+      await request('/legal/acceptances', { method: 'POST', body: {} })
+      expect.unreachable('should have thrown')
+    } catch (error) {
+      const api = error as ApiError
+      expect(api.status).toBe(409)
+      // Nothing was recorded against the old version, and the customer is told
+      // that rather than being shown a generic failure they might retry into.
+      expect(api.isLegalVersionStale).toBe(true)
+      expect(api.isLegalAcceptanceRequired).toBe(false)
+    }
+  })
+
   it('surfaces a transport failure as NetworkError, distinct from a server error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('failed to fetch')))
     await expect(request('/users/me')).rejects.toBeInstanceOf(NetworkError)

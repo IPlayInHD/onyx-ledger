@@ -114,6 +114,26 @@ test.describe('legal centre', () => {
     })
   }
 
+  // LONG LEGAL TEXT, scanned as such (B4 §32). The acceptance screen links out
+  // to these rather than embedding them, so the reading surface a customer is
+  // asked to agree to is this page — headings, contents order, draft banner and
+  // several thousand words of it. The two that require acceptance are the two
+  // scanned; a violation buried in the middle of the Terms is exactly the kind
+  // that a scan of the short pages would never see.
+  for (const id of ['terms', 'privacy']) {
+    test(`${id} has no detectable accessibility violations`, async ({ page }) => {
+      await page.goto(`/legal/${id}`)
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+      const results = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze()
+      expect(
+        results.violations.map((v) => `${v.id}: ${v.description}`),
+        'axe violations',
+      ).toEqual([])
+    })
+  }
+
   test('AI transparency states that AI does not determine tax results', async ({ page }) => {
     await page.goto('/legal/ai-transparency')
     const body = (await settledBody(page)).toLowerCase()

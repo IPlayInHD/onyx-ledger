@@ -11,6 +11,8 @@
    ========================================================================= */
 import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
+import { seedUsableAccount } from './account'
+import { type } from './form'
 
 const API = process.env.ONYX_E2E_API ?? 'http://127.0.0.1:8099'
 const PASSWORD = 'supersecret1'
@@ -38,37 +40,37 @@ test('authenticated surfaces have no detectable accessibility violations', async
 
   // Seed a real account with a real analysis, so the screens under test are
   // rendering genuine engine output rather than empty states.
-  const registered = await request.post(`${API}/api/v1/auth/register`, {
-    data: { email, password: PASSWORD },
-  })
-  expect(registered.status()).toBe(201)
-  const loggedIn = await request.post(`${API}/api/v1/auth/login`, {
-    data: { email, password: PASSWORD },
-  })
-  expect(loggedIn.status()).toBe(200)
-  const { access_token } = (await loggedIn.json()) as { access_token: string }
-  const headers = { authorization: `Bearer ${access_token}` }
+  //
+  // PAST BOTH GATES, and every seeding call below checked. This sweep used to
+  // register and go straight to signing in: the account was never confirmed,
+  // so all four writes were refused with a 403 nobody asserted on, and axe
+  // scanned `/verify-email` eight times under eight product-screen names.
+  const { headers } = await seedUsableAccount(request, email, PASSWORD)
 
-  await request.put(`${API}/api/v1/users/me/tax-profile`, {
+  const profile = await request.put(`${API}/api/v1/users/me/tax-profile`, {
     headers,
     data: { province_code: 'ON', marital_status: 'single' },
   })
-  await request.post(`${API}/api/v1/financials/income`, {
+  expect(profile.status(), 'tax profile').toBe(200)
+  const income = await request.post(`${API}/api/v1/financials/income`, {
     headers,
     data: { tax_year: TAX_YEAR, income_type_code: 'employment', amount: '90000' },
   })
-  await request.post(`${API}/api/v1/financials/expenses`, {
+  expect(income.status(), 'income').toBe(201)
+  const expense = await request.post(`${API}/api/v1/financials/expenses`, {
     headers,
     data: { tax_year: TAX_YEAR, expense_category_code: 'donation', amount: '5000' },
   })
-  await request.post(`${API}/api/v1/analysis`, {
+  expect(expense.status(), 'expense').toBe(201)
+  const analysis = await request.post(`${API}/api/v1/analysis`, {
     headers,
     data: { tax_year: TAX_YEAR },
   })
+  expect(analysis.status(), 'analysis').toBe(201)
 
   await page.goto('/sign-in')
-  await page.getByLabel(/email/i).fill(email)
-  await page.getByLabel(/password/i).fill(PASSWORD)
+  await type(page, /email/i, email)
+  await type(page, /password/i, PASSWORD)
   await page.getByRole('button', { name: /sign in/i }).click()
   await page.waitForURL(/\/app/, { timeout: 30_000 })
 
@@ -76,6 +78,14 @@ test('authenticated surfaces have no detectable accessibility violations', async
 
   for (const screen of SCREENS) {
     await page.goto(screen.path)
+    // STILL ON THE SCREEN WE ASKED FOR. A gate that bounced the browser
+    // elsewhere would leave axe scanning a small public page and reporting it
+    // clean under a product screen's name — which is how this sweep spent two
+    // entries passing over nothing at all.
+    await expect(page, `${screen.name} bounced away from ${screen.path}`).toHaveURL(
+      new RegExp(`${screen.path}$`),
+      { timeout: 30_000 },
+    )
     // Wait for the route's own heading: scanning the Suspense fallback would
     // report a clean sheet for a page that never rendered.
     await page.getByRole('heading', { level: 1 }).first().waitFor({ state: 'visible' })

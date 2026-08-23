@@ -112,15 +112,30 @@ export default function VerifyEmail() {
     }
   }, [redemption])
 
+  /* DOES THIS TAB HOLD A SESSION? That is the only question this screen has to
+     answer, and it is deliberately not the same question as "may they use the
+     product". `legal-outstanding` is signed in — B4 added a second gate after
+     this one, and reading only `authenticated` here left a customer who had
+     just confirmed their address stranded on this page, being told they had
+     used a different browser. They had not. Caught by the E2E suite, and the
+     reason the check is a session question rather than a status equality. */
+  const holdsSession = status === 'authenticated' || status === 'legal-outstanding'
+
   /* Verified and holding a session in this tab: there is nothing left to do
-     here, so go where they were going. */
+     here, so go where they were going.
+
+     `/app` ON PURPOSE, even when the legal gate is outstanding. `RequireAuth`
+     is the ONE place that maps a session status onto a destination; sending
+     this screen straight to `/legal/accept` would be a second copy of that map
+     and the two would drift the first time a gate is added or removed. The
+     redirect happens inside the router, so nothing of the product renders. */
   useEffect(() => {
-    if (redemption === 'done' && status === 'authenticated') {
+    if (redemption === 'done' && holdsSession) {
       const timer = setTimeout(() => navigate('/app', { replace: true }), 1200)
       return () => clearTimeout(timer)
     }
     return undefined
-  }, [redemption, status, navigate])
+  }, [redemption, holdsSession, navigate])
 
   const handleResend = useCallback(async () => {
     setResendError(null)
@@ -173,7 +188,7 @@ export default function VerifyEmail() {
                 />
                 <section className="panel">
                   <div className="panel__body" ref={announcementRef} role="status" tabIndex={-1}>
-                    {status === 'authenticated' ? (
+                    {holdsSession ? (
                       <p className="text-sm text-secondary">
                         Taking you to Onyx…
                       </p>

@@ -15,7 +15,8 @@
      · a completed reset does not sign anybody in, which is the whole point of
        a flow whose premise is that somebody else may have had access
    ========================================================================= */
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext } from '@playwright/test'
+import { type } from './form'
 import { messagesFor, tokenFrom, waitForMessage } from './mailbox'
 
 const API = process.env.ONYX_E2E_API ?? 'http://127.0.0.1:8099'
@@ -24,24 +25,6 @@ const NEW_PASSWORD = 'a-completely-different-one-9'
 
 function freshEmail(tag: string): string {
   return `e2e_${tag}_${Date.now()}_${Math.floor(Math.random() * 1e6)}@test.ca`
-}
-
-/** Type into a field and WAIT FOR REACT TO HAVE ACCEPTED IT.
- *
- *  `fill()` writes the DOM value and dispatches `input`; React processes that
- *  asynchronously into component state. Under parallel load the submit click
- *  can land before the commit, so the handler reads an empty string and the
- *  form renders its own "enter your email address" — which looks exactly like
- *  a broken page and is a race in the test.
- *
- *  Observed once in a full run and never in four isolated repeats, which is
- *  the signature. A person cannot click faster than React commits; a headless
- *  browser on a loaded box can.
- */
-async function type(page: Page, label: RegExp, value: string): Promise<void> {
-  const field = page.getByLabel(label)
-  await field.fill(value)
-  await expect(field).toHaveValue(value)
 }
 
 /** Register through the API. Faster and less brittle than driving the form for
@@ -63,6 +46,40 @@ async function verifyViaApi(api: APIRequestContext, email: string): Promise<void
     data: { token: tokenFrom(await waitForMessage(email, 'EMAIL_VERIFICATION')) },
   })
   expect(confirmed.status(), 'confirm').toBe(200)
+}
+
+/** Clear the legal gate through the API.
+ *
+ *  A PRECONDITION HERE, NOT A SUBJECT. B4 puts an acceptance gate after
+ *  verification, so an account that has not accepted lands on `/legal/accept`
+ *  rather than in the product — correct behaviour, and proved by
+ *  `legal.spec.ts`. Recovery tests that care about "the new password works"
+ *  clear it first, so they keep asserting the thing they are actually about.
+ *
+ *  The required set comes from the SERVER. A list written here would be a
+ *  second registry, and it would stop covering a document the day one is
+ *  added.
+ */
+async function acceptLegalViaApi(api: APIRequestContext, email: string): Promise<void> {
+  const signedIn = await api.post(`${API}/api/v1/auth/login`, {
+    data: { email, password: PASSWORD },
+  })
+  expect(signedIn.status(), 'login').toBe(200)
+  const headers = { authorization: `Bearer ${(await signedIn.json()).access_token}` }
+
+  const state = await api.get(`${API}/api/v1/legal/state`, { headers })
+  expect(state.status(), `legal state: ${await state.text()}`).toBe(200)
+  for (const document of (await state.json()).documents) {
+    if (!document.acceptance_outstanding) continue
+    const accepted = await api.post(`${API}/api/v1/legal/acceptances`, {
+      headers,
+      data: {
+        document_type: document.document_type,
+        document_version: document.current_version,
+      },
+    })
+    expect(accepted.status(), `accept ${document.document_type}`).toBe(200)
+  }
 }
 
 test.describe('email verification', () => {
@@ -87,7 +104,7 @@ test.describe('email verification', () => {
     expect(body).not.toMatch(/do not match|incorrect|suspended|contact support/)
   })
 
-  test('opening the link confirms the address and opens the product', async ({
+  test('opening the link confirms the address and moves the customer on', async ({
     page,
     request,
   }) => {
@@ -103,7 +120,15 @@ test.describe('email verification', () => {
     const token = tokenFrom(await waitForMessage(email, 'EMAIL_VERIFICATION'))
     await page.goto(`/verify-email?token=${token}`)
 
-    await expect(page).toHaveURL(/\/app/, { timeout: 30_000 })
+    // NOT `/app`, and not this page either. Confirming the address clears the
+    // FIRST gate; B4 puts the current Terms and Privacy Policy behind the
+    // second one. What matters here is that the customer is carried onward to
+    // something they can act on rather than left sitting on the screen that
+    // just finished its job — which is exactly what happened when this page
+    // recognised only `authenticated` as "holds a session", and told a
+    // customer who had confirmed in this very tab that they had used a
+    // different browser.
+    await expect(page).toHaveURL(/\/legal\/accept/, { timeout: 30_000 })
     // The token is out of the address bar before anything else happens.
     expect(page.url()).not.toContain('token=')
   })
@@ -177,6 +202,7 @@ test.describe('password recovery', () => {
     const email = freshEmail('reset')
     await registerViaApi(request, email)
     await verifyViaApi(request, email)
+    await acceptLegalViaApi(request, email)
 
     await page.goto('/sign-in')
     await page.getByRole('link', { name: /forgot your password/i }).click()

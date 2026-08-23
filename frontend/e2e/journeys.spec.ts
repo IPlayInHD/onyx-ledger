@@ -10,6 +10,8 @@
    A mocked API would only prove the mock agrees with itself.
    ========================================================================= */
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { fillField } from './form'
+import { acceptOutstandingLegal } from './legal'
 import { tokenFrom, waitForMessage } from './mailbox'
 
 const API = process.env.ONYX_E2E_API ?? 'http://127.0.0.1:8099'
@@ -179,6 +181,33 @@ async function seedPersona(
   })
   expect(confirmed.status(), 'confirm verification').toBe(200)
 
+  // CLEAR THE LEGAL GATE. B4 refuses every authenticated write until the
+  // account has accepted the current required documents, so this is a
+  // precondition of the persona rather than a test of acceptance — the
+  // dedicated spec in legal.spec.ts is what proves the flow itself.
+  //
+  // The required set comes from the SERVER, never a list in this file. A
+  // second registry in the test suite is the same mistake B4 forbids the
+  // frontend from making, and it would stop covering a document the day one
+  // is added.
+  const legalState = await api.get(`${API}/api/v1/legal/state`, { headers })
+  // The BODY in the message, not just the status. Four different refusals
+  // share 403 here — deleting, suspended, unverified, legal — and a bare
+  // "expected 200, received 403" cannot tell them apart, which turns a
+  // one-line diagnosis into a re-run.
+  expect(legalState.status(), `legal state: ${await legalState.text()}`).toBe(200)
+  for (const document of (await legalState.json()).documents) {
+    if (!document.acceptance_outstanding) continue
+    const accepted = await postPaced(api, `${API}/api/v1/legal/acceptances`, {
+      headers,
+      data: {
+        document_type: document.document_type,
+        document_version: document.current_version,
+      },
+    })
+    expect(accepted.status(), `accept ${document.document_type}`).toBe(200)
+  }
+
   const profile = await api.put(`${API}/api/v1/users/me/tax-profile`, {
     headers,
     data: { province_code: 'ON', marital_status: 'single' },
@@ -263,10 +292,8 @@ async function submitAuthForm(
     // broken page and is a race in the test.
     const emailField = page.getByLabel(/email/i)
     const passwordField = page.getByLabel(/password/i)
-    await emailField.fill(email)
-    await passwordField.fill(PASSWORD)
-    await expect(emailField).toHaveValue(email)
-    await expect(passwordField).toHaveValue(PASSWORD)
+    await fillField(emailField, email)
+    await fillField(passwordField, PASSWORD)
     await page.getByRole('button', { name: button }).click()
 
     // Race the two real outcomes instead of waiting out the full navigation
@@ -411,6 +438,13 @@ test.describe('new user journey', () => {
     // Open the link the way a customer does.
     const token = tokenFrom(await waitForMessage(email, 'EMAIL_VERIFICATION'))
     await page.goto(`/verify-email?token=${token}`)
+
+    // CONFIRMING THE ADDRESS DOES NOT OPEN THE PRODUCT — it advances the
+    // account to the next gate. B4 asks for the current Terms and Privacy
+    // Policy before any tax surface, and the two gates are ordered so the
+    // customer only ever sees the one they can act on.
+    await expect(page).toHaveURL(/\/legal\/accept/, { timeout: 30_000 })
+    await acceptOutstandingLegal(page)
     await expect(page).toHaveURL(/\/app/, { timeout: 30_000 })
 
     await page.goto('/trust')
