@@ -1,7 +1,22 @@
 import { defineConfig, devices } from '@playwright/test'
 
-/* Browser E2E for the critical journeys. Chromium is provisioned in this
-   environment; `executablePath` is left to Playwright's own resolution. */
+/* Browser E2E for the critical journeys.
+
+   ONYX_E2E_CHROMIUM, when set, points Playwright at a Chromium that is already
+   on the machine instead of the build it downloads for itself. UNSET BY
+   DEFAULT, so CI — which runs `npx playwright install` and gets an exactly
+   matching build — behaves as it always has.
+
+   It exists for a sandbox that pre-provisions browsers: the image's Chromium
+   is pinned to whatever Playwright version it was built against, and a
+   lockfile bump leaves the two disagreeing about a build number. Playwright
+   then refuses to launch and EVERY test fails in single-digit milliseconds,
+   which reads exactly like a catastrophic application regression and is
+   nothing of the kind. Naming the binary is cheaper than downloading 150MB
+   into a container that already has one. */
+const CHROMIUM = process.env.ONYX_E2E_CHROMIUM
+const launch = CHROMIUM ? { executablePath: CHROMIUM } : {}
+
 export default defineConfig({
   testDir: './e2e',
   /* Longer than Playwright's 30s default, on purpose. Authentication draws on
@@ -19,10 +34,10 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
+    { name: 'desktop', use: { ...devices['Desktop Chrome'], launchOptions: launch } },
     // A real small-phone profile: mobile is a supported target, not an
     // afterthought, so the same journeys run at 393px.
-    { name: 'mobile', use: { ...devices['Pixel 7'] } },
+    { name: 'mobile', use: { ...devices['Pixel 7'], launchOptions: launch } },
   ],
   webServer: {
     // --host 127.0.0.1 IS LOAD-BEARING. `vite preview` binds `localhost`,
