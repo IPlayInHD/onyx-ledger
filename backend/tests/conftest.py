@@ -180,7 +180,43 @@ async def register_verified(
     token = signed_in.json()["access_token"]
 
     await verify_account(client, email, token)
+    await accept_required_legal(client, token)
     return token
+
+
+async def accept_required_legal(client, token: str) -> None:
+    """Accept every document the registry currently requires.
+
+    B4 put a legal gate in front of the application, so a verified account is
+    still refused until it has agreed to the current Terms and Privacy Policy.
+    Almost every test that calls `register_verified` is about something else
+    entirely and wants a usable account as a PRECONDITION.
+
+    DRIVEN THROUGH THE REAL ENDPOINTS, and reading the required set from the
+    SERVER rather than hardcoding it. A test helper carrying its own list of
+    required documents would be a second registry — exactly what B4 §3 forbids
+    the frontend from having — and it would silently stop covering a document
+    the day one is added.
+    """
+    headers = {"Authorization": f"Bearer {token}"}
+    state = await client.get("/api/v1/legal/state", headers=headers)
+    assert state.status_code == 200, state.text
+
+    for document in state.json()["documents"]:
+        if not document["acceptance_outstanding"]:
+            continue
+        accepted = await client.post(
+            "/api/v1/legal/acceptances",
+            headers=headers,
+            json={
+                "document_type": document["document_type"],
+                "document_version": document["current_version"],
+            },
+        )
+        assert accepted.status_code == 200, accepted.text
+
+    after = await client.get("/api/v1/legal/state", headers=headers)
+    assert not after.json()["application_access_blocked"], after.text
 
 
 def owner_dsn() -> str:
