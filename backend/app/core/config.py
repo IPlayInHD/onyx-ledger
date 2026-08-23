@@ -183,6 +183,20 @@ class Settings(BaseSettings):
     #: Configuration only, https in production.
     app_public_url: str | None = None
 
+    #: Where the capture provider ALSO writes each message, one JSON file per
+    #: send. Unset by default, so the outbox is process-memory only.
+    #:
+    #: For two callers that cannot reach into the API process: a developer
+    #: running Onyx locally who needs to click the link, and the browser E2E
+    #: suite, which drives a real uvicorn over HTTP and has no other way to see
+    #: what was "sent". Both are the ergonomic access B3 §4 asks for.
+    #:
+    #: THIS CANNOT EXIST IN PRODUCTION. The capture provider is refused there
+    #: outright, so nothing ever writes to this directory — but the validator
+    #: below refuses the setting itself as well, because a path configured in
+    #: production is a statement of intent worth failing on.
+    email_capture_dir: str | None = None
+
     #: Recovery token lifetimes. Short enough that a link sitting in a mailbox
     #: stops being a credential quickly; long enough to survive a customer who
     #: reads their mail after lunch.
@@ -388,6 +402,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ONYX_APP_PUBLIC_URL must be set in production; verification "
                 "and reset links are built from it"
+            )
+        if self.email_capture_dir:
+            raise ValueError(
+                "ONYX_EMAIL_CAPTURE_DIR must not be set in production; it "
+                "writes transactional messages, including recovery links, to "
+                "the filesystem"
             )
         if not self.app_public_url.startswith("https://"):
             raise ValueError(

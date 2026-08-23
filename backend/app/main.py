@@ -10,6 +10,7 @@ from app.core.exceptions import DomainError
 from app.core.logging import configure_logging, correlation_id, get_logger
 from app.core.middleware import CorrelationIdMiddleware
 from app.services.admission import AdmissionRejected
+from app.services.auth.recovery import RecoveryThrottled
 from app.services.ioe.retention.service import StaleAcknowledgement
 from app.services.ioe.scenario.before_you_act import ComparisonUnavailable
 
@@ -49,6 +50,15 @@ def create_app() -> FastAPI:
             # reconnaissance signal.
             body["operation_code"] = exc.operation.value
             body["error_code"] = exc.reason.value
+            body["retry_after_seconds"] = exc.retry_after_seconds
+            headers["Retry-After"] = str(exc.retry_after_seconds)
+
+        if isinstance(exc, RecoveryThrottled):
+            # A recovery link went out recently and another is not being sent.
+            # The wait is the whole payload: the caller did nothing wrong, the
+            # delay is short and knowable, and a client that has to guess it
+            # will guess short and be refused again. Same two fields
+            # `AdmissionRejected` uses, so one client-side handler covers both.
             body["retry_after_seconds"] = exc.retry_after_seconds
             headers["Retry-After"] = str(exc.retry_after_seconds)
 

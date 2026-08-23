@@ -12,6 +12,7 @@ import pytest
 from app.core.security.jwt import create_admin_token
 from app.database.session import unit_of_work
 from app.services.admin.service import AdminService
+from tests.conftest import register_verified
 
 
 async def _make_admin(email: str, roles: list[str]) -> str:
@@ -60,9 +61,7 @@ async def test_four_eyes_ingest_approve_publish(client):
 
     # the newly published rule is now visible to end users via the KB
     email = f"u_{uuid.uuid4().hex[:6]}@t.ca"
-    await client.post("/api/v1/auth/register", json={"email": email, "password": "supersecret1"})
-    tok = (await client.post("/api/v1/auth/login",
-                             json={"email": email, "password": "supersecret1"})).json()["access_token"]
+    tok = await register_verified(client, email, "supersecret1")
     r = await client.get("/api/v1/tax/rules?tax_year=2025",
                          headers={"Authorization": f"Bearer {tok}"})
     assert any(rule["code"] == code for rule in r.json())
@@ -72,9 +71,7 @@ async def test_four_eyes_ingest_approve_publish(client):
 async def test_non_admin_token_rejected(client):
     # a normal user access token must not reach admin endpoints
     email = f"nu_{uuid.uuid4().hex[:6]}@t.ca"
-    await client.post("/api/v1/auth/register", json={"email": email, "password": "supersecret1"})
-    tok = (await client.post("/api/v1/auth/login",
-                             json={"email": email, "password": "supersecret1"})).json()["access_token"]
+    tok = await register_verified(client, email, "supersecret1")
     r = await client.post("/api/v1/admin/ingestion/jobs",
                           headers={"Authorization": f"Bearer {tok}"},
                           json=_dataset("NOPE"))

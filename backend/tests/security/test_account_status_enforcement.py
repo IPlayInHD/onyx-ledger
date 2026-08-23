@@ -26,7 +26,7 @@ import uuid
 import psycopg2
 import pytest
 
-from tests.conftest import owner_dsn
+from tests.conftest import owner_dsn, register_verified
 
 PASSWORD = "supersecret1"
 
@@ -55,13 +55,11 @@ def owner_cursor():
         conn.close()
 
 
-async def _register(client) -> tuple[str, uuid.UUID, str]:
+async def _register(client) -> tuple[str, uuid.UUID, str, str]:
     email = f"status_{uuid.uuid4().hex[:10]}@example.com"
-    assert (
-        await client.post(
-            "/api/v1/auth/register", json={"email": email, "password": PASSWORD}
-        )
-    ).status_code == 201
+    await register_verified(client, email, PASSWORD)
+    # Signed in again after verification, because these tests need a REFRESH
+    # token as well and want both halves of one pair.
     login = await client.post(
         "/api/v1/auth/login", json={"email": email, "password": PASSWORD}
     )
@@ -153,19 +151,101 @@ async def test_an_active_account_is_unaffected(client):
     ).status_code == 200
 
 
-async def test_pending_verification_is_deliberately_still_allowed(client):
-    """A decision, recorded as a test so it cannot drift into being an accident.
+async def test_pending_verification_signs_in_and_cannot_act(client):
+    """The decision this test used to record, INVERTED — as it said it should be.
 
-    `pending_verification` is NOT in the blocking set. Registration currently
-    creates accounts `active` and there is no email-verification flow, so
-    blocking the status would lock out any account that reached it with no way
-    to clear it. When verification ships, this test is where the policy changes:
-    it should be inverted, not deleted.
+    Its predecessor asserted `pending_verification` was fully allowed, because
+    registration created `active` accounts and there was no flow to clear the
+    status; it said in as many words that when verification shipped, this test
+    was where the policy would change and that it should be inverted rather
+    than deleted. B3 shipped it, so here is the inversion.
+
+    THE POLICY IS TWO-SIDED and both sides are load-bearing:
+
+      signs in    — because an account that cannot authenticate cannot ask for
+                    another link except through an anonymous endpoint keyed on
+                    a typed address, which is an enumeration oracle and an
+                    email-flood amplifier
+      cannot act  — because an unverified address is an unproven one, and an
+                    account that can file tax data against it is a product
+                    asserting something it has not checked
+
+    Asserting only the second half would be satisfied by an application that
+    refused the account outright, which is the failure this shape prevents.
     """
-    from app.services.privacy.lifecycle import BLOCKING_ACCOUNT_STATUSES
+    from app.services.privacy.lifecycle import (
+        BLOCKING_ACCOUNT_STATUSES,
+        UNVERIFIED_ACCOUNT_STATUSES,
+    )
 
-    assert "pending_verification" not in BLOCKING_ACCOUNT_STATUSES
+    assert "pending_verification" in UNVERIFIED_ACCOUNT_STATUSES
+    assert "pending_verification" not in BLOCKING_ACCOUNT_STATUSES, (
+        "an unverified account must still be able to sign in; see the "
+        "docstring above and BLOCKING_ACCOUNT_STATUSES for why"
+    )
 
-    token, user_id, _email, _refresh = await _register(client)
+    token, user_id, email, _refresh = await _register(client)
     _set_status(user_id, "pending_verification")
-    assert (await client.get("/api/v1/users/me", headers=_headers(token))).status_code == 200
+
+    # Authentication still works, both ways in.
+    signed_in = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": PASSWORD}
+    )
+    assert signed_in.status_code == 200, signed_in.text
+    assert (
+        await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": signed_in.json()["refresh_token"]},
+        )
+    ).status_code == 200
+
+    # The application does not.
+    refused = await client.get("/api/v1/users/me", headers=_headers(token))
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["type"].endswith("email-verification-required"), refused.json()
+
+
+async def test_the_unverified_refusal_is_distinguishable_from_suspension(client):
+    """§22: an unverified account must not look like a generic failure.
+
+    A frontend that cannot tell these apart shows "contact support" to somebody
+    who needs "check your email", and the account is stuck for a reason nobody
+    can see. Distinct `type` values are what make that impossible.
+    """
+    token, user_id, _email, _refresh = await _register(client)
+
+    _set_status(user_id, "pending_verification")
+    unverified = await client.get("/api/v1/users/me", headers=_headers(token))
+
+    _set_status(user_id, "suspended")
+    suspended = await client.get("/api/v1/users/me", headers=_headers(token))
+
+    assert unverified.status_code == suspended.status_code == 403
+    assert unverified.json()["type"] != suspended.json()["type"]
+    assert unverified.json()["type"].endswith("email-verification-required")
+    assert suspended.json()["type"].endswith("account-not-active")
+
+
+async def test_suspension_beats_unverified_when_an_account_is_both(client):
+    """Ordering, and it is not cosmetic.
+
+    "Confirm your email address" offered to a suspended account is a false
+    promise: confirming it would change nothing, and the customer would spend
+    the afternoon clicking links instead of contacting the operator who
+    suspended them.
+    """
+    token, user_id, _email, _refresh = await _register(client)
+    _set_status(user_id, "suspended")
+
+    # `suspended` is not `pending_verification`, so make the account genuinely
+    # both by clearing the verification stamp too — the status column holds one
+    # value, and suspension is the one an operator sets.
+    with owner_cursor() as cur:
+        cur.execute(
+            "UPDATE identity.user_account SET email_verified_at = NULL WHERE id = %s",
+            (str(user_id),),
+        )
+
+    refused = await client.get("/api/v1/users/me", headers=_headers(token))
+    assert refused.status_code == 403
+    assert refused.json()["type"].endswith("account-not-active"), refused.json()

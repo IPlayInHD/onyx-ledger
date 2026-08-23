@@ -16,19 +16,15 @@ from sqlalchemy import text
 
 from app.integrations.storage import ObjectTooLarge, get_object_storage
 from app.services.admission.limits import MAX_DOCUMENT_BYTES, MAX_EXTRACTION_TEXT_BYTES
+from tests.conftest import register_verified
 
 PASSWORD = "supersecret1"
 
 
 async def _authed(client) -> dict[str, str]:
     email = f"docbound_{uuid.uuid4().hex[:10]}@test.ca"
-    assert (await client.post(
-        "/api/v1/auth/register", json={"email": email, "password": PASSWORD}
-    )).status_code == 201
-    login = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": PASSWORD})
-    assert login.status_code == 200, login.text
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+    token = await register_verified(client, email, PASSWORD)
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _key_from(upload_url: str) -> tuple[str, str]:

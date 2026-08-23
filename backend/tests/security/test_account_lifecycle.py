@@ -21,7 +21,7 @@ from app.services.privacy import (
     LifecycleFailureCode,
     LifecycleState,
 )
-from tests.conftest import owner_dsn
+from tests.conftest import owner_dsn, register_verified
 
 PASSWORD = "supersecret1"
 
@@ -36,13 +36,7 @@ async def _dispose_engine():
 
 async def _register(client) -> tuple[str, uuid.UUID, str]:
     email = f"lifecycle_{uuid.uuid4().hex[:10]}@example.com"
-    assert (await client.post("/api/v1/auth/register",
-                              json={"email": email, "password": PASSWORD})
-            ).status_code == 201
-    login = await client.post("/api/v1/auth/login",
-                              json={"email": email, "password": PASSWORD})
-    assert login.status_code == 200, login.text
-    token = login.json()["access_token"]
+    token = await register_verified(client, email, PASSWORD)
     me = await client.get("/api/v1/users/me",
                           headers={"Authorization": f"Bearer {token}"})
     return token, uuid.UUID(me.json()["id"]), email

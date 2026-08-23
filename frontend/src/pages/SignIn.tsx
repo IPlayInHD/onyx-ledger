@@ -242,12 +242,8 @@ export default function SignIn() {
                   <p className="text-sm text-secondary">
                     New to Onyx? <Link to="/sign-up">Create an account</Link>.
                   </p>
-                  {/* Said plainly rather than hidden behind a link that would
-                      go nowhere: the certified backend exposes no password
-                      reset, so this screen will not pretend to offer one. */}
-                  <p className="text-xs text-muted">
-                    Onyx cannot yet send a password reset email. Keep your
-                    password somewhere you can retrieve it.
+                  <p className="text-sm text-secondary">
+                    <Link to="/forgot-password">Forgot your password?</Link>
                   </p>
                 </div>
               </div>

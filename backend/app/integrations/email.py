@@ -20,6 +20,9 @@ could work.
 """
 from __future__ import annotations
 
+import json
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.core.logging import get_logger
@@ -77,12 +80,58 @@ _OUTBOX: list[CapturedEmail] = []
 
 
 class CaptureEmailProvider:
-    """Records the message and sends nothing. Never opens a socket."""
+    """Records the message and sends nothing. Never opens a socket.
+
+    `capture_dir` ALSO writes each message to disk, one JSON file per send.
+    That exists for the two readers who cannot reach into this process: a
+    developer running Onyx locally who needs to click the link, and the browser
+    E2E suite, which drives a real uvicorn over HTTP. Both are the ergonomic
+    access B3 §4 asks for, and neither can exist in production — the capture
+    provider is refused there, and so is the setting.
+
+    A FAILED WRITE IS NOT A FAILED SEND. The in-memory outbox is the real one;
+    the directory is a convenience, so a full disk or a bad path logs and
+    carries on rather than turning a developer's typo into a delivery failure
+    that looks like a product defect.
+    """
+
+    def __init__(self, capture_dir: str | None = None) -> None:
+        self._dir = Path(capture_dir) if capture_dir else None
 
     def send(
         self, to: str, kind: TransactionalEmail, message: RenderedEmail
     ) -> None:
         _OUTBOX.append(CapturedEmail(to, kind, message))
+        if self._dir is not None:
+            self._write(to, kind, message)
+
+    def _write(
+        self, to: str, kind: TransactionalEmail, message: RenderedEmail
+    ) -> None:
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
+            # The recipient is in the NAME so a reader can find one message
+            # without opening every file, and every character that is not
+            # plainly safe in a path is replaced — an address is user input,
+            # and `../` in a filename is how a convenience becomes a write
+            # primitive. `uuid4` keeps two messages to one address distinct.
+            safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in to)
+            path = self._dir / f"{safe}.{uuid.uuid4().hex}.json"  # type: ignore[operator]
+            path.write_text(
+                json.dumps(
+                    {
+                        "to": to,
+                        "kind": kind.value,
+                        "subject": message.subject,
+                        "text": message.text,
+                        "html": message.html,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            log.warning("capture_email_not_written", error_class=type(exc).__name__)
 
 
 def captured_emails(
@@ -221,7 +270,7 @@ def build_email_provider(
                 "instead of delivered, and every locked-out customer would "
                 "stay locked out"
             )
-        return CaptureEmailProvider()
+        return CaptureEmailProvider(settings.email_capture_dir)
 
     # Imported here, not at module scope: this module is pulled in by services
     # that never send mail, and a top-level import would make the whole

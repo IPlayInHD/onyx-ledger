@@ -19,6 +19,9 @@ import { useAuth } from '@/auth/AuthProvider'
 const Landing = lazy(() => import('@/pages/Landing'))
 const SignIn = lazy(() => import('@/pages/SignIn'))
 const SignUp = lazy(() => import('@/pages/SignUp'))
+const VerifyEmail = lazy(() => import('@/pages/VerifyEmail'))
+const ForgotPassword = lazy(() => import('@/pages/ForgotPassword'))
+const ResetPassword = lazy(() => import('@/pages/ResetPassword'))
 const Onboarding = lazy(() => import('@/pages/Onboarding'))
 const Overview = lazy(() => import('@/pages/Overview'))
 const Position = lazy(() => import('@/pages/Position'))
@@ -51,6 +54,13 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (status === 'anonymous') {
     return <Navigate to="/sign-in" replace state={{ from: location.pathname }} />
   }
+  // Signed in, address not confirmed. A distinct destination from /sign-in,
+  // because sending them to a form that is going to succeed and change nothing
+  // is the generic failure they cannot act on. `from` is carried so the app
+  // resumes where they were headed once the link is opened.
+  if (status === 'unverified') {
+    return <Navigate to="/verify-email" replace state={{ from: location.pathname }} />
+  }
   return <AppShell>{children}</AppShell>
 }
 
@@ -70,6 +80,14 @@ export default function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/sign-in" element={<SignIn />} />
         <Route path="/sign-up" element={<SignUp />} />
+        {/* Recovery is PUBLIC. Every one of these is reached from a link in an
+            email, opened in whatever browser read the mail — which is
+            routinely not the one holding a session. Putting them behind
+            RequireAuth would break the ordinary case to protect nothing: the
+            token in the link is the entire claim. */}
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/trust" element={<TrustCentre />} />
         <Route path="/legal" element={<LegalIndex />} />
         <Route path="/legal/:documentId" element={<LegalDocument />} />

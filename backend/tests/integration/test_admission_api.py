@@ -14,20 +14,12 @@ import pytest
 from app.database.session import unit_of_work
 from app.services.admission.policy import POLICIES, OperationClass
 from app.services.admission.service import AdmissionService
+from tests.conftest import register_verified
 
 
 async def _register(client) -> tuple[str, uuid.UUID]:
     email = f"admission_{uuid.uuid4().hex[:12]}@test.ca"
-    response = await client.post(
-        "/api/v1/auth/register", json={"email": email, "password": "supersecret1"}
-    )
-    assert response.status_code == 201, response.text
-    login = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "supersecret1"}
-    )
-    assert login.status_code == 200, login.text
-    token = login.json()["access_token"]
-
+    token = await register_verified(client, email, "supersecret1")
     me = await client.get("/api/v1/users/me",
                           headers={"Authorization": f"Bearer {token}"})
     return token, uuid.UUID(me.json()["id"])

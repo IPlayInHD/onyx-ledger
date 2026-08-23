@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.database.session import unit_of_work
-from tests.conftest import owner_dsn
+from tests.conftest import owner_dsn, register_verified
 
 # The ONLY objects the freshness worker may touch directly. Anything else it can
 # reach is a finding. Kept deliberately tiny — the worker's whole job is to call
@@ -398,12 +398,8 @@ async def test_the_api_error_body_is_sanitized_and_correlated(client):
     non-enumerating 404 needs a caller the system will actually admit.
     """
     email = f"errshape_{uuid.uuid4().hex[:10]}@example.com"
-    assert (await client.post("/api/v1/auth/register",
-                              json={"email": email, "password": "supersecret1"})
-            ).status_code == 201
-    login = await client.post("/api/v1/auth/login",
-                              json={"email": email, "password": "supersecret1"})
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    token = await register_verified(client, email, "supersecret1")
+    headers = {"Authorization": f"Bearer {token}"}
 
     response = await client.get(
         f"/api/v1/ioe/scenarios/{uuid.uuid4()}", headers=headers

@@ -33,6 +33,12 @@ export class ApiError extends Error {
   readonly code: string | null
   readonly detail: string | null
   readonly retryAfterSeconds: number | null
+  /** The RFC-9457 `type` URI. A STABLE identifier for what went wrong, which
+   *  `status` alone is not: the backend answers 403 for an account that is
+   *  suspended and for one that has not confirmed its email, and those two
+   *  need completely different screens. Matching on `detail` instead would
+   *  couple the UI to human copy. */
+  readonly problemType: string | null
 
   constructor(init: {
     status: number
@@ -40,6 +46,7 @@ export class ApiError extends Error {
     code?: string | null
     detail?: string | null
     retryAfterSeconds?: number | null
+    problemType?: string | null
   }) {
     super(init.message)
     this.name = 'ApiError'
@@ -47,6 +54,7 @@ export class ApiError extends Error {
     this.code = init.code ?? null
     this.detail = init.detail ?? null
     this.retryAfterSeconds = init.retryAfterSeconds ?? null
+    this.problemType = init.problemType ?? null
   }
 
   /** 404 is the backend's NON-ENUMERATING answer: "not yours" and "not there"
@@ -72,6 +80,32 @@ export class ApiError extends Error {
 
   get isValidation(): boolean {
     return this.status === 422
+  }
+
+  /** The account signed in fine and has not confirmed its email address.
+   *
+   *  Distinct from every other 403 on purpose: it is the one the customer can
+   *  clear themselves, in about thirty seconds, and showing them a suspension
+   *  screen instead would leave them contacting support about a link sitting
+   *  in their inbox. */
+  get isVerificationRequired(): boolean {
+    return (
+      this.status === 403 &&
+      this.problemType === 'https://onyx.ledger/errors/email-verification-required'
+    )
+  }
+
+  /** A recovery link was already sent recently. Carries `retryAfterSeconds`. */
+  get isRecoveryThrottled(): boolean {
+    return this.problemType === 'https://onyx.ledger/errors/recovery-throttled'
+  }
+
+  /** A verification or reset link is expired, used, or was never real. The
+   *  backend does not distinguish those four, and neither does the UI —
+   *  telling a holder of a guessed token that it "expired" tells them they
+   *  guessed a real one. */
+  get isRecoveryLinkInvalid(): boolean {
+    return this.problemType === 'https://onyx.ledger/errors/recovery-token-invalid'
   }
 }
 
@@ -171,6 +205,7 @@ async function parseError(response: Response): Promise<ApiError> {
   let detail: string | null = null
   let code: string | null = null
   let retryAfter: number | null = null
+  let problemType: string | null = null
   try {
     const payload = (await response.json()) as Record<string, unknown>
     // The backend's DomainError shape: {type,title,status,detail,...}. Its
@@ -181,6 +216,8 @@ async function parseError(response: Response): Promise<ApiError> {
     code = typeof errorCode === 'string' ? errorCode : null
     const retry = payload['retry_after_seconds']
     retryAfter = typeof retry === 'number' ? retry : null
+    const type = payload['type']
+    problemType = typeof type === 'string' ? type : null
   } catch {
     /* A non-JSON error body (a proxy's HTML 502) is not shown to the user. */
   }
@@ -190,6 +227,7 @@ async function parseError(response: Response): Promise<ApiError> {
     code,
     detail,
     retryAfterSeconds: retryAfter,
+    problemType,
   })
 }
 

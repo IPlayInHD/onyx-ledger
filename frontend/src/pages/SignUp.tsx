@@ -107,9 +107,14 @@ export default function SignUp() {
       setFailureCount((count) => count + 1)
       return
     }
+    // TO VERIFICATION, NOT ONBOARDING. Registering creates an account that has
+    // not confirmed its address, and `/app/onboarding` is behind RequireAuth,
+    // which would bounce straight here anyway — going directly saves the
+    // customer a redirect that looks like the product losing its place.
+    //
     // `replace` so the back button does not return to a form that has already
     // been submitted successfully.
-    navigate('/app/onboarding', { replace: true })
+    navigate('/verify-email', { replace: true })
   }
 
   return (

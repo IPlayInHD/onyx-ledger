@@ -10,6 +10,7 @@
    A mocked API would only prove the mock agrees with itself.
    ========================================================================= */
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { tokenFrom, waitForMessage } from './mailbox'
 
 const API = process.env.ONYX_E2E_API ?? 'http://127.0.0.1:8099'
 const PASSWORD = 'supersecret1'
@@ -162,6 +163,22 @@ async function seedPersona(
   expect(loggedIn.status(), 'login').toBe(200)
   const { access_token } = (await loggedIn.json()) as { access_token: string }
   const headers = { authorization: `Bearer ${access_token}` }
+
+  // CONFIRM THE ADDRESS. Registration creates `pending_verification`, and
+  // every write below is refused for an account in that state — so this is a
+  // precondition of the persona, not a test of verification. It goes through
+  // the real endpoints and the real message rather than a shortcut, because a
+  // shortcut here would take the whole browser suite off the path customers
+  // actually walk.
+  const asked = await postPaced(api, `${API}/api/v1/auth/verification`, {
+    data: undefined,
+    headers,
+  })
+  expect(asked.status(), 'ask for verification link').toBe(202)
+  const confirmed = await postPaced(api, `${API}/api/v1/auth/verification/confirm`, {
+    data: { token: tokenFrom(await waitForMessage(email, 'EMAIL_VERIFICATION')) },
+  })
+  expect(confirmed.status(), 'confirm verification').toBe(200)
 
   const profile = await api.put(`${API}/api/v1/users/me/tax-profile`, {
     headers,
@@ -357,14 +374,21 @@ test.describe('new user journey', () => {
   test('register, land in the product, and reach the trust surfaces', async ({ page }) => {
     const email = `e2e_new_${Date.now()}@test.ca`
 
-    // Registration lands in onboarding, because a new account has no facts yet
-    // and an empty position would be a meaningless first impression.
+    // Registration lands on the verification screen, not in the product: a new
+    // account has not confirmed its address, and Onyx will not show anybody
+    // their tax position until it knows the address belongs to them.
     await submitAuthForm(page, {
       path: '/sign-up',
       email,
       button: /create|sign up/i,
     })
-    expect(page.url()).toMatch(/\/app/)
+    await expect(page).toHaveURL(/\/verify-email/)
+    await expect(page.getByRole('heading', { name: /confirm your email/i })).toBeVisible()
+
+    // Open the link the way a customer does.
+    const token = tokenFrom(await waitForMessage(email, 'EMAIL_VERIFICATION'))
+    await page.goto(`/verify-email?token=${token}`)
+    await expect(page).toHaveURL(/\/app/, { timeout: 30_000 })
 
     await page.goto('/trust')
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()

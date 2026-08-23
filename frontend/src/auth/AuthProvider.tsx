@@ -19,7 +19,7 @@ import {
   type ReactNode,
 } from 'react'
 import { ApiError, NetworkError, auth, pauseFor, request } from '@/api/client'
-import { authApi, type TokenPair } from '@/api/endpoints'
+import { authApi, recoveryApi, type TokenPair } from '@/api/endpoints'
 
 export interface SessionUser {
   id: string
@@ -27,14 +27,36 @@ export interface SessionUser {
   status: string
 }
 
-type Status = 'restoring' | 'authenticated' | 'anonymous'
+/**
+ * `unverified` IS A SIGNED-IN STATE, and keeping it separate from both of its
+ * neighbours is the whole point.
+ *
+ * Not `anonymous`: the credentials were accepted, the tokens are real, and
+ * `/auth/verification` — the one endpoint that clears this state — needs them.
+ * Folding it into `anonymous` would send someone back to a sign-in form that
+ * is going to succeed and change nothing, which is the "generic login failure"
+ * the customer cannot act on.
+ *
+ * Not `authenticated`: the product surface is refused by the backend, so
+ * rendering it would fill the screen with failed requests.
+ */
+type Status = 'restoring' | 'authenticated' | 'unverified' | 'anonymous'
 
 interface AuthState {
   status: Status
   user: SessionUser | null
+  /** The address the pending link was sent to, so the "check your inbox"
+   *  screen can name it. Known because the customer just typed it. */
+  pendingEmail: string | null
   signIn: (email: string, password: string) => Promise<void>
   register: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
+  /** Ask for another verification link. Throws `ApiError` — a 429 carries the
+   *  wait, and the screen shows it rather than guessing. */
+  resendVerification: () => Promise<void>
+  /** Re-read the account after a link is redeemed in THIS tab, so the app
+   *  opens without making the customer sign in again. */
+  recheck: () => Promise<void>
 }
 
 /* Restoring a session may wait out a real throttle. The bound is generous
@@ -48,6 +70,7 @@ const AuthContext = createContext<AuthState | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('restoring')
   const [user, setUser] = useState<SessionUser | null>(null)
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
 
   const adopt = useCallback((tokens: TokenPair) => {
     auth.setAccessToken(tokens.access_token)
@@ -57,7 +80,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const drop = useCallback(() => {
     auth.clear()
     setUser(null)
+    setPendingEmail(null)
     setStatus('anonymous')
+  }, [])
+
+  /**
+   * Read the account behind the tokens we now hold, and settle into the state
+   * it implies. ONE function, called from sign-in, registration and session
+   * restore, because three copies of "what does a 403 here mean" would drift
+   * and only one of them would be tested.
+   *
+   * The tokens are KEPT on a verification refusal. They are valid — the
+   * account simply may not act yet — and they are exactly what the resend
+   * endpoint requires.
+   */
+  const settle = useCallback(async (knownEmail?: string) => {
+    try {
+      const me = await authApi.me()
+      setUser(me)
+      setPendingEmail(null)
+      setStatus('authenticated')
+    } catch (error) {
+      if (error instanceof ApiError && error.isVerificationRequired) {
+        setUser(null)
+        if (knownEmail) setPendingEmail(knownEmail)
+        setStatus('unverified')
+        return
+      }
+      throw error
+    }
   }, [])
 
   /* A 401 that survives a refresh attempt means the session is gone —
@@ -98,10 +149,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             skipAuthRefresh: true,
           })
           adopt(tokens)
-          const me = await authApi.me()
+          // No address to pass: a restored session knows the tokens, not what
+          // was typed to get them. The verification screen handles that by
+          // saying "your address" rather than inventing one.
+          await settle()
           if (cancelled) return
-          setUser(me)
-          setStatus('authenticated')
           return
         } catch (error) {
           const transient =
@@ -136,17 +188,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [adopt, drop])
+  }, [adopt, drop, settle])
 
   const signIn = useCallback(
     async (email: string, password: string) => {
       const tokens = await authApi.login(email, password)
       adopt(tokens)
-      const me = await authApi.me()
-      setUser(me)
-      setStatus('authenticated')
+      await settle(email)
     },
-    [adopt],
+    [adopt, settle],
   )
 
   const register = useCallback(
@@ -156,12 +206,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // there is exactly one code path that establishes a session.
       const tokens = await authApi.login(email, password)
       adopt(tokens)
-      const me = await authApi.me()
-      setUser(me)
-      setStatus('authenticated')
+      // Settles into `unverified`, which is now the ordinary outcome of
+      // registering — the account exists and has not confirmed its address.
+      await settle(email)
     },
-    [adopt],
+    [adopt, settle],
   )
+
+  const resendVerification = useCallback(async () => {
+    await recoveryApi.sendVerification()
+  }, [])
+
+  const recheck = useCallback(async () => {
+    await settle()
+  }, [settle])
 
   const signOut = useCallback(async () => {
     try {
@@ -179,8 +237,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [drop])
 
   const value = useMemo<AuthState>(
-    () => ({ status, user, signIn, register, signOut }),
-    [status, user, signIn, register, signOut],
+    () => ({
+      status,
+      user,
+      pendingEmail,
+      signIn,
+      register,
+      signOut,
+      resendVerification,
+      recheck,
+    }),
+    [status, user, pendingEmail, signIn, register, signOut, resendVerification, recheck],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

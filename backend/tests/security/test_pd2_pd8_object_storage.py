@@ -30,6 +30,7 @@ from app.services.document_processing.service import (
     OBJECT_KEY_VERSION,
     _opaque_object_key,
 )
+from tests.conftest import register_verified
 
 #: Every token here must be absent from a generated key.
 LEAKY_FILENAME = "Zorana Marchetti 2025 T4 medical private.pdf"
@@ -40,12 +41,7 @@ PASSWORD = "supersecret1"
 
 async def _register(client) -> tuple[str, uuid.UUID]:
     email = f"pd2_{uuid.uuid4().hex[:10]}@example.com"
-    assert (await client.post("/api/v1/auth/register",
-                              json={"email": email, "password": PASSWORD})
-            ).status_code == 201
-    login = await client.post("/api/v1/auth/login",
-                              json={"email": email, "password": PASSWORD})
-    token = login.json()["access_token"]
+    token = await register_verified(client, email, PASSWORD)
     me = await client.get("/api/v1/users/me",
                           headers={"Authorization": f"Bearer {token}"})
     return token, uuid.UUID(me.json()["id"])

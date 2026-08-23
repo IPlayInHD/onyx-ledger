@@ -41,6 +41,54 @@ export const authApi = {
   me: () => request<{ id: string; email: string; status: string }>('/users/me'),
 }
 
+/* --------------------------------------------------------- account recovery -- */
+
+/** What every message-sending recovery endpoint answers.
+ *
+ *  ONE SHAPE, and it must stay one shape. The password-reset request answers
+ *  identically for an address with an account and one without; a field that
+ *  varied between them would turn this endpoint into the account-enumeration
+ *  oracle the whole flow is written to avoid. The UI renders the copy it was
+ *  given and never infers anything from it.
+ */
+export interface RecoveryAccepted {
+  detail: string
+}
+
+export const recoveryApi = {
+  /** Send, or re-send, this account's verification link. Authenticated: it can
+   *  only ever mail the account whose token is presented. */
+  sendVerification: () =>
+    request<RecoveryAccepted>('/auth/verification', { method: 'POST' }),
+
+  /** Redeem a verification link. ANONYMOUS, because the link is opened in
+   *  whatever browser read the mail — routinely not the one holding a session. */
+  confirmVerification: (token: string) =>
+    request<{ status: string }>('/auth/verification/confirm', {
+      method: 'POST',
+      body: { token },
+      anonymous: true,
+    }),
+
+  requestPasswordReset: (email: string) =>
+    request<RecoveryAccepted>('/auth/password-reset', {
+      method: 'POST',
+      body: { email },
+      anonymous: true,
+    }),
+
+  /** Set a new password from a link. Returns nothing and grants nothing: the
+   *  backend deliberately does not hand back a session, because the premise of
+   *  a reset is that somebody else may have had access. The customer signs in
+   *  with the password they just chose. */
+  completePasswordReset: (token: string, newPassword: string) =>
+    request<void>('/auth/password-reset/confirm', {
+      method: 'POST',
+      body: { token, new_password: newPassword },
+      anonymous: true,
+    }),
+}
+
 /* --------------------------------------------------------------- profile -- */
 
 export type TaxProfile = S['TaxProfileOut']

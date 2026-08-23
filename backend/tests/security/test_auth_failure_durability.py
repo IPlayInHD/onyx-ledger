@@ -21,7 +21,7 @@ import uuid
 import psycopg2
 import pytest
 
-from tests.conftest import owner_dsn
+from tests.conftest import owner_dsn, register_verified
 
 PASSWORD = "supersecret1"
 
@@ -43,9 +43,10 @@ def _count(sql: str, *params) -> int:
 
 async def _register(client) -> tuple[str, str, str]:
     email = f"authdur_{uuid.uuid4().hex[:10]}@example.com"
-    response = await client.post("/api/v1/auth/register",
-                                 json={"email": email, "password": PASSWORD})
-    assert response.status_code == 201, response.text
+    await register_verified(client, email, PASSWORD)
+    # Signed in AGAIN, deliberately: `register_verified` leaves a session
+    # behind and these tests are about what happens to sessions. Taking a
+    # fresh pair means the refresh token under test is one this test minted.
     login = await client.post("/api/v1/auth/login",
                               json={"email": email, "password": PASSWORD})
     assert login.status_code == 200, login.text

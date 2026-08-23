@@ -18,7 +18,7 @@ import uuid
 import psycopg2
 import pytest
 
-from tests.conftest import owner_dsn
+from tests.conftest import owner_dsn, register_verified
 from tests.security.test_pd1_tenant_isolation import Tenant, runtime_cursor
 
 PASSWORD = "supersecret1"
@@ -197,12 +197,7 @@ async def test_the_deletion_cutoff_still_applies_after_rls(client):
     path would show up here as the wrong status code.
     """
     email = f"pd1life_{uuid.uuid4().hex[:10]}@example.com"
-    assert (await client.post("/api/v1/auth/register",
-                              json={"email": email, "password": PASSWORD})
-            ).status_code == 201
-    login = await client.post("/api/v1/auth/login",
-                              json={"email": email, "password": PASSWORD})
-    token = login.json()["access_token"]
+    token = await register_verified(client, email, PASSWORD)
     headers = {"Authorization": f"Bearer {token}"}
 
     # Reads that traverse the newly protected children still work while active.

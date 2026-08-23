@@ -6,20 +6,16 @@ import uuid
 
 import pytest
 
+from tests.conftest import register_verified
+
 
 @pytest.mark.asyncio
 async def test_full_flow(client):
     email = f"user_{uuid.uuid4().hex[:8]}@test.ca"
 
-    # register
-    r = await client.post("/api/v1/auth/register", json={"email": email, "password": "supersecret1"})
-    assert r.status_code == 201, r.text
-
-    # login
-    r = await client.post("/api/v1/auth/login", json={"email": email, "password": "supersecret1"})
-    assert r.status_code == 200, r.text
-    tokens = r.json()
-    auth = {"Authorization": f"Bearer {tokens['access_token']}"}
+    # register, confirm the address, sign in
+    token = await register_verified(client, email, "supersecret1")
+    auth = {"Authorization": f"Bearer {token}"}
 
     # set tax profile (Ontario)
     r = await client.put("/api/v1/users/me/tax-profile", headers=auth,
@@ -56,7 +52,7 @@ async def test_full_flow(client):
 @pytest.mark.asyncio
 async def test_refresh_rotation(client):
     email = f"user_{uuid.uuid4().hex[:8]}@test.ca"
-    await client.post("/api/v1/auth/register", json={"email": email, "password": "supersecret1"})
+    await register_verified(client, email, "supersecret1")
     r = await client.post("/api/v1/auth/login", json={"email": email, "password": "supersecret1"})
     refresh = r.json()["refresh_token"]
 

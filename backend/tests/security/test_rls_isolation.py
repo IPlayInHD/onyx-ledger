@@ -1,3 +1,4 @@
+
 """Security: Row-Level Security must prevent cross-user data access.
 
 User A creates income; user B must not see it, even though both hit the same
@@ -8,11 +9,12 @@ import uuid
 
 import pytest
 
+from tests.conftest import register_verified
+
 
 async def _register_login(client, email):
-    await client.post("/api/v1/auth/register", json={"email": email, "password": "supersecret1"})
-    r = await client.post("/api/v1/auth/login", json={"email": email, "password": "supersecret1"})
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    token = await register_verified(client, email, "supersecret1")
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.asyncio

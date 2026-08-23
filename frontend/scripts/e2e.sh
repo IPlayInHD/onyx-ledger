@@ -12,6 +12,22 @@ BACKEND_DIR="$(cd "$FRONTEND_DIR/../backend" && pwd)"
 API_PORT="${ONYX_E2E_API_PORT:-8099}"
 LOG="${ONYX_E2E_API_LOG:-/tmp/onyx_e2e_api.log}"
 
+# Where the capture email provider drops each message as JSON.
+#
+# THE SUITE HAS NO OTHER WAY IN. Registration now creates an unverified
+# account, and the link that clears it exists only inside the API process's
+# outbox — which Playwright, driving that process over HTTP, cannot reach. A
+# directory both sides can see is the smallest thing that closes the gap, and
+# it is the same mechanism a developer running Onyx locally uses to click their
+# own link. It cannot exist in production: the capture provider is refused
+# there, and so is this setting.
+#
+# Emptied at the start of every run, so one run never reads a link another one
+# minted for the same address.
+CAPTURE_DIR="${ONYX_E2E_CAPTURE_DIR:-/tmp/onyx_e2e_mail}"
+rm -rf "$CAPTURE_DIR"
+mkdir -p "$CAPTURE_DIR"
+
 cleanup() {
   if [[ -n "${API_PID:-}" ]] && kill -0 "$API_PID" 2>/dev/null; then
     kill "$API_PID" 2>/dev/null || true
@@ -44,6 +60,7 @@ echo ">> starting backend on :$API_PORT"
   cd "$BACKEND_DIR"
   PYTHONPATH=. \
   ONYX_DATABASE_URL="${ONYX_DATABASE_URL:-postgresql+asyncpg://onyx_test@localhost:5432/onyx_b01}" \
+  ONYX_EMAIL_CAPTURE_DIR="$CAPTURE_DIR" \
   exec python3 -m uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG" 2>&1
 ) &
 API_PID=$!
@@ -76,4 +93,6 @@ echo ">> building frontend"
 npm run build >/dev/null
 
 echo ">> running playwright"
-ONYX_E2E_API="http://127.0.0.1:$API_PORT" npx playwright test "$@"
+ONYX_E2E_API="http://127.0.0.1:$API_PORT" \
+ONYX_E2E_CAPTURE_DIR="$CAPTURE_DIR" \
+npx playwright test "$@"

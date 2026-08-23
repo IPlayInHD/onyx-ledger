@@ -27,7 +27,7 @@ import pytest
 
 from app.domain.ports import DeleteOutcome
 from app.integrations.storage import get_object_storage
-from tests.conftest import owner_dsn
+from tests.conftest import owner_dsn, register_verified
 
 PASSWORD = "supersecret1"
 
@@ -44,12 +44,7 @@ def owner_cursor():
 
 async def _register(client) -> tuple[str, uuid.UUID]:
     email = f"doc_{uuid.uuid4().hex[:10]}@example.com"
-    assert (await client.post("/api/v1/auth/register",
-                              json={"email": email, "password": PASSWORD})
-            ).status_code == 201
-    login = await client.post("/api/v1/auth/login",
-                              json={"email": email, "password": PASSWORD})
-    token = login.json()["access_token"]
+    token = await register_verified(client, email, PASSWORD)
     me = await client.get("/api/v1/users/me",
                           headers={"Authorization": f"Bearer {token}"})
     return token, uuid.UUID(me.json()["id"])
