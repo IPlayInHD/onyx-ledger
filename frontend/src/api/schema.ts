@@ -421,7 +421,10 @@ export interface paths {
         put?: never;
         /**
          * Register
-         * @description Create an account.
+         * @description Create an account and send it a verification link.
+         *
+         *     The account is created unverified: it can sign in, and it cannot reach the
+         *     rest of the API until the emailed link is opened.
          *
          *     Throttled on the same class as login. Registration is not a credential test,
          *     but it is unauthenticated, it writes two rows and computes an Argon2 hash,

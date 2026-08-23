@@ -5823,7 +5823,7 @@
     },
     "/api/v1/auth/register": {
       "post": {
-        "description": "Create an account.\n\nThrottled on the same class as login. Registration is not a credential test,\nbut it is unauthenticated, it writes two rows and computes an Argon2 hash,\nand \u2014 because it must say whether an address is already taken \u2014 an\nunthrottled version is a fast account-enumeration oracle. The throttle does\nnot remove that disclosure; it bounds how quickly it can be harvested.",
+        "description": "Create an account and send it a verification link.\n\nThe account is created unverified: it can sign in, and it cannot reach the\nrest of the API until the emailed link is opened.\n\nThrottled on the same class as login. Registration is not a credential test,\nbut it is unauthenticated, it writes two rows and computes an Argon2 hash,\nand \u2014 because it must say whether an address is already taken \u2014 an\nunthrottled version is a fast account-enumeration oracle. The throttle does\nnot remove that disclosure; it bounds how quickly it can be harvested.",
         "operationId": "register_api_v1_auth_register_post",
         "requestBody": {
           "content": {
