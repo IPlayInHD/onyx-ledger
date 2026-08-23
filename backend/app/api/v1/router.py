@@ -12,6 +12,7 @@ from app.api.v1.config.routes import router as config_router
 from app.api.v1.documents.routes import router as documents_router
 from app.api.v1.financials.routes import router as financials_router
 from app.api.v1.ioe.routes import router as ioe_router
+from app.api.v1.legal.routes import router as legal_router
 from app.api.v1.tax.routes import router as tax_router
 from app.api.v1.tkms.routes import router as tkms_router
 from app.api.v1.users.routes import router as users_router
@@ -25,6 +26,7 @@ api_router.include_router(tax_router)
 api_router.include_router(analysis_router)
 api_router.include_router(documents_router)
 api_router.include_router(account_router)
+api_router.include_router(legal_router)
 api_router.include_router(ai_router)
 api_router.include_router(admin_router)
 api_router.include_router(tkms_router)

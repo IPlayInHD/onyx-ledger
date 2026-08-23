@@ -134,6 +134,36 @@ class EmailVerificationRequired(DomainError):
         )
 
 
+class LegalAcceptanceRequired(DomainError):
+    """Authenticated, verified, not suspended — and has not accepted the terms.
+
+    A FOURTH DISTINCT STATE, and the reason it is its own error rather than a
+    new `user_account.status` value is B4 §12. Status already answers "what has
+    an operator or the customer done to this account"; legal standing answers
+    "has this person agreed to the current documents". Folding the second into
+    the first would produce values like `active_terms_v2_missing`, and every
+    new required document would multiply them again.
+
+    So the account stays `active`, and this is asked separately by the same
+    central check that asks everything else — one gate, four questions,
+    answered in an order that gives the customer the most actionable one.
+
+    403 for the same reason as its neighbours: the caller proved who they are
+    and is refused for what is outstanding. `documents` names which ones, so
+    the screen can say "the Terms changed" rather than "access denied".
+    """
+
+    status_code = 403
+    error_type = "https://onyx.ledger/errors/legal-acceptance-required"
+    title = "Legal Acceptance Required"
+
+    def __init__(self, documents: tuple[str, ...] = ()) -> None:
+        self.documents = documents
+        super().__init__(
+            "Review and accept the current terms to continue using Onyx."
+        )
+
+
 class AccountNotActive(DomainError):
     """The account exists and authenticated, but its status forbids acting.
 
@@ -270,7 +300,11 @@ class AccountLifecycleService:
         )
 
     async def assert_may_act(
-        self, user_id: uuid.UUID, *, require_verified: bool = True
+        self,
+        user_id: uuid.UUID,
+        *,
+        require_verified: bool = True,
+        require_legal_acceptance: bool = True,
     ) -> None:
         """THE cutoff check. One statement, on a connection already open.
 
@@ -344,6 +378,24 @@ class AccountLifecycleService:
         # unverified account that is also deleting is still refused.
         if require_verified and status in UNVERIFIED_ACCOUNT_STATUSES:
             raise EmailVerificationRequired()
+
+        # LAST, AND SEPARATELY. Ordering again, and it is the same principle
+        # each time: the customer gets the answer that is both true and
+        # actionable. Asking a suspended account to accept new Terms would be
+        # a false promise, so suspension is decided above; asking an unverified
+        # account to accept them sends somebody to a second screen when the
+        # first one is still in the way.
+        #
+        # This reads a DIFFERENT TABLE than everything above it — legal
+        # standing is not account status, and B4 §12 requires the two stay
+        # separable. It costs one indexed query on a connection already open,
+        # and only for callers that require it.
+        if require_legal_acceptance:
+            from app.services.legal.service import LegalAcceptanceService
+
+            outstanding = await LegalAcceptanceService(self.s).outstanding(user_id)
+            if outstanding:
+                raise LegalAcceptanceRequired(tuple(d.value for d in outstanding))
 
     # ---------------------------------------------------------- request --
     async def request_deletion(self, user_id: uuid.UUID) -> LifecycleStatus:
@@ -526,6 +578,7 @@ __all__ = [
     "AccountDeletionInProgress",
     "AccountNotActive",
     "EmailVerificationRequired",
+    "LegalAcceptanceRequired",
     "AccountLifecycleService",
     "ClaimedLifecycle",
     "LifecycleFailureCode",

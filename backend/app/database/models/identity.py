@@ -105,6 +105,34 @@ class LoginEvent(Base):
     created_at: Mapped[datetime] = created_at_col()
 
 
+class LegalAcceptance(Base):
+    """Durable proof that one account accepted one version of one document.
+
+    APPEND ONLY. There is no `updated_at`, no soft-delete flag and no status
+    column, because none of those states exists: a row is written once and is
+    then a fact. Terms v2 replacing v1 produces a SECOND row, so the history
+    reads "accepted v1 at T1, accepted v2 at T2" — which is what happened. The
+    database refuses UPDATE and DELETE outright; see 66_legal_acceptance.sql.
+
+    `document_type` is the frontend's own route slug, so a stored acceptance
+    names a document a person can navigate to. The closed set is
+    `app.domain.legal.LegalDocumentType` and a CHECK constraint pins it.
+    """
+
+    __tablename__ = "legal_acceptance"
+    __table_args__ = {"schema": "identity"}
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("identity.user_account.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    document_type: Mapped[str] = mapped_column(Text, nullable=False)
+    document_version: Mapped[str] = mapped_column(Text, nullable=False)
+    accepted_at: Mapped[datetime] = created_at_col()
+
+
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_token"
     __table_args__ = {"schema": "identity"}

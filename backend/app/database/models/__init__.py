@@ -59,6 +59,7 @@ from app.database.models.identity import (  # noqa: F401
     AuthSession,
     DeletionSubject,
     EmailVerificationToken,
+    LegalAcceptance,
     LoginEvent,
     MfaMethod,
     PasswordResetToken,

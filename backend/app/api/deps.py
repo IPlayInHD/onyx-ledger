@@ -71,7 +71,31 @@ async def db_authed_unverified_ok(
 
     async with unit_of_work(user_id=user_id, actor_type="user") as session:
         await AccountLifecycleService(session).assert_may_act(
-            user_id, require_verified=False
+            user_id, require_verified=False, require_legal_acceptance=False
+        )
+        yield session
+
+
+async def db_authed_legal_exempt(
+    user_id: uuid.UUID = Depends(current_user_id),
+) -> AsyncIterator[AsyncSession]:
+    """For the endpoints that EXIST to clear outstanding legal acceptance.
+
+    Same shape and same reasoning as `db_authed_unverified_ok`: the screen that
+    resolves a blocking state cannot itself be blocked by that state, or the
+    state is permanent.
+
+    It relaxes EXACTLY the legal check. Verification, suspension, closure and
+    the deletion cutoff all still apply — an unverified account does not reach
+    the terms screen, because confirming an address comes first and stacking
+    two blockers on one customer is how they end up unable to tell which one
+    they are looking at.
+    """
+    from app.services.privacy.lifecycle import AccountLifecycleService
+
+    async with unit_of_work(user_id=user_id, actor_type="user") as session:
+        await AccountLifecycleService(session).assert_may_act(
+            user_id, require_legal_acceptance=False
         )
         yield session
 
