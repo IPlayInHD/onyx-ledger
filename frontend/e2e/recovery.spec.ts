@@ -15,7 +15,7 @@
      · a completed reset does not sign anybody in, which is the whole point of
        a flow whose premise is that somebody else may have had access
    ========================================================================= */
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { messagesFor, tokenFrom, waitForMessage } from './mailbox'
 
 const API = process.env.ONYX_E2E_API ?? 'http://127.0.0.1:8099'
@@ -24,6 +24,24 @@ const NEW_PASSWORD = 'a-completely-different-one-9'
 
 function freshEmail(tag: string): string {
   return `e2e_${tag}_${Date.now()}_${Math.floor(Math.random() * 1e6)}@test.ca`
+}
+
+/** Type into a field and WAIT FOR REACT TO HAVE ACCEPTED IT.
+ *
+ *  `fill()` writes the DOM value and dispatches `input`; React processes that
+ *  asynchronously into component state. Under parallel load the submit click
+ *  can land before the commit, so the handler reads an empty string and the
+ *  form renders its own "enter your email address" — which looks exactly like
+ *  a broken page and is a race in the test.
+ *
+ *  Observed once in a full run and never in four isolated repeats, which is
+ *  the signature. A person cannot click faster than React commits; a headless
+ *  browser on a loaded box can.
+ */
+async function type(page: Page, label: RegExp, value: string): Promise<void> {
+  const field = page.getByLabel(label)
+  await field.fill(value)
+  await expect(field).toHaveValue(value)
 }
 
 /** Register through the API. Faster and less brittle than driving the form for
@@ -56,8 +74,8 @@ test.describe('email verification', () => {
     await registerViaApi(request, email)
 
     await page.goto('/sign-in')
-    await page.getByLabel(/email/i).fill(email)
-    await page.getByLabel(/password/i).fill(PASSWORD)
+    await type(page, /email/i, email)
+    await type(page, /password/i, PASSWORD)
     await page.getByRole('button', { name: /sign in/i }).click()
 
     // The credentials WERE accepted. The customer is not sent back to the form
@@ -77,8 +95,8 @@ test.describe('email verification', () => {
     await registerViaApi(request, email)
 
     await page.goto('/sign-in')
-    await page.getByLabel(/email/i).fill(email)
-    await page.getByLabel(/password/i).fill(PASSWORD)
+    await type(page, /email/i, email)
+    await type(page, /password/i, PASSWORD)
     await page.getByRole('button', { name: /sign in/i }).click()
     await expect(page).toHaveURL(/\/verify-email/, { timeout: 30_000 })
 
@@ -133,7 +151,7 @@ test.describe('password recovery', () => {
 
     const submit = async (address: string): Promise<string> => {
       await page.goto('/forgot-password')
-      await page.getByLabel(/email/i).fill(address)
+      await type(page, /email/i, address)
       await page.getByRole('button', { name: /send reset link/i }).click()
       await expect(page.getByRole('heading', { name: /check your inbox/i })).toBeVisible({
         timeout: 30_000,
@@ -164,7 +182,7 @@ test.describe('password recovery', () => {
     await page.getByRole('link', { name: /forgot your password/i }).click()
     await expect(page).toHaveURL(/\/forgot-password/)
 
-    await page.getByLabel(/email/i).fill(email)
+    await type(page, /email/i, email)
     await page.getByRole('button', { name: /send reset link/i }).click()
     await expect(page.getByRole('heading', { name: /check your inbox/i })).toBeVisible({
       timeout: 30_000,
@@ -177,8 +195,8 @@ test.describe('password recovery', () => {
     // Gone from the URL before a character is typed into the form.
     expect(page.url()).not.toContain('token=')
 
-    await page.getByLabel(/^new password$/i).fill(NEW_PASSWORD)
-    await page.getByLabel(/confirm new password/i).fill(NEW_PASSWORD)
+    await type(page, /^new password$/i, NEW_PASSWORD)
+    await type(page, /confirm new password/i, NEW_PASSWORD)
     await page.getByRole('button', { name: /change password/i }).click()
 
     await expect(page.getByRole('heading', { name: /password is changed/i })).toBeVisible({
@@ -190,8 +208,8 @@ test.describe('password recovery', () => {
     await page.goto('/app')
     await expect(page).toHaveURL(/\/sign-in/, { timeout: 30_000 })
 
-    await page.getByLabel(/email/i).fill(email)
-    await page.getByLabel(/password/i).fill(NEW_PASSWORD)
+    await type(page, /email/i, email)
+    await type(page, /password/i, NEW_PASSWORD)
     await page.getByRole('button', { name: /sign in/i }).click()
     await expect(page).toHaveURL(/\/app/, { timeout: 30_000 })
 
@@ -214,14 +232,14 @@ test.describe('password recovery', () => {
     const token = tokenFrom(await waitForMessage(email, 'PASSWORD_RESET'))
 
     await page.goto(`/reset-password?token=${token}`)
-    await page.getByLabel(/^new password$/i).fill(NEW_PASSWORD)
-    await page.getByLabel(/confirm new password/i).fill(`${NEW_PASSWORD}-typo`)
+    await type(page, /^new password$/i, NEW_PASSWORD)
+    await type(page, /confirm new password/i, `${NEW_PASSWORD}-typo`)
     await page.getByRole('button', { name: /change password/i }).click()
     await expect(page.getByRole('alert')).toBeVisible()
 
     // The link is UNSPENT: the mismatch was caught in the browser, so the
     // customer can correct it rather than start over.
-    await page.getByLabel(/confirm new password/i).fill(NEW_PASSWORD)
+    await type(page, /confirm new password/i, NEW_PASSWORD)
     await page.getByRole('button', { name: /change password/i }).click()
     await expect(page.getByRole('heading', { name: /password is changed/i })).toBeVisible({
       timeout: 30_000,

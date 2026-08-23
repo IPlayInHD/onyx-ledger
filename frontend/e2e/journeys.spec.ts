@@ -256,8 +256,17 @@ async function submitAuthForm(
 ) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await page.goto(path)
-    await page.getByLabel(/email/i).fill(email)
-    await page.getByLabel(/password/i).fill(PASSWORD)
+    // Filled AND CONFIRMED before submitting. `fill()` writes the DOM value and
+    // dispatches `input`; React commits that to state asynchronously, and under
+    // parallel load a click can land first — the handler then reads an empty
+    // string and the form renders its own validation error, which looks like a
+    // broken page and is a race in the test.
+    const emailField = page.getByLabel(/email/i)
+    const passwordField = page.getByLabel(/password/i)
+    await emailField.fill(email)
+    await passwordField.fill(PASSWORD)
+    await expect(emailField).toHaveValue(email)
+    await expect(passwordField).toHaveValue(PASSWORD)
     await page.getByRole('button', { name: button }).click()
 
     // Race the two real outcomes instead of waiting out the full navigation
