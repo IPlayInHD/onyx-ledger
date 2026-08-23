@@ -65,6 +65,7 @@ An unclassified row is an open item, not a default.
 | 1 | `finance.income_source_y2025` | — |
 | 1 | `identity.auth_session` | — |
 | 1 | `identity.email_verification_token` | — |
+| 1 | `identity.legal_acceptance` | — |
 | 1 | `identity.mfa_method` | — |
 | 1 | `identity.password_reset_token` | — |
 | 1 | `identity.user_credential` | — |

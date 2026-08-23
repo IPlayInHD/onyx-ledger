@@ -36,3 +36,6 @@ def downgrade() -> None:
     op_execute(
         "DROP FUNCTION IF EXISTS identity.reject_legal_acceptance_mutation()"
     )
+    op_execute(
+        "DROP FUNCTION IF EXISTS identity.reject_legal_acceptance_delete()"
+    )

@@ -58,7 +58,7 @@ def test_the_registry_covers_the_certified_universe_exactly():
             assert m.group(2) not in doc, f"duplicate row in universe doc: {m.group(2)}"
             doc[m.group(2)] = int(m.group(1))
 
-    assert len(doc) == 73, f"the universe doc parsed to {len(doc)} tables, not 73"
+    assert len(doc) == 74, f"the universe doc parsed to {len(doc)} tables, not 74"
     assert sorted(set(doc) - set(REGISTRY)) == []
     assert sorted(set(REGISTRY) - set(doc)) == []
     assert {t: e.depth for t, e in REGISTRY.items()} == doc
@@ -194,8 +194,8 @@ def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
     counted.
     """
     classified = sorted(t for t, e in REGISTRY.items() if e.state == CLASSIFIED)
-    assert len(classified) == 69, (
-        f"{len(classified)} classified, expected 69. Every entry here was "
+    assert len(classified) == 70, (
+        f"{len(classified)} classified, expected 70. Every entry here was "
         "argued from a writer, a reader and a measured lifecycle fate — a "
         "count that moved without that work is the failure this file exists "
         "to catch."
@@ -280,12 +280,12 @@ def test_question_a_the_root_cascade_edge_is_already_unsafe():
 
 
 def test_question_b_the_terminal_delete_gate_fails_closed():
-    """4 of 73 unclassified, so the terminal delete must not be certified."""
+    """4 of 74 unclassified, so the terminal delete must not be certified."""
     with pytest.raises(AssertionError) as excinfo:
         assert_terminal_account_delete_ready()
 
     message = str(excinfo.value)
-    assert "4" in message and "73" in message
+    assert "4" in message and "74" in message
     assert "UNCLASSIFIED_BLOCKING" in message, (
         "the failure must name the workflow state, or the reader will read it as "
         "a retention verdict"
@@ -361,12 +361,18 @@ def test_every_unresolved_surface_has_a_stated_reason():
 
 
 def test_the_accounting_reconciles_to_seventy_two():
-    """68 classified plus 4 explained, and nothing else. Widened from 70 by
-    the Decision Journal entry (migration 0068): two new LIVE_USER_DATA_DELETE
-    tables, classified before the migration shipped."""
+    """70 classified plus 4 explained, and nothing else.
+
+    Widened twice, and each widening was the classification work rather than a
+    number being edited. Migration 0068 (Decision Journal) added two
+    LIVE_USER_DATA_DELETE tables. Migration 0073 (B4, legal acceptance) added
+    one more — argued from its writer, its single reader (the gate), and a
+    measured lifecycle fate: untouched by all four privacy phases and removed
+    by the account cascade, with the surviving evidence deliberately placed in
+    audit.consent_log instead."""
     classified = {t for t, e in REGISTRY.items() if e.state == CLASSIFIED}
     accounted = set().union(*UNRESOLVED_REASONS.values())
-    assert len(classified) + len(accounted) == 73
+    assert len(classified) + len(accounted) == 74
     assert classified.isdisjoint(accounted)
     assert classified | accounted == set(REGISTRY)
 

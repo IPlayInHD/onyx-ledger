@@ -371,6 +371,21 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
        S.OPERATIONAL, R.SHORT_OPERATIONAL, D.CASCADE_DELETE),
     _e("identity.email_verification_token", (P.AUTHENTICATION_SECURITY,),
        S.OPERATIONAL, R.SHORT_OPERATIONAL, D.CASCADE_DELETE),
+    _e("identity.legal_acceptance", (P.ACCOUNT_IDENTITY, P.AUDIT_SECURITY_RECORD),
+       S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE, rls=True,
+       notes="Entry B4. Which legal document versions this account accepted, "
+             "and when. Append-only: the runtime holds INSERT and SELECT only, "
+             "and triggers refuse UPDATE outright and refuse DELETE while the "
+             "account exists — the FK cascade is the single permitted removal, "
+             "which is why this is CASCADE_DELETE rather than DE_IDENTIFY.\n"
+             "THE EVIDENCE IS NOT LOST BY THAT CHOICE. This table is live "
+             "tenant state answering 'may this person use the application', a "
+             "question that stops being asked when the account goes. The proof "
+             "that an agreement was given is the parallel row in "
+             "audit.consent_log, which 11B6D de-identifies and retains — so "
+             "deletion removes the identifiable state and keeps the "
+             "non-attributable evidence, which is the same split "
+             "identity.login_event and audit.security_event already use."),
     _e("identity.mfa_method", (P.AUTHENTICATION_SECURITY, P.USER_FREE_TEXT),
        S.SOURCE, R.WHILE_ACCOUNT_ACTIVE, D.CASCADE_DELETE,
        notes="`label` is user free text and may name a device."),

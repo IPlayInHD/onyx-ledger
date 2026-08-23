@@ -486,6 +486,40 @@ REGISTRY: dict[str, Entry] = {
             "tests/privacy/surface_census.py",
         ),
     ),
+    "identity.legal_acceptance": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="LIVE_LEGAL_STANDING_EVIDENCE_RETAINED_ELSEWHERE",
+        evidence_quality="DIRECT_TEST_EVIDENCE",
+        rationale=(
+            "Entry B4. Which legal document versions this account accepted "
+            "and when. It is LIVE STATE rather than history: the only "
+            "consumer is the gate deciding whether this person may use the "
+            "application, and that question stops being asked the moment the "
+            "account is gone. Deleting it therefore destroys no evidence "
+            "anyone can act on. "
+            "THE PROOF IS DELIBERATELY SOMEWHERE ELSE. Every acceptance also "
+            "writes audit.consent_log, which 11B6D de-identifies and retains "
+            "— so the record that an agreement was given survives the "
+            "account, non-attributably, while the identifiable state does "
+            "not. That is the same split identity.login_event and "
+            "audit.security_event already use, and it is why this is a "
+            "delete rather than a de-identify: de-identifying a row keyed to "
+            "user_id would leave an orphan the gate can never read and the "
+            "customer can never see. "
+            "Append-only in life: the runtime holds INSERT and SELECT only, "
+            "a trigger refuses UPDATE outright, and a second trigger refuses "
+            "DELETE while the account still exists — measured, because a "
+            "first attempt blocked the cascade itself and broke account "
+            "deletion. The FK cascade is the single permitted removal."
+        ),
+        evidence_references=(
+            "db/sql/66_legal_acceptance.sql",
+            "app/services/legal/service.py",
+            "app/privacy/classification.py",
+        ),
+    ),
     "identity.mfa_method": Entry(
         state=CLASSIFIED,
         depth=1,

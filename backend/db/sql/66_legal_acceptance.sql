@@ -153,15 +153,50 @@ CREATE TRIGGER trg_legal_acceptance_no_update
     BEFORE UPDATE ON identity.legal_acceptance
     FOR EACH ROW EXECUTE FUNCTION identity.reject_legal_acceptance_mutation();
 
--- The account cascade is the ONE deletion that must still work: it is the
--- database removing a child whose parent is gone, and blocking it would make
--- account deletion impossible. A statement-level trigger fires for a direct
--- `DELETE FROM identity.legal_acceptance` and does not fire for the cascade,
--- which is exactly the distinction wanted here.
+-- DELETE is refused too, with ONE exception that must keep working: the
+-- account cascade. `ON DELETE CASCADE` removes these rows when the account
+-- goes, and a trigger that blocked it would make account deletion impossible —
+-- trading a privacy right the product has already shipped for a second layer
+-- of protection against a role nobody holds.
+--
+-- A FIRST ATTEMPT USED `FOR EACH STATEMENT` on the theory that a cascade is
+-- not a statement against this table. That was reasoning, not measurement, and
+-- it was wrong: PostgreSQL implements the cascade as a real
+-- `DELETE FROM ONLY identity.legal_acceptance WHERE $1 = user_id`, the
+-- statement trigger fired, and account deletion broke outright.
+--
+-- The discriminator below was then MEASURED rather than assumed. During a
+-- cascade the parent row is already gone by the time the child trigger runs;
+-- during a direct delete of a live account's rows it is still there:
+--
+--     direct delete   parent visible = t   → refused
+--     cascade         parent visible = f   → allowed
+--
+-- So the rule is exactly "you may not delete an acceptance belonging to an
+-- account that still exists", which is the property actually wanted.
+CREATE OR REPLACE FUNCTION identity.reject_legal_acceptance_delete()
+RETURNS trigger LANGUAGE plpgsql
+-- `identity` is on the path because the guard reads user_account by name.
+SET search_path = identity, pg_catalog
+AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM identity.user_account WHERE id = OLD.user_id) THEN
+        RAISE EXCEPTION
+            'legal acceptance rows are append-only; DELETE is not permitted '
+            'while the account exists'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN OLD;
+END;
+$$;
+
+ALTER FUNCTION identity.reject_legal_acceptance_delete() OWNER TO onyx_migrator;
+REVOKE ALL ON FUNCTION identity.reject_legal_acceptance_delete() FROM PUBLIC;
+
 DROP TRIGGER IF EXISTS trg_legal_acceptance_no_delete ON identity.legal_acceptance;
 CREATE TRIGGER trg_legal_acceptance_no_delete
     BEFORE DELETE ON identity.legal_acceptance
-    FOR EACH STATEMENT EXECUTE FUNCTION identity.reject_legal_acceptance_mutation();
+    FOR EACH ROW EXECUTE FUNCTION identity.reject_legal_acceptance_delete();
 
 -- NO BACKFILL. Not one row is written here for an account that existed before
 -- this migration, and that is the most important line in the file. There is no
