@@ -19,7 +19,12 @@ import pytest
 
 from app.domain.ports import TransactionalEmail
 from app.integrations.email import captured_emails
-from tests.conftest import owner_dsn, register_verified, token_from_link
+from tests.conftest import (
+    accept_required_legal,
+    owner_dsn,
+    register_verified,
+    token_from_link,
+)
 
 PASSWORD = "supersecret1"
 NEW_PASSWORD = "a-completely-different-one-9"
@@ -156,10 +161,25 @@ async def test_a_valid_link_verifies_the_account(client):
     assert done.status_code == 200, done.text
     assert done.json()["status"] == "active"
 
-    # And the application opens.
+    # AND THE VERIFICATION BLOCKER IS GONE — which is not the same as the
+    # application being open, and B4 is why. A freshly registered account has
+    # accepted nothing, so the next thing in the way is the legal gate.
+    #
+    # Asserting the SUCCESSOR state rather than a bare 200 is the stronger
+    # claim: it proves the two gates are ordered and distinct rather than one
+    # blanket refusal, which is exactly what B4 §12 requires and what a plain
+    # `== 200` would stop checking the day a third gate appeared.
     me = await client.get("/api/v1/users/me",
                           headers={"Authorization": f"Bearer {token}"})
-    assert me.status_code == 200, me.text
+    assert me.status_code == 403, me.text
+    assert me.json()["type"].endswith("legal-acceptance-required"), me.json()
+
+    # Clearing that one too opens the application, so verification really did
+    # its half of the work.
+    await accept_required_legal(client, token)
+    opened = await client.get("/api/v1/users/me",
+                              headers={"Authorization": f"Bearer {token}"})
+    assert opened.status_code == 200, opened.text
 
 
 async def test_a_verification_link_works_exactly_once(client):

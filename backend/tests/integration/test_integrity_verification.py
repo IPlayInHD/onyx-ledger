@@ -62,7 +62,7 @@ from app.services.ioe.replay.verification import (
     VerificationAlreadyRunning,
 )
 from app.services.ioe.scenario.service import ScenarioService
-from tests.conftest import frozen_snapshot
+from tests.conftest import frozen_snapshot, grant_required_legal
 
 # Synthetic values that must never leave the database. Chosen to be searchable.
 SYNTHETIC_SIN = "046454286"
@@ -95,6 +95,7 @@ async def _user_with_frozen_baseline(employment: str = SYNTHETIC_INCOME):
         user = UserAccount(email=f"integ_{uuid.uuid4().hex[:8]}@test.ca", status="active")
         s.add(user)
         await s.flush()
+        await grant_required_legal(s, user.id)
         uid = user.id
         income_type_id = (await s.scalar(
             select(IncomeType).where(IncomeType.code == "employment")
@@ -126,6 +127,7 @@ async def _user_with_stub_baseline():
         user = UserAccount(email=f"stub_{uuid.uuid4().hex[:8]}@test.ca", status="active")
         s.add(user)
         await s.flush()
+        await grant_required_legal(s, user.id)
         uid = user.id
         income_type_id = (await s.scalar(
             select(IncomeType).where(IncomeType.code == "employment")
