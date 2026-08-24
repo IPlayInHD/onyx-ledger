@@ -11,28 +11,55 @@ locals {
     "worker-app" = {
       queues      = "analysis,documents,ingestion,notify,maintenance,tkms_parse,tkms_extract,tkms_validate,tkms_compare,tkms_index,ioe"
       db_secret   = "api"
-      cpu         = var.worker_cpu
-      memory      = var.worker_memory
+      cpu         = var.worker_app_cpu
+      memory      = var.worker_app_memory
       count       = var.worker_app_count
-      concurrency = 4
+      concurrency = var.worker_app_concurrency
     }
     "worker-freshness" = {
       queues      = "ioe_freshness,ioe_integrity"
       db_secret   = "freshness"
-      cpu         = 512
-      memory      = 1024
-      count       = 1
-      concurrency = 2
+      cpu         = var.worker_freshness_cpu
+      memory      = var.worker_freshness_memory
+      count       = var.worker_freshness_count
+      concurrency = var.worker_freshness_concurrency
     }
     "worker-privacy" = {
       queues      = "privacy"
       db_secret   = "privacy"
-      cpu         = 512
-      memory      = 1024
-      count       = 1
-      concurrency = 1 # deletion is serialised on purpose
+      cpu         = var.worker_privacy_cpu
+      memory      = var.worker_privacy_memory
+      count       = var.worker_privacy_count
+      concurrency = var.worker_privacy_concurrency # deletion is serialised on purpose
     }
   }
+
+  # WHY THE POOL IS CAPPED PER ROLE.
+  #
+  # Every uvicorn worker and every Celery child builds its own SQLAlchemy
+  # engine, so the connections an environment can open is
+  # (pool + overflow) x processes x tasks — not (pool + overflow). At the
+  # application defaults (10 + 20) that multiplies out to 423 potential
+  # backends against a db.t4g.small's 225, and the failure mode is the database
+  # refusing connections during a burst.
+  #
+  # These are ENVIRONMENT variables, not a code change: `ONYX_DB_POOL_SIZE` and
+  # `ONYX_DB_MAX_OVERFLOW` are ordinary pydantic settings. modules/capacity
+  # computes the resulting ceiling and refuses to plan if it exceeds what the
+  # chosen instance class allows.
+  #
+  # Measured: the API held 23 backends across two uvicorn workers while serving
+  # 4 000 authenticated requests at 534 rps — about 12 per process against a cap
+  # of 20. The cap is headroom over a load far above launch volume, not a
+  # squeeze on the working set.
+  api_pool_env = [
+    { name = "ONYX_DB_POOL_SIZE", value = tostring(var.api_pool_size) },
+    { name = "ONYX_DB_MAX_OVERFLOW", value = tostring(var.api_pool_overflow) },
+  ]
+  worker_pool_env = [
+    { name = "ONYX_DB_POOL_SIZE", value = tostring(var.worker_pool_size) },
+    { name = "ONYX_DB_MAX_OVERFLOW", value = tostring(var.worker_pool_overflow) },
+  ]
 
   # Secrets injected into every task that talks to the application database.
   # `ONYX_PRIVACY_DATABASE_URL` and `ONYX_FRESHNESS_DATABASE_URL` are read by
@@ -71,13 +98,13 @@ resource "aws_ecs_task_definition" "api" {
       "uvicorn", "app.main:app",
       "--host", "0.0.0.0",
       "--port", tostring(var.api_port),
-      "--workers", "2",
+      "--workers", tostring(var.api_uvicorn_workers),
       # Graceful termination: finish in-flight requests before exiting, so a
       # deployment does not sever a customer's analysis mid-response.
       "--timeout-graceful-shutdown", "25",
     ]
 
-    environment = local.common_environment
+    environment = concat(local.common_environment, local.api_pool_env)
     secrets = concat(local.base_secrets, [
       { name = "ONYX_DATABASE_URL", valueFrom = var.db_secret_arns["api"] },
     ])
@@ -147,12 +174,30 @@ resource "aws_ecs_service" "api" {
   tags = local.tags
 }
 
+# THE HARD CEILING.
+#
+# `max_capacity` is what autoscaling may reach. The precondition is what stops a
+# profile from ever asking for more than the estate is willing to pay for: a
+# mistyped maximum fails the plan instead of becoming a bill. §11 asks for a
+# capped autoscaling maximum; this is that cap, expressed where it cannot be
+# skipped rather than in a comment.
 resource "aws_appautoscaling_target" "api" {
   max_capacity       = var.api_max_count
   min_capacity       = var.api_count
   resource_id        = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.api.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
+
+  lifecycle {
+    precondition {
+      condition     = var.api_max_count <= var.api_absolute_max_count
+      error_message = "api_max_count ${var.api_max_count} exceeds the absolute ceiling ${var.api_absolute_max_count}."
+    }
+    precondition {
+      condition     = var.api_count <= var.api_max_count
+      error_message = "api_count ${var.api_count} exceeds api_max_count ${var.api_max_count}."
+    }
+  }
 }
 
 resource "aws_appautoscaling_policy" "api_cpu" {
@@ -198,7 +243,7 @@ resource "aws_ecs_task_definition" "worker" {
       "--loglevel", "INFO",
     ]
 
-    environment = local.common_environment
+    environment = concat(local.common_environment, local.worker_pool_env)
     secrets = concat(local.base_secrets, [
       { name = "ONYX_DATABASE_URL", valueFrom = var.db_secret_arns[each.value.db_secret] },
       ], each.key == "worker-privacy" ? [
@@ -259,8 +304,8 @@ resource "aws_ecs_task_definition" "beat" {
   family                   = "${var.name}-onyx-beat"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = var.beat_cpu
+  memory                   = var.beat_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task["beat"].arn
 
@@ -275,8 +320,11 @@ resource "aws_ecs_task_definition" "beat" {
     essential = true
     command   = ["celery", "-A", "workers.celery_app", "beat", "--loglevel", "INFO"]
 
-    environment = local.common_environment
-    secrets     = local.base_secrets
+    environment = concat(local.common_environment, [
+      { name = "ONYX_DB_POOL_SIZE", value = "2" },
+      { name = "ONYX_DB_MAX_OVERFLOW", value = "2" },
+    ])
+    secrets = local.base_secrets
 
     logConfiguration = {
       logDriver = "awslogs"
@@ -320,8 +368,8 @@ resource "aws_ecs_task_definition" "migration" {
   family                   = "${var.name}-onyx-migration"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 512
-  memory                   = 1024
+  cpu                      = var.migration_cpu
+  memory                   = var.migration_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task["migration"].arn
 
@@ -336,7 +384,7 @@ resource "aws_ecs_task_definition" "migration" {
     essential = true
     command   = ["python", "-m", "alembic", "upgrade", "head"]
 
-    environment = local.common_environment
+    environment = concat(local.common_environment, local.worker_pool_env)
     # The MIGRATOR's credentials, and only here. No serving task is given them.
     secrets = [
       { name = "ONYX_DATABASE_URL_SYNC", valueFrom = var.db_secret_arns["migrator"] },

@@ -38,36 +38,10 @@ locals {
 }
 
 # ------------------------------------------------------------------- image --
-resource "aws_ecr_repository" "this" {
-  name                 = "onyx/backend"
-  image_tag_mutability = "IMMUTABLE" # a tag must never come to mean other bytes
-  force_delete         = false
-
-  image_scanning_configuration { scan_on_push = true }
-
-  encryption_configuration {
-    encryption_type = "KMS"
-    kms_key         = var.ecr_kms_key_arn
-  }
-
-  tags = local.tags
-}
-
-resource "aws_ecr_lifecycle_policy" "this" {
-  repository = aws_ecr_repository.this.name
-  policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the last 30 images; older ones are recoverable from git."
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 30
-      }
-      action = { type = "expire" }
-    }]
-  })
-}
+# THE REGISTRY IS NOT OWNED HERE. It lives in envs/shared because staging is
+# ephemeral: `terraform destroy` on this root must not take the images with it,
+# and the image an environment is rebuilt from must be the same bytes that were
+# there before. See envs/shared/main.tf.
 
 # ----------------------------------------------------------------- cluster --
 resource "aws_ecs_cluster" "this" {
@@ -90,11 +64,26 @@ resource "aws_cloudwatch_log_group" "tasks" {
 
 # ---------------------------------------------------------- load balancer ----
 # Public by construction: CloudFront reaches it over the internet, as every
-# CloudFront-to-ALB origin does. What stops anyone ELSE using it is the regional
-# WAF in modules/edge, whose default action is BLOCK and whose single allow rule
-# requires a secret header only our distribution sends. An internal ALB would
-# require VPC origins, which CloudFront supports only through VPC Lattice — more
-# moving parts than a two-person team should run for the same property.
+# CloudFront-to-ALB origin does. What stops anyone ELSE using it is the LISTENER
+# below, whose default action is a 403 and whose single forwarding rule requires
+# a secret header that only our distribution sends.
+#
+# WHY NOT A PRIVATE ALB BEHIND A CLOUDFRONT VPC ORIGIN. That option was
+# researched rather than assumed, and rejected on three findings, recorded in
+# docs/operations/cost-model.md:
+#   * ca-central-1 DOES support VPC origins (all AZs except cac1-az3), so the
+#     older note in this file claiming they need VPC Lattice was wrong.
+#   * The Terraform provider cannot manage a change to a VPC origin that is
+#     attached to a distribution (hashicorp/terraform-provider-aws#40905, still
+#     open): AWS returns 409 and the documented workaround is to destroy and
+#     recreate the whole distribution. That is not production-ready lifecycle
+#     management for the one resource that fronts the entire product.
+#   * With a VPC origin CloudFront addresses the load balancer by its AWS-issued
+#     `*.elb.amazonaws.com` name, and ACM will not issue a publicly-trusted
+#     certificate for a domain we do not control — so keeping `https-only` to
+#     the origin is not straightforward, and dropping to `http-only` would give
+#     up TLS on that hop.
+# The saving foregone is two public IPv4 addresses, $7.30/month.
 # tfsec:ignore:aws-elb-alb-not-public
 resource "aws_lb" "this" {
   name               = "${var.name}-onyx"
@@ -141,6 +130,20 @@ resource "aws_lb_target_group" "api" {
   tags = local.tags
 }
 
+# THE ORIGIN GATE.
+#
+# This used to be a REGIONAL WAF web ACL whose default action was BLOCK and
+# whose one rule allowed the secret header. It enforced exactly the property
+# below and cost $5/month for the ACL plus $1/month for the rule. A listener
+# whose DEFAULT action is 403, with one rule that forwards only when the header
+# matches, refuses precisely the same requests at precisely the same point —
+# before any target is chosen — for nothing.
+#
+# WHAT WAS GIVEN UP: the WAF's own `BlockedRequests` metric. What replaces it is
+# `HTTPCode_ELB_4XX_Count` plus the access logs, which are already enabled and
+# already record the matched rule. WHAT WAS NOT GIVEN UP: the CloudFront web ACL
+# in modules/edge keeps every managed rule group and the volumetric bound. The
+# edge protections are unchanged; only the duplicate ACL is gone.
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.this.arn
   port              = 443
@@ -148,8 +151,32 @@ resource "aws_lb_listener" "https" {
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
   certificate_arn   = var.certificate_arn
 
+  # DEFAULT DENY. A request that reaches this listener without the header never
+  # reaches a target group.
   default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "403"
+      message_body = "Forbidden"
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "from_our_distribution" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 1
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.api.arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = "X-Onyx-Origin-Verify"
+      values           = [var.origin_verify_secret]
+    }
   }
 }

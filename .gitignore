@@ -10,3 +10,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+
+# Terraform working directories and provider lock files. The lock file is
+# deliberately NOT committed: nothing here is applied from a developer machine,
+# and the pipeline resolves providers against the version constraints in each
+# root every time.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*

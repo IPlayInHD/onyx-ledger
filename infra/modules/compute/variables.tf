@@ -25,7 +25,6 @@ variable "documents_bucket_arn" { type = string }
 variable "legislation_bucket" { type = string }
 variable "legislation_bucket_arn" { type = string }
 variable "s3_kms_key_arn" { type = string }
-variable "ecr_kms_key_arn" { type = string }
 variable "logs_kms_key_arn" { type = string }
 variable "secrets_kms_key_arn" { type = string }
 
@@ -42,13 +41,59 @@ variable "api_port" {
   type    = number
   default = 8000
 }
+# --- capacity, supplied by modules/capacity ----------------------------------
+# Nothing here has a default. A missing size must fail the plan rather than
+# quietly land an environment on whatever this file happened to say.
 variable "api_cpu" { type = number }
 variable "api_memory" { type = number }
 variable "api_count" { type = number }
 variable "api_max_count" { type = number }
-variable "worker_cpu" { type = number }
-variable "worker_memory" { type = number }
+variable "api_uvicorn_workers" { type = number }
+variable "api_pool_size" { type = number }
+variable "api_pool_overflow" { type = number }
+
+variable "worker_app_cpu" { type = number }
+variable "worker_app_memory" { type = number }
 variable "worker_app_count" { type = number }
+variable "worker_app_concurrency" { type = number }
+
+variable "worker_freshness_cpu" { type = number }
+variable "worker_freshness_memory" { type = number }
+variable "worker_freshness_count" { type = number }
+variable "worker_freshness_concurrency" { type = number }
+
+variable "worker_privacy_cpu" { type = number }
+variable "worker_privacy_memory" { type = number }
+variable "worker_privacy_count" { type = number }
+variable "worker_privacy_concurrency" { type = number }
+
+variable "worker_pool_size" { type = number }
+variable "worker_pool_overflow" { type = number }
+
+variable "beat_cpu" { type = number }
+variable "beat_memory" { type = number }
+
+variable "migration_cpu" { type = number }
+variable "migration_memory" { type = number }
+
+# The HARD ceiling on how many API tasks autoscaling may ever run. Separate
+# from api_max_count so that a mistake in a profile cannot become an unbounded
+# bill: the autoscaling target refuses to plan if the profile asks for more.
+variable "api_absolute_max_count" {
+  type    = number
+  default = 6
+}
+
+variable "ecr_repository_url" {
+  description = "Persistent registry, created in envs/shared. NOT owned here, so destroying an environment does not destroy its images."
+  type        = string
+}
+
+variable "origin_verify_secret" {
+  description = "Shared with modules/edge. The load balancer refuses any request that does not carry it."
+  type        = string
+  sensitive   = true
+}
 
 variable "log_retention_days" {
   description = "Operational log retention. NOT a customer-data retention policy."

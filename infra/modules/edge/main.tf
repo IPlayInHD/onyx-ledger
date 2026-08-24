@@ -9,9 +9,9 @@
 # THE ALB IS OPEN TO THE INTERNET AND MUST NOT BE USABLE FROM IT. A security
 # group cannot express "only from our distribution" — CloudFront's egress ranges
 # are shared by every customer. So the distribution adds a secret header that
-# Terraform generates and nobody reads, and a regional WAF on the load balancer
-# blocks any request without it. Anything that finds the ALB's DNS name and
-# connects directly is refused before it reaches a task.
+# Terraform generates and nobody reads, and the load balancer's listener refuses
+# anything that does not carry it. Anything that finds the ALB's DNS name and
+# connects directly is answered with a 403 before a target group is chosen.
 
 terraform {
   required_providers {
@@ -23,11 +23,6 @@ terraform {
 }
 
 locals { tags = merge(var.tags, { Module = "edge" }) }
-
-resource "random_password" "origin_secret" {
-  length  = 48
-  special = false
-}
 
 # ------------------------------------------------------- frontend bucket -----
 # The frontend bucket holds the compiled public bundle — the same bytes any
@@ -125,7 +120,7 @@ resource "aws_cloudfront_distribution" "this" {
     # documented in runbooks.md.
     custom_header {
       name  = "X-Onyx-Origin-Verify"
-      value = random_password.origin_secret.result
+      value = var.origin_verify_secret
     }
   }
 

@@ -62,6 +62,21 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
+# Every size in this root comes from here. Nothing below invents a number.
+module "capacity" {
+  source  = "../../modules/capacity"
+  profile = var.capacity_profile
+}
+
+# The secret CloudFront sends and the load balancer's listener demands. Created
+# HERE rather than in either module, because both need it and modules/compute
+# cannot depend on modules/edge — edge already depends on compute for the load
+# balancer's DNS name.
+resource "random_password" "origin_verify" {
+  length  = 48
+  special = false
+}
+
 locals {
   name = "production"
   tags = { Environment = "production" }
@@ -103,7 +118,7 @@ module "network" {
   name               = local.name
   region             = var.region
   vpc_cidr           = "10.40.0.0/16"
-  single_nat_gateway = false
+  single_nat_gateway = module.capacity.single_nat_gateway
   logs_kms_key_arn   = aws_kms_key.logs.arn
   tags               = local.tags
 }
@@ -113,11 +128,11 @@ module "database" {
   name                  = local.name
   data_subnet_ids       = module.network.data_subnet_ids
   security_group_id     = module.network.database_security_group_id
-  instance_class        = "db.m7g.large"
-  allocated_storage     = 50
-  max_allocated_storage = 500
-  multi_az              = true
-  backup_retention_days = 35
+  instance_class        = module.capacity.db_instance_class
+  allocated_storage     = module.capacity.db_allocated_storage
+  max_allocated_storage = module.capacity.db_max_allocated_storage
+  multi_az              = module.capacity.db_multi_az
+  backup_retention_days = module.capacity.db_backup_retention_days
   deletion_protection   = true
   tags                  = local.tags
 }
@@ -128,8 +143,8 @@ module "cache" {
   data_subnet_ids   = module.network.data_subnet_ids
   security_group_id = module.network.cache_security_group_id
   logs_kms_key_arn  = aws_kms_key.logs.arn
-  node_type         = "cache.t4g.small"
-  node_count        = 2
+  node_type         = module.capacity.cache_node_type
+  node_count        = module.capacity.cache_node_count
   tags              = local.tags
 }
 
@@ -177,7 +192,6 @@ module "compute" {
   legislation_bucket     = module.storage.legislation_bucket
   legislation_bucket_arn = module.storage.legislation_bucket_arn
   s3_kms_key_arn         = module.storage.kms_key_arn
-  ecr_kms_key_arn        = module.storage.kms_key_arn
   logs_kms_key_arn       = aws_kms_key.logs.arn
   secrets_kms_key_arn    = module.secrets.kms_key_arn
 
@@ -190,15 +204,42 @@ module "compute" {
     values(module.secrets.db_secret_arns),
   )
 
-  api_cpu          = 1024
-  api_memory       = 2048
-  api_count        = 2
-  api_max_count    = 6
-  worker_cpu       = 1024
-  worker_memory    = 2048
-  worker_app_count = 2
+  api_cpu             = module.capacity.api_cpu
+  api_memory          = module.capacity.api_memory
+  api_count           = module.capacity.api_count
+  api_max_count       = module.capacity.api_max_count
+  api_uvicorn_workers = module.capacity.api_uvicorn_workers
+  api_pool_size       = module.capacity.api_pool_size
+  api_pool_overflow   = module.capacity.api_pool_overflow
 
-  log_retention_days     = 90
+  worker_app_cpu         = module.capacity.worker_app_cpu
+  worker_app_memory      = module.capacity.worker_app_memory
+  worker_app_count       = module.capacity.worker_app_count
+  worker_app_concurrency = module.capacity.worker_app_concurrency
+
+  worker_freshness_cpu         = module.capacity.worker_freshness_cpu
+  worker_freshness_memory      = module.capacity.worker_freshness_memory
+  worker_freshness_count       = module.capacity.worker_freshness_count
+  worker_freshness_concurrency = module.capacity.worker_freshness_concurrency
+
+  worker_privacy_cpu         = module.capacity.worker_privacy_cpu
+  worker_privacy_memory      = module.capacity.worker_privacy_memory
+  worker_privacy_count       = module.capacity.worker_privacy_count
+  worker_privacy_concurrency = module.capacity.worker_privacy_concurrency
+
+  worker_pool_size     = module.capacity.worker_pool_size
+  worker_pool_overflow = module.capacity.worker_pool_overflow
+
+  beat_cpu    = module.capacity.beat_cpu
+  beat_memory = module.capacity.beat_memory
+
+  migration_cpu    = module.capacity.migration_cpu
+  migration_memory = module.capacity.migration_memory
+
+  ecr_repository_url   = var.ecr_repository_url
+  origin_verify_secret = random_password.origin_verify.result
+
+  log_retention_days     = module.capacity.log_retention_days
   deletion_protection    = true
   enable_execute_command = false
 
@@ -215,7 +256,7 @@ module "edge" {
   aliases                   = var.aliases
   certificate_arn           = var.cloudfront_certificate_arn
   alb_dns_name              = module.compute.alb_dns_name
-  alb_arn                   = module.compute.alb_arn
+  origin_verify_secret      = random_password.origin_verify.result
   access_logs_bucket_domain = "${local.name}-onyx-access-logs.s3.amazonaws.com"
   tags                      = local.tags
 }
@@ -232,7 +273,7 @@ module "observability" {
   db_identifier              = module.database.identifier
   cache_replication_group_id = "${local.name}-valkey"
   log_group_name             = module.compute.log_group_name
-  max_connections_alarm      = 300
+  max_connections_alarm      = module.capacity.connection_room
   tags                       = local.tags
 }
 
@@ -241,18 +282,27 @@ module "github_oidc" {
   name            = local.name
   region          = var.region
   account_id      = data.aws_caller_identity.current.account_id
-  create_provider = false # staging created it
+  create_provider = false # the provider is created once, in envs/shared
 
   # A GitHub ENVIRONMENT, not a branch. Promotion to production therefore
   # inherits that environment's protection rules — required reviewers, wait
   # timers — instead of happening because somebody pushed.
   trusted_subjects = ["repo:${var.github_repository}:environment:production"]
 
-  ecr_repository_arn  = module.compute.ecr_repository_arn
+  ecr_repository_arn  = var.ecr_repository_arn
   cluster_arn         = module.compute.cluster_arn
   cluster_name        = module.compute.cluster_name
   passable_role_arns  = module.compute.passable_role_arns
   frontend_bucket_arn = module.edge.frontend_bucket_arn
   distribution_arn    = module.edge.distribution_arn
   tags                = local.tags
+}
+
+# ------------------------------------------------------------ cost --------
+module "cost_guardrails" {
+  source             = "../../modules/cost_guardrails"
+  name               = local.name
+  monthly_budget_usd = module.capacity.monthly_budget_usd
+  alert_emails       = var.alert_emails
+  tags               = local.tags
 }

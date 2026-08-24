@@ -1,0 +1,55 @@
+name: infra quality gate
+
+# Blocking, like the other gates: no `continue-on-error`, no `|| true`.
+#
+# WHAT THIS CANNOT DO. It never runs `terraform plan` against a real account and
+# never applies anything, so it proves the configuration is well-formed, valid
+# and free of the misconfigurations tfsec knows about — not that an apply would
+# succeed. That distinction is deliberate: a CI job holding credentials able to
+# read production state is a larger risk than the class of error it would catch.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-quality-gate.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-quality-gate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TERRAFORM_VERSION: "1.9.8"
+  TFSEC_VERSION: "v1.28.13"
+
+jobs:
+  infra:
+    name: fmt + validate + tfsec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: install tfsec
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/tfsec \
+            "https://github.com/aquasecurity/tfsec/releases/download/${TFSEC_VERSION}/tfsec-linux-amd64"
+          chmod +x /tmp/tfsec
+          sudo mv /tmp/tfsec /usr/local/bin/tfsec
+          tfsec --version
+
+      - name: infra gate
+        run: ./infra/check.sh

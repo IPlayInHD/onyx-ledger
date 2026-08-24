@@ -24,7 +24,19 @@ variable "backup_retention_days" {
   description = "Operational backup window. NOT a customer-data retention policy — see PD-3."
   type        = number
 }
-variable "deletion_protection" { type = bool }
+variable "deletion_protection" {
+  description = <<-DOC
+    Whether the instance refuses `terraform destroy`.
+
+    DEFAULTS TO TRUE. An environment that forgets to state its intent gets the
+    protected value; only an environment that deliberately says `false` — and
+    staging, which is ephemeral by design, is the one that does — can be torn
+    down. Making the safe value the default is also what lets this module be
+    scanned in isolation without a false finding.
+  DOC
+  type        = bool
+  default     = true
+}
 variable "tags" {
   type    = map(string)
   default = {}

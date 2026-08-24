@@ -43,6 +43,31 @@ variable "email_sender_address" { type = string }
 variable "ses_identity_arn" { type = string }
 
 variable "alert_emails" {
-  type    = list(string)
-  default = []
+  description = "Operational and budget notices. At least one address is required — see modules/cost_guardrails."
+  type        = list(string)
 }
+variable "capacity_profile" {
+  description = <<-DOC
+    `lean_launch` or `high_availability`. See modules/capacity — that module is
+    the single place every size is decided, and this is the single line that
+    decides which set applies. Moving between them is a reviewed configuration
+    change, not a redesign.
+
+    The default is the LAUNCH POSTURE, written here rather than in a tfvars file
+    that is not in the repository, so that what this environment runs at is
+    visible to a reader and to a test.
+  DOC
+  type        = string
+  default     = "lean_launch"
+}
+
+variable "ecr_repository_url" {
+  description = "From envs/shared. The registry outlives this environment."
+  type        = string
+}
+
+variable "ecr_repository_arn" {
+  description = "From envs/shared."
+  type        = string
+}
+

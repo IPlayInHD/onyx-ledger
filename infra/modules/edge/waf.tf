@@ -117,56 +117,17 @@ resource "aws_wafv2_web_acl" "cloudfront" {
 }
 
 # ------------------------------------------------ in front of the ALB --------
-# One rule, and it is the whole reason this ACL exists: a request that did not
-# come through our distribution does not carry the secret header, and is
-# refused. This is what makes the load balancer's open security group safe.
-resource "aws_wafv2_web_acl" "alb" {
-  name        = "${var.name}-onyx-alb"
-  description = "Admits only requests forwarded by the Onyx distribution."
-  scope       = "REGIONAL"
-
-  default_action {
-    block {}
-  }
-
-  rule {
-    name     = "from-our-distribution"
-    priority = 1
-    action {
-      allow {}
-    }
-    statement {
-      byte_match_statement {
-        field_to_match {
-          single_header {
-            name = "x-onyx-origin-verify"
-          }
-        }
-        positional_constraint = "EXACTLY"
-        search_string         = random_password.origin_secret.result
-        text_transformation {
-          priority = 0
-          type     = "NONE"
-        }
-      }
-    }
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "from-distribution"
-      sampled_requests_enabled   = false # the header is the secret
-    }
-  }
-
-  visibility_config {
-    cloudwatch_metrics_enabled = true
-    metric_name                = "${var.name}-onyx-alb"
-    sampled_requests_enabled   = false
-  }
-
-  tags = local.tags
-}
-
-resource "aws_wafv2_web_acl_association" "alb" {
-  resource_arn = var.alb_arn
-  web_acl_arn  = aws_wafv2_web_acl.alb.arn
-}
+# THERE IS NO LONGER A SECOND WEB ACL HERE.
+#
+# It existed to hold one rule: admit a request only if it carries the secret
+# header our distribution sends. A REGIONAL web ACL costs $5.00/month plus
+# $1.00/month for that rule, and the load balancer's own listener enforces the
+# same rule for nothing — default action 403, one forwarding rule conditioned on
+# the header. See `aws_lb_listener.https` in modules/compute/main.tf.
+#
+# THE PROPERTY IS UNCHANGED, and tests/security/test_deployment_surface.py
+# asserts it directly: a request that does not carry the header never reaches a
+# target group. What was removed is a duplicate enforcement point, not an
+# enforcement point. The CLOUDFRONT web ACL above is untouched — every managed
+# rule group and the volumetric bound are still in front of every public
+# request.
