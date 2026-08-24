@@ -1,10 +1,12 @@
 # Onyx production architecture
 
-**Status: DESIGN. Nothing here is provisioned.** No cloud account, credentials
-or infrastructure-as-code exist in this repository, so every component below is
-a decision and a rationale, not a running system. Where this document states a
-requirement it is a requirement on whoever provisions it, and the closure report
-for this entry lists what remains unproven for exactly that reason.
+**Status: DESIGN, now expressed as code. Nothing is provisioned.** The
+infrastructure entry turned this document into Terraform under `infra/` —
+validated and security-scanned, never applied, because no AWS account was
+reachable from it. Every component below is still a decision and a rationale
+rather than a running system; the difference is that the decisions now have a
+file each. `infra/README.md` records where this document and the code disagree
+and why.
 
 Launch scope is **Federal + Ontario** (`/api/v1/config/launch-scope`).
 
@@ -58,12 +60,23 @@ carries every managed service this design needs.
 Fargate runs a container without a node to patch, and it is the smallest thing
 that runs both the API and the workers from one image.
 
-**One exception to "one cloud": the static frontend stays on Netlify.** It holds
-no customer data, its entire configuration is the forty lines in `netlify.toml`,
-and it is already built and hardened. Consolidating onto CloudFront + S3 is a
-reasonable later move — one bill, one WAF — and the trade is genuinely close;
-what is not close is that spending the launch budget rebuilding a working static
-deploy buys nothing a customer can see.
+**~~One exception to "one cloud": the static frontend stays on Netlify.~~
+SUPERSEDED by the infrastructure entry.** The original reasoning — it works, it
+is hardened, rebuilding buys nothing visible — was sound while the API had no
+edge in front of it. It stops being sound once there is one, for a reason that
+is measurable rather than aesthetic: a Netlify proxy reaches the API over the
+public internet, so the load balancer has to accept connections from anywhere,
+and anything that finds its hostname has bypassed the security headers, the WAF
+and the rate rules entirely.
+
+With CloudFront as the only origin, the load balancer admits only requests
+carrying a secret header that Terraform generates and no human reads; the
+regional WAF's default action is BLOCK. Same-origin `/api/*` routing is
+preserved, so the CORS posture does not widen.
+
+`netlify.toml` remains in the repository as the statement of the header policy,
+and `tests/security/test_deployment_surface.py` fails if the CloudFront response
+headers policy drifts from it.
 
 ## 3. Environments
 
@@ -131,13 +144,29 @@ security meaningful rather than advisory.
 The schema already defines dedicated principals, and production uses them
 rather than collapsing to one connection string:
 
-| identity | used by | holds |
-|---|---|---|
-| `onyx_migrator` | deployment pipeline only | DDL |
-| `onyx_app_rw` | API and general workers | DML under RLS |
-| `onyx_privacy_runtime` | privacy/deletion worker | its own capability, and NOT `onyx_app_rw` |
-| `onyx_freshness_runtime` | freshness relay | its own capability, and NOT `onyx_app_rw` |
-| `kb_publisher` | publication only | publication, nothing more |
+**Corrected during the infrastructure entry.** An earlier version of this table
+named `onyx_privacy_runtime`, `onyx_freshness_runtime` and `kb_publisher`. Those
+roles do not exist. The schema's roles are below, and every one of them is
+`NOLOGIN` — they are GROUPS, and nothing can connect as one. Production creates
+LOGIN users as members, exactly as `scripts/run_backend_tests.sh` does for the
+test topology. Provisioning from the old table would have produced a set of
+roles no application could authenticate as, and the mistake would not have
+surfaced until the first connection attempt.
+
+| group role (NOLOGIN) | login user | used by | holds |
+|---|---|---|---|
+| `onyx_migrator` | `onyx_migrator` (LOGIN, `rds_superuser`) | migration task only | DDL, and schema ownership |
+| `onyx_app_rw` | `onyx_api` | API and general workers | DML under RLS |
+| `onyx_privacy_worker` | `onyx_privacy` | privacy/deletion worker | its own capability, and NOT `onyx_app_rw` |
+| `onyx_freshness_worker` | `onyx_freshness` | freshness relay and integrity verifier | its own capability, and NOT `onyx_app_rw` |
+| `onyx_app_ro` | `onyx_reporting` | nothing yet | read only |
+| `onyx_kb_admin` | — | knowledge authoring | publication |
+| `onyx_audit_writer` | — | audit triggers | INSERT into `audit.*` |
+
+`infra/modules/database/bootstrap.sql` and `bootstrap_runtime_logins.sql` are
+that ordering, in two passes: the migrator and the extensions first, the schema
+second (as the migrator), the runtime logins third — because the group roles do
+not exist until the schema has been applied.
 
 The privacy and freshness runtimes are deliberately separate LOGIN roles. PD-16
 was exactly this boundary being reachable from the application identity: a

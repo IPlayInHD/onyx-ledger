@@ -1,0 +1,21 @@
+# The build context is not the repository.
+#
+# Everything here is either useless in an image or actively unwanted in one. The
+# Dockerfile copies four directories by name, so this is defence in depth — a
+# later `COPY . .` written in a hurry should not be able to ship the test suite,
+# and the seeded credentials in its fixtures, into production.
+
+tests/
+scripts/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.env
+.env.*
+*.log
+requirements-dev.lock.txt

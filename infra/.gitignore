@@ -1,0 +1,19 @@
+# Provider binaries, downloaded by `terraform init`. Hundreds of megabytes, and
+# reproducible from the lock file below — which is why the lock file IS
+# committed and these are not.
+.terraform/
+
+# State, and anything that looks like it. Real state lives in the S3 backend;
+# a local copy would contain generated database passwords, the Redis AUTH token
+# and the JWT signing secret in cleartext.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Environment-specific backend configuration: it names the state bucket, which
+# contains the account id. Copy backend.hcl.example and fill it in locally.
+backend.hcl
+
+# Variable files may carry hostnames, certificate ARNs and sender identities.
+*.tfvars
+!*.tfvars.example

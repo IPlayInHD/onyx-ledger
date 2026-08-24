@@ -1,0 +1,284 @@
+# =============================================================================
+# Deploy — staging on merge, production only when a person asks
+# =============================================================================
+# NEVER EXECUTED. No AWS account existed when this was written, so this file has
+# been linted and reviewed and has not run. Treat its first execution as a
+# rehearsal: run it against staging, watch each step, and expect to find
+# something.
+#
+# The ordering is the part that matters and is not negotiable:
+#
+#   quality gates → build by digest → migrate → deploy → verify
+#
+# Migrations run as their own task, as the migrator identity, and a failure
+# stops everything after it. No API container runs `alembic upgrade` on start:
+# two revisions racing the same ALTER is how a deployment corrupts a schema.
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which environment to deploy
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+concurrency:
+  # One deployment at a time per environment. Two overlapping deploys can run
+  # their migrations in an order neither of them chose.
+  group: deploy-${{ inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # the OIDC token exchanged for a short-lived AWS session
+
+env:
+  AWS_REGION: ca-central-1
+  ECR_REPOSITORY: onyx/backend
+
+jobs:
+  # The existing gates decide whether this commit may be built at all. They are
+  # referenced rather than repeated: a second copy of the quality bar drifts
+  # from the first, and the first is the one reviewers read.
+  gates:
+    name: quality gates must be green
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the backend and frontend gates to have passed for this SHA
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+            });
+            const required = ['backend quality gate', 'frontend quality gate'];
+            const failed = [];
+            for (const name of required) {
+              const runs = data.check_runs.filter(r => r.name.includes(name.split(' ')[0]));
+              if (!runs.length) failed.push(`${name}: no check run for this SHA`);
+              else if (runs.some(r => r.conclusion !== 'success')) failed.push(`${name}: not success`);
+            }
+            if (failed.length) core.setFailed(failed.join('\n'));
+
+  build:
+    name: build and push by digest
+    needs: gates
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the deployment role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          # No stored access key. The session lasts an hour and is scoped by the
+          # trust policy to this repository and this ref.
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Build
+        working-directory: backend
+        run: |
+          docker build \
+            --platform linux/arm64 \
+            --tag onyx-backend:${{ github.sha }} \
+            --file Dockerfile \
+            .
+
+      - name: Push, and record the DIGEST
+        id: push
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          registry="${{ steps.ecr.outputs.registry }}"
+          repo="$registry/${{ env.ECR_REPOSITORY }}"
+
+          # The git SHA is the tag a human reads. The digest is what production
+          # runs, so that promoting staging's artefact promotes the same bytes
+          # rather than a rebuild that resolved differently.
+          docker tag onyx-backend:${{ github.sha }} "$repo:${{ github.sha }}"
+          docker push "$repo:${{ github.sha }}"
+
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$repo:${{ github.sha }}")
+          echo "image=$digest" >> "$GITHUB_OUTPUT"
+          echo "::notice::deploying $digest"
+
+  migrate:
+    name: migrate (its own task, as the migrator)
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run the migration task and wait for it
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          set -euo pipefail
+          cluster="$ENVIRONMENT-onyx"
+          family="$ENVIRONMENT-onyx-migration"
+
+          # Re-register the family with the new image, so the migration runs the
+          # code being deployed rather than whatever ran last time.
+          definition=$(aws ecs describe-task-definition --task-definition "$family" \
+            --query 'taskDefinition' --output json)
+          updated=$(echo "$definition" | jq --arg img "$IMAGE" '
+            .containerDefinitions[0].image = $img
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)')
+          arn=$(aws ecs register-task-definition --cli-input-json "$updated" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          task=$(aws ecs run-task \
+            --cluster "$cluster" \
+            --task-definition "$arn" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.TASKS_SECURITY_GROUP_ID }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "migration task: $task"
+          aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
+
+          code=$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "migration exit code: $code"
+
+          # A non-zero exit stops the deployment here. Nothing rolls the schema
+          # back automatically: reversing a migration is a decision a person
+          # makes with the runbook open, not something a pipeline does at 3am.
+          if [ "$code" != "0" ]; then
+            echo "::error::migration failed; the application was NOT deployed"
+            exit 1
+          fi
+
+  deploy:
+    name: deploy services
+    needs: [build, migrate]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Point every service at the new digest
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          set -euo pipefail
+          cluster="$ENVIRONMENT-onyx"
+
+          for service in api worker-app worker-freshness worker-privacy beat; do
+            family="$ENVIRONMENT-onyx-$service"
+            definition=$(aws ecs describe-task-definition --task-definition "$family" \
+              --query 'taskDefinition' --output json)
+            updated=$(echo "$definition" | jq --arg img "$IMAGE" '
+              .containerDefinitions[0].image = $img
+              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                    .compatibilities, .registeredAt, .registeredBy)')
+            arn=$(aws ecs register-task-definition --cli-input-json "$updated" \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+            aws ecs update-service --cluster "$cluster" --service "$service" \
+              --task-definition "$arn" >/dev/null
+            echo "$service -> $arn"
+          done
+
+          # The circuit breaker rolls a service back on its own if the new tasks
+          # do not stabilise. Waiting here means the job fails when that happens
+          # rather than reporting a success the customers disagree with.
+          for service in api worker-app worker-freshness worker-privacy beat; do
+            aws ecs wait services-stable --cluster "$cluster" --services "$service"
+          done
+
+      - name: Publish the frontend
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          # Hashed assets first, with a long cache; the HTML shell last, with
+          # none. The other order serves an index that references assets which
+          # are not uploaded yet.
+          aws s3 sync dist/ "s3://$ENVIRONMENT-onyx-frontend/" \
+            --exclude index.html --cache-control "public,max-age=31536000,immutable" --delete
+          aws s3 cp dist/index.html "s3://$ENVIRONMENT-onyx-frontend/index.html" \
+            --cache-control "public,max-age=0,must-revalidate"
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/index.html" >/dev/null
+
+  verify:
+    name: verify the deployment
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Readiness, and the SHA that is actually serving
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+        run: |
+          set -euo pipefail
+          # /readyz opens a database connection; /healthz does not. The load
+          # balancer polls the cheap one, so this is the one place the expensive
+          # check is worth making.
+          for attempt in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/readyz" || true)
+            [ "$code" = "200" ] && break
+            echo "readyz: $code (attempt $attempt)"; sleep 10
+          done
+          [ "$code" = "200" ] || { echo "::error::deployment is not ready"; exit 1; }
+
+      - name: The security headers are actually being sent
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+        run: |
+          set -euo pipefail
+          headers=$(curl -sSI "$BASE_URL/")
+          for required in \
+            "content-security-policy" \
+            "strict-transport-security" \
+            "x-content-type-options" \
+            "referrer-policy"; do
+            echo "$headers" | grep -qi "^$required" || {
+              echo "::error::$required is not present on the deployed response"
+              exit 1
+            }
+          done
+
+      - name: Browser journeys against the deployment
+        working-directory: frontend
+        env:
+          ONYX_E2E_BASE_URL: ${{ vars.BASE_URL }}
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          # Public surfaces only against a shared environment: the persona
+          # journeys register accounts and send mail, which is fine in staging
+          # and is not something to point at production.
+          npx playwright test e2e/public.spec.ts

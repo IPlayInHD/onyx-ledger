@@ -1,0 +1,6 @@
+# terraform init -backend-config=backend.hcl
+bucket         = "onyx-tfstate-REPLACE-WITH-ACCOUNT-ID"
+key            = "production/terraform.tfstate"
+region         = "ca-central-1"
+dynamodb_table = "onyx-terraform-locks"
+encrypt        = true

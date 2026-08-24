@@ -166,3 +166,141 @@ The publication identity can change what the tax engine believes.
 4. Roll back unapproved publications through the existing rollback path.
 5. Re-run the affected analyses — a customer priced under a forged rule has a
    wrong number sealed into their history, and it does not correct itself.
+
+---
+
+# Infrastructure runbooks
+
+Added by the infrastructure entry. **None of these has been executed** — no AWS
+account was reachable — so each is a procedure to rehearse in staging before it
+is needed in anger, not a procedure that has been proven. Where a step says
+"expect", that is a prediction, and the first person to run it should correct
+this file with what actually happened.
+
+## Deploy
+
+`.github/workflows/deploy.yml`, on merge to `main` for staging and by manual
+dispatch for production. The ordering is fixed: gates → build by digest →
+migrate → deploy → verify.
+
+What is worth watching the first few times:
+
+- the migration task's **exit code**, not its logs. A migration that prints a
+  traceback and exits 0 would deploy.
+- `aws ecs wait services-stable` returning quickly for `beat`. Beat is
+  configured to stop the old task before starting the new one, so it is briefly
+  absent by design; the scheduler missing a minute is acceptable and two beats
+  running at once is not.
+
+## Rollback
+
+Application rollback is routine; schema rollback is not.
+
+```
+aws ecs update-service --cluster <env>-onyx --service api \
+    --task-definition <previous-task-definition-arn>
+```
+
+The previous ARN is in the deployment run's log, and every revision stays
+registered. Roll every service back together — a worker running new code against
+an API running old code is a combination nothing tested.
+
+**Do not roll a migration back as a reflex.** The migrations are written to be
+backward compatible with the revision still serving, which means rolling the
+application back is usually sufficient and rolling the schema back is usually
+destructive. If the schema genuinely must move backwards, that is a person with
+this runbook open and a snapshot taken first.
+
+## Restore
+
+Not rehearsed. The drill belongs in staging and is the acceptance criterion for
+saying backups work; a checkbox in the RDS console is not evidence.
+
+```
+aws rds restore-db-instance-to-point-in-time \
+    --source-db-instance-identifier <env>-postgres \
+    --target-db-instance-identifier <env>-postgres-restore \
+    --restore-time <ISO-8601 within the retention window> \
+    --db-subnet-group-name <env>-db --no-publicly-accessible
+```
+
+Then, and this is the part that makes it a drill rather than a gesture: point a
+task at the restored instance, run the privilege invariant suite against it, and
+confirm a synthetic persona's analysis is present and its figures unchanged. A
+restore that produces a reachable database with an incoherent schema has proven
+nothing.
+
+Record `RESTORE_SUCCESS`, `RTO` (start of restore to first successful query) and
+`RPO` (the gap between the restore point and the last committed write) as
+measured numbers.
+
+## Secret rotation
+
+Each secret is its own entry under `<env>/onyx/`, so rotation is per secret.
+
+- **JWT signing key** — rotating it signs every live session out. It touches no
+  sealed tax artefact; those are hashed over canonical content, not signed with
+  this key. So it is a sign-out event, not a data event. Update the secret, then
+  restart the API service so tasks pick up the new value.
+- **Database passwords** — change the password in PostgreSQL first, then the
+  secret, then restart the consuming service. The other order locks the service
+  out of its own database.
+- **Redis AUTH token** — ElastiCache supports two tokens during rotation. Set the
+  new one as `ROTATE`, update the secret, restart the workers, then `SET` to
+  finish. Skipping the two-token window drops every worker at once.
+- **CloudFront origin secret** — two applies: add the new value to the WAF rule
+  as a second allow condition, update the distribution's custom header, then
+  remove the old condition. One apply locks the edge out of the origin.
+
+## Worker outage
+
+Symptom: queue depth climbing, or the worker-failure alarm.
+
+1. Which queue? The service names map to queues in
+   `infra/modules/compute/services.tf`.
+2. `worker-privacy` stuck is the one to treat as urgent-but-careful: it is the
+   deletion path, and a customer waiting on erasure is a compliance clock. Do
+   not clear its queue to make the alarm stop.
+3. Restart is `aws ecs update-service --force-new-deployment`. `acks_late` means
+   an in-flight task is re-queued rather than lost.
+
+## Database outage
+
+The API's `/readyz` will fail and the load balancer will keep serving `/healthz`,
+so tasks stay up and requests fail rather than the service disappearing. That is
+deliberate: a database blip should not trigger a replacement stampede.
+
+Check the RDS event log before restarting anything. Multi-AZ failover takes
+about a minute and resolves itself; a restart during it extends the outage.
+
+## SES outage
+
+Registration still succeeds — the token is committed before the message is
+scheduled, so a customer who does not receive a link can ask for another once
+delivery recovers. Nothing is lost and nothing needs replaying.
+
+Watch the bounce and complaint rates rather than only the send count: a spike in
+bounces is how a domain's reputation gets damaged, and the recovery from that is
+measured in weeks.
+
+## S3 outage
+
+Document upload and download fail; the tax engine does not, because it reads
+published knowledge from PostgreSQL. The product degrades to "cannot attach a
+document" rather than stopping.
+
+**Do not retry a privacy erasure blindly against a failing bucket.**
+`hard_erase` re-lists to confirm removal; if listing is what is failing, a retry
+loop can report success on an unverified deletion. Wait for the service to
+recover.
+
+## Suspected compromise
+
+1. Revoke first, investigate second. Rotate the JWT secret — every session ends.
+2. VPC flow logs record REJECTs for fourteen days; CloudFront and ALB access
+   logs record requests. Start there.
+3. The deployment role cannot read secret values and cannot alter IAM, by
+   explicit deny. If something did either, the compromise is upstream of the
+   pipeline.
+4. Do not delete evidence to restore service. Snapshot the database before any
+   destructive remediation.
