@@ -304,3 +304,96 @@ recover.
    pipeline.
 4. Do not delete evidence to restore service. Snapshot the database before any
    destructive remediation.
+
+---
+
+## Running an ephemeral staging environment
+
+**Never executed.** Written against the interfaces the repository defines; every
+step is a plan until it has run against a real account.
+
+Staging is not a place, it is a run. `infra/staging_cycle.sh` is the whole
+sequence and its destroy step is in a `trap`, because the expensive failure mode
+is not a failed proving run — it is a run that failed at step 5 and left a NAT
+gateway, a database and five Fargate tasks standing until somebody notices.
+
+```
+RUN_ID=2026-08-24-b6 EVIDENCE_BUCKET=<from envs/shared outputs> \
+PRIVATE_SUBNET_IDS=... TASKS_SECURITY_GROUP_ID=... \
+  ./infra/staging_cycle.sh
+```
+
+**Before starting.** `envs/shared` must already be applied — the registry, the
+OIDC provider and the evidence bucket are prerequisites, not part of the run.
+The two ACM certificates and the hosted zone must already exist; they are passed
+in as ARNs and are not created or destroyed by the cycle.
+
+**What the run proves, in order.** Provision → migrate (exit code 0 required, or
+the run stops) → the estate answers `/readyz` → the browser journeys → the
+security invariants → privacy hard erasure against real versioned S3 → the
+restorable-time check → the twelve-persona tax regression → evidence preserved
+to the shared bucket under `RUN_ID` → destroy.
+
+**If the destroy fails.** It will say so and exit non-zero. Do not walk away:
+re-run `terraform -chdir=infra/envs/staging destroy` until it succeeds, then
+`terraform state list` to confirm nothing is left. A half-destroyed environment
+is the one state that costs money and proves nothing.
+
+**Drift.** There is none to accumulate, which is the point. The environment is
+created from the committed configuration at the start of every run, so
+"staging drifted" stops being something that can happen quietly between runs.
+What can still drift is the PERSISTENT tier — the registry's lifecycle policy,
+the evidence bucket's settings — and that is why it is a Terraform root of its
+own rather than console-managed.
+
+**Cost.** $0.2451 per hour standing. A two-day run is $11.76; ten days is
+$58.81. See `docs/operations/cost-model.md`.
+
+## Changing the capacity profile
+
+`infra/modules/capacity` holds two profiles. Moving between them is one line in
+an environment root:
+
+```hcl
+variable "capacity_profile" {
+  default = "high_availability"   # was "lean_launch"
+}
+```
+
+**Then read the plan.** It will show a database instance-class change (which
+replaces the instance and takes a maintenance window), a second NAT gateway, a
+second cache node and larger task definitions. None of it is reversible for
+free: going back down is another instance-class change.
+
+**What the plan must NOT show.** A change to `publicly_accessible`, to a route
+table, to a task role, to a database secret mapping, to `ONYX_ENVIRONMENT`, or
+to the listener's default action. If it does, something has been wired through
+the capacity module that should not be, and
+`backend/tests/security/test_capacity_profiles.py` should have caught it —
+treat a plan like that as a defect in the test, not a surprise in the plan.
+
+**The scale-up triggers** that say when to do this are in
+`docs/operations/cost-model.md` §7. They are metric thresholds with durations,
+not a date.
+
+## Rotating the CloudFront origin secret
+
+Superseded by the lean-launch entry: the secret is now generated in the
+environment root (`random_password.origin_verify`) and consumed by BOTH
+`modules/compute` — the load balancer's listener rule — and `modules/edge` — the
+distribution's custom header. It is no longer inside the edge module, and the
+regional WAF web ACL that used to enforce it no longer exists.
+
+The two-apply sequence is unchanged in shape and still necessary, because the
+distribution and the listener must not be updated in the same apply:
+
+1. Add the new value as a SECOND accepted value on the listener rule (an
+   `http_header` condition takes a list), apply, and wait for the load balancer
+   to settle. Both the old and the new header are now admitted.
+2. Change the distribution's `custom_header` to the new value, apply, and wait
+   for the distribution to deploy — CloudFront propagation is minutes, not
+   seconds.
+3. Remove the old value from the listener rule, apply. Only now is the old
+   secret refused.
+
+Doing it in one apply refuses live traffic for the length of the propagation.

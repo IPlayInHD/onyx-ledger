@@ -153,8 +153,20 @@ resource "aws_secretsmanager_secret_version" "redis" {
 # Created empty so that the day a provider is chosen, the plumbing — task role
 # grants, injection, rotation runbook — already exists and nobody is tempted to
 # paste a key into an environment variable "just to test it".
+#
+# OFF BY DEFAULT SINCE THE LEAN-LAUNCH REVIEW. Secrets Manager bills $0.40 per
+# secret per month whether or not the secret holds anything, and these hold
+# nothing: no task role grants access to them, no container is given them, and
+# they appear in no `all_secret_arns`. What they actually reserve is a NAME —
+# useful only against the case where somebody else creates a secret called
+# `<env>/onyx/payments` first. Three names in a private account is not $1.20 a
+# month of value, and creating them the day a provider is chosen is one apply.
+#
+# This is NOT the same decision as moving a real credential out of Secrets
+# Manager to save money. Nothing here is a credential. §9's rule stands: the
+# fourteen secrets that DO hold credentials stay exactly where they are.
 resource "aws_secretsmanager_secret" "placeholder" {
-  for_each                = toset(["ai-provider", "payments", "error-reporting"])
+  for_each                = var.reserve_unwired_secret_names ? toset(["ai-provider", "payments", "error-reporting"]) : toset([])
   name                    = "${var.name}/onyx/${each.key}"
   description             = "Reserved. No provider is wired; see the closure report."
   kms_key_id              = aws_kms_key.this.id

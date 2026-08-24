@@ -14,20 +14,39 @@ API. Treat a first `plan` as a review step, not a formality.
 
 ```
 bootstrap/            state bucket + lock table. Run once, with local state.
+check.sh              fmt + validate + tfsec over every root and module
+staging_cycle.sh      the ephemeral staging run, start to destroy
 modules/
+  capacity/           the two capacity profiles. Creates nothing; decides sizes
   network/            VPC, subnets, NAT, endpoints, security groups
   database/           RDS PostgreSQL, KMS, parameter group, credentials
   cache/              ElastiCache (Valkey), auth token
   storage/            S3 document + legislation buckets
   secrets/            Secrets Manager entries and their KMS key
-  compute/            ECR, ECS cluster, ALB, API + worker services, migration task
+  compute/            ECS cluster, ALB, API + worker services, migration task
   edge/               CloudFront, WAF, ACM, response headers
   observability/      log groups, alarms, notification topic
-  github_oidc/        OIDC provider and the deploy roles CI assumes
+  github_oidc/        the deploy roles CI assumes
+  cost_guardrails/    budget thresholds and anomaly detection
 envs/
-  staging/            the staging composition
+  shared/             PERSISTENT: ECR, the OIDC provider, the evidence bucket
+  staging/            the staging composition — EPHEMERAL by default
   production/         the production composition
 ```
+
+**Two tiers, and the split is what makes staging safe to destroy.** `envs/shared`
+holds what must outlive an environment: the container registry (so a rebuild
+uses the same bytes), the account's single OIDC provider, and the bucket that
+keeps what a staging run proved after the estate that proved it is gone. Both
+are `prevent_destroy`. Certificates and the hosted zone are persistent too, and
+are passed into the environment roots as ARNs rather than created there.
+
+**Every size comes from `modules/capacity`.** An environment root names a
+profile — `lean_launch` or `high_availability` — and the module supplies every
+instance class, task size, count and pool cap. It also computes the arithmetic
+maximum number of PostgreSQL backends the configuration can open and refuses to
+plan when that exceeds what the chosen database class allows. See
+`docs/operations/cost-model.md` for what was measured and what it refuted.
 
 ## Order of operations
 
@@ -36,9 +55,21 @@ the S3 bucket and DynamoDB table the other stacks use for state and locking, and
 it is the only stack whose own state is local — a chicken-and-egg that every
 Terraform estate has and that is cheaper to accept than to hide.
 
-Then `envs/staging`, then `envs/production`. They are separate root modules with
-separate state files on purpose: a `terraform apply` typed in the wrong terminal
-should not be able to reach production.
+Then `envs/shared`, once. It creates the registry, the OIDC provider and the
+evidence bucket, and neither environment root can be applied without its
+outputs.
+
+Then `envs/staging` or `envs/production`, in either order — they no longer
+depend on each other, because the OIDC provider they used to fight over now
+lives in `shared`. They are separate root modules with separate state files on
+purpose: a `terraform apply` typed in the wrong terminal should not be able to
+reach production.
+
+Staging is meant to be created and destroyed rather than kept:
+`infra/staging_cycle.sh` is the whole run — provision, migrate, verify, journeys,
+security, hard erasure, restore check, twelve-persona regression, preserve the
+evidence, destroy. Its destroy step is unconditional, because the expensive
+failure is not a failed run, it is a run that failed and left the estate up.
 
 ## Decisions that differ from the design document
 
@@ -67,43 +98,25 @@ produce roles nothing can log in as.
 
 ## Cost
 
-`ca-central-1`, monthly, USD, on-demand. These are computed from the instance
-types this code actually selects, not from a general estimate — change a
-`node_type` or an `instance_class` and this table is wrong until somebody
-updates it. Nothing has been applied, so no figure here has met a bill.
+**`docs/operations/cost-model.md` is the cost model.** It carries the rate card
+(pulled from the AWS Price List Query API rather than remembered), the measured
+sizing evidence, the per-component breakdown for both profiles, the ephemeral
+staging figures, the top five drivers and the scale-up triggers. The short
+version:
 
-| | staging | closed beta | early production |
-|---|---:|---:|---:|
-| RDS PostgreSQL | $30 `db.t4g.small`, single-AZ | $60 `db.t4g.small`, Multi-AZ | $190 `db.m7g.large`, Multi-AZ |
-| ElastiCache Valkey | $12 `cache.t4g.micro` ×1 | $13 `cache.t4g.micro` ×1 | $50 `cache.t4g.small` ×2 |
-| Fargate — API | $18 0.5 vCPU ×1 | $18 0.5 vCPU ×1 | $110 1 vCPU ×2–6 |
-| Fargate — workers | $36 4 services, small | $36 | $150 |
-| NAT gateway | $34 one | $34 one | $75 one per AZ |
-| CloudFront + WAF | $12 mostly WAF's fixed fee | $18 | $45 |
-| S3 + KMS + Secrets | $10 | $15 | $40 |
-| CloudWatch logs + alarms | $8 14-day retention | $12 | $35 |
-| SES | $0 under the free tier | $1 | $10 |
-| **Total** | **≈ $160** | **≈ $210** | **≈ $700** |
+| | $/month |
+|---|---:|
+| `lean_launch` production, standing | 178.89 |
+| `lean_launch` production at 100 users | 187.06 |
+| `high_availability` production at 100 users | 733.38 |
+| ephemeral staging, 2-day run | 11.76 |
+| ephemeral staging, 10-day run | 58.81 |
 
-**The two surprises in that table**, because they are the ones that catch people
-out at this size:
-
-*The NAT gateway costs more than the API.* $34/month before a byte moves,
-per AZ, and production runs one per AZ for availability. The S3 gateway endpoint
-already keeps document traffic off it, which is why it is in `modules/network`
-rather than left as a later optimisation. If cost pressure ever gets real,
-interface endpoints for ECR, Secrets Manager and CloudWatch would let the NAT
-gateways go entirely — roughly a wash on price, better on security, and more
-moving parts.
-
-*The WAF's fixed fee dominates its own line.* $5 per web ACL plus $1 per rule
-group, before any request. Two ACLs — one at CloudFront, one at the ALB — is
-most of that $12. It is worth it: the ALB ACL is what makes the load balancer's
-open security group safe.
-
-**Staging costs nearly as much as closed beta**, which looks wrong and is not.
-Availability is what production buys, and staging deliberately does not buy it —
-but the fixed costs (NAT, WAF, the smallest RDS instance that exists) are the
-same either way. The way to make staging cheaper is to run it only when needed;
-`terraform destroy` on the staging root is safe by construction, which is why
-its deletion protection is off and its secret recovery window is zero.
+**A correction to what this file used to say.** An earlier version of this
+section claimed that replacing the NAT gateways with interface endpoints for
+ECR, Secrets Manager and CloudWatch would be "roughly a wash on price". It is
+not. At the real `ca-central-1` rate — $0.011 per endpoint-hour per availability
+zone — the five endpoints the tasks need cost $40.15/month in one zone and
+$80.30 across the two they actually run in, against $36.50 for one NAT gateway.
+The endpoint route is 10% to 120% more expensive, not a wash, and the entry that
+found this declined to take it for that reason.

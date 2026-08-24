@@ -16,3 +16,13 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "reserve_unwired_secret_names" {
+  description = <<-DOC
+    Whether to create the three empty placeholder secrets for providers that are
+    not wired yet. They cost $0.40 each per month and grant nothing; see the
+    comment beside the resource. Turn on when a name actually needs holding.
+  DOC
+  type        = bool
+  default     = false
+}
