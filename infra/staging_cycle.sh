@@ -104,5 +104,18 @@ step "STEP 8   twelve-persona tax regression"
 keep "$OUT/personas.log"
 
 step "STEP 9   evidence preserved"
+# The CloudWatch log group belongs to the environment and dies with it, so the
+# application's own account of the run has to be pulled out before the destroy.
+# `filter-log-events` rather than `create-export-task`: the export API needs a
+# bucket policy granting the regional logs service principal, and one more
+# bucket policy to get right is not worth it for text.
+LOGS=$(terraform -chdir="$STAGING" output -raw log_group_name 2>/dev/null || echo "")
+if [ -n "$LOGS" ]; then
+  aws logs filter-log-events --log-group-name "$LOGS" \
+    --start-time "$(( ( $(date +%s) - 86400 * 14 ) * 1000 ))" \
+    --output json > "$OUT/task-logs.json" || echo "log export failed; continuing to destroy"
+  keep "$OUT/task-logs.json"
+fi
+
 aws s3 ls "s3://$EVIDENCE/$RUN_ID/" | tee "$OUT/manifest.txt"
 grep -q . "$OUT/manifest.txt" || { echo "nothing was preserved"; exit 1; }

@@ -253,6 +253,23 @@ def test_the_lean_profile_cannot_autoscale_beyond_its_hard_maximum() -> None:
     )
     assert targets == {"api"}, f"unexpected autoscaling targets: {sorted(targets)}"
 
+    # The database grows on its own too, and that is also a bill. RDS storage
+    # autoscaling is bounded by the profile, not left at whatever AWS allows.
+    ceiling = int(re.search(r"db_max_allocated_storage\s*=\s*(\d+)", lean).group(1))
+    floor = int(re.search(r"db_allocated_storage\s*=\s*(\d+)", lean).group(1))
+    assert floor <= ceiling <= 200, (
+        f"lean storage autoscaling is bounded at {ceiling} GB; that is either "
+        "below the starting size or high enough to be a surprise"
+    )
+
+    # And no capacity provider strategy anywhere: Spot is not used, and a
+    # service that quietly acquired it would be running interruptible capacity
+    # nobody proved safe. See docs/operations/cost-model.md.
+    assert "capacity_provider_strategy" not in services, (
+        "a service declares a capacity provider strategy; Fargate Spot is not "
+        "proven interruption-safe for any Onyx workload"
+    )
+
 
 # ---------------------------------------------------------------------------
 # 5. The high-availability profile still exists
@@ -433,6 +450,85 @@ def test_destroying_an_environment_cannot_destroy_the_registry_or_evidence() -> 
     assert 'resource "aws_ecr_repository"' not in compute, (
         "modules/compute still owns the registry"
     )
+
+
+# ---------------------------------------------------------------------------
+# Bill-shock guardrails (§11)
+# ---------------------------------------------------------------------------
+def test_the_estate_stays_in_one_region_and_off_expensive_families() -> None:
+    """Nothing here should be able to become a large bill by accident.
+
+    Two ways that happens without anybody deciding to spend the money: a
+    resource lands in a second region, or a size string names a family whose
+    hourly rate is an order of magnitude above the rest of the estate. The
+    us-east-1 provider alias is the ONE deliberate exception — CloudFront's web
+    ACL and its certificate must live there and cannot live anywhere else.
+    """
+    for env in ENV_ROOTS:
+        root = _strip_comments(_tf("envs", env, "main.tf"))
+        regions = set(re.findall(r'region\s*=\s*"([^"]+)"', root))
+        assert regions <= {"us-east-1"}, (
+            f"envs/{env} pins regions {sorted(regions)}; the primary region "
+            "comes from var.region and only the CloudFront alias may be fixed"
+        )
+        default = re.search(
+            r'variable\s+"region"\s*\{[^}]*default\s*=\s*"([^"]+)"',
+            _strip_comments(_tf("envs", env, "variables.tf")),
+            re.S,
+        )
+        assert default and default.group(1) == "ca-central-1", (
+            f"envs/{env} does not default to ca-central-1"
+        )
+
+    capacity = _strip_comments(CAPACITY.read_text())
+    sizes = re.findall(r'"(db\.[a-z0-9.]+|cache\.[a-z0-9.]+)"', capacity)
+    assert sizes, "no instance classes found — the pattern has gone stale"
+    forbidden = re.compile(r"\.(p[2-9]|g[3-9]|inf|trn|dl|x[12]|u-|z1d|24xlarge|metal)")
+    offenders = [s for s in sizes if forbidden.search(s)]
+    assert not offenders, f"a profile names an expensive family: {offenders}"
+
+    # Sizes must be literals in the profile table, never variables: a size that
+    # can be passed in from a tfvars file is a size nobody reviewed.
+    for profile in ("lean_launch", "high_availability"):
+        body = _profile_body(capacity, profile)
+        for knob in ("db_instance_class", "cache_node_type"):
+            value = re.search(rf'{knob}\s*=\s*(\S+)', body)
+            assert value and value.group(1).startswith('"'), (
+                f"{profile}.{knob} is not a literal: {value.group(1) if value else None}"
+            )
+
+
+def test_a_budget_exists_and_it_never_acts_on_the_estate() -> None:
+    """Budgets tell a person. They must not touch a running service.
+
+    §11 is explicit that an automated destructive shutdown of customer
+    production data is not a guardrail. This asserts the module notifies and
+    nothing else: no SNS action wired to a lambda, no autoscaling action, no
+    ECS or RDS call reachable from a budget.
+    """
+    guardrails = _strip_comments(_tf("modules", "cost_guardrails", "main.tf"))
+
+    budget = _block(guardrails, "resource", "aws_budgets_budget", "monthly")
+    assert budget, "there is no budget"
+    thresholds = sorted(int(x) for x in re.findall(r"threshold\s*=\s*(\d+)", budget))
+    assert thresholds[0] <= 50, (
+        f"the lowest budget threshold is {thresholds[0]}%; a notice that only "
+        "arrives at the limit arrives after the money is spent"
+    )
+    assert "FORECASTED" in budget, "nothing warns before month end"
+
+    assert 'resource "aws_ce_anomaly_monitor"' in guardrails, (
+        "no anomaly detection: a threshold cannot see a shape change"
+    )
+
+    for forbidden in (
+        "aws_lambda", "aws_autoscaling", "aws_appautoscaling",
+        "aws_ecs_service", "aws_db_instance", "sns_topic_subscription",
+    ):
+        assert forbidden not in guardrails, (
+            f"the cost guardrails reference {forbidden}; a billing signal must "
+            "not be able to act on the estate"
+        )
 
 
 # ---------------------------------------------------------------------------

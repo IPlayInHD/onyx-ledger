@@ -332,6 +332,33 @@ given them, so what they reserved was a *name*. They are now off by default
 (`reserve_unwired_secret_names`), saving $1.20/month per environment, and
 creating them the day a provider is chosen is one apply.
 
+### Fargate Spot is not used anywhere
+
+Spot capacity is 70% cheaper and would save roughly $40/month across the five
+tasks. It is not taken, and the reason is that the entry's condition — *proven*
+interruption-safe — has not been met for any Onyx workload, and "probably fine"
+is not proof.
+
+Taking each in turn against the rule that Spot must never serve requests, run a
+sole scheduler, run a migration, or run privacy deletion:
+
+* **api** — request-serving. Excluded by the rule.
+* **beat** — the sole scheduler, exactly one task by construction. Excluded.
+* **migration** — excluded.
+* **worker-privacy** — runs account deletion. Excluded.
+* **worker-freshness** — runs `verify_sealed_integrity`, which replays sealed
+  calculations and arbitrates at record level through a partial unique index.
+  Interruption is *plausibly* safe here because `task_acks_late` returns the
+  message to the queue. Plausibly is not proven, and nothing in the test suite
+  currently exercises a mid-replay kill.
+* **worker-app** — the same argument, over the queues a customer waits on.
+
+So the honest position is that Spot is available for `worker-app` and
+`worker-freshness` **after** someone writes the test that kills a worker
+mid-task and asserts the work completes exactly once. Until that test exists,
+the saving is not banked and the capacity profiles specify no capacity provider
+strategy at all, which leaves both services on `FARGATE`.
+
 ### Logging is not reduced
 
 $0.55/GB is real money at volume, and the Infrequent Access log class would

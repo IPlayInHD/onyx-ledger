@@ -70,9 +70,16 @@ and anything that finds its hostname has bypassed the security headers, the WAF
 and the rate rules entirely.
 
 With CloudFront as the only origin, the load balancer admits only requests
-carrying a secret header that Terraform generates and no human reads; the
-regional WAF's default action is BLOCK. Same-origin `/api/*` routing is
-preserved, so the CORS posture does not widen.
+carrying a secret header that Terraform generates and no human reads.
+Same-origin `/api/*` routing is preserved, so the CORS posture does not widen.
+
+**Amended by the lean-launch entry:** that admission was originally enforced by
+a regional WAF web ACL whose default action was BLOCK. It is now the load
+balancer's own listener — default action a 403 fixed response, one forwarding
+rule conditioned on the header. The property is identical and is asserted by
+`test_the_load_balancer_refuses_requests_without_the_origin_header`; what went
+away is $6.00/month of duplicate enforcement. The CloudFront web ACL is
+unchanged.
 
 `netlify.toml` remains in the repository as the statement of the header policy,
 and `tests/security/test_deployment_surface.py` fails if the CloudFront response
@@ -366,31 +373,37 @@ with the runbook open.
 
 ## 10. Cost
 
-Order-of-magnitude, `ca-central-1`, monthly, USD. Provisioning will move these.
+**~~Order-of-magnitude estimates.~~ SUPERSEDED by
+`docs/operations/cost-model.md`,** which replaces the guesses below with rates
+pulled from the AWS Price List Query API for `ca-central-1` and sizes taken from
+measuring the real API and the real workers rather than from intuition.
 
-| | closed beta | early production | 10× early production |
-|---|---|---|---|
-| RDS PostgreSQL | $60 (t4g.small, Multi-AZ) | $180 (m7g.large, Multi-AZ) | $700 (m7g.2xlarge + replica) |
-| ElastiCache Redis | $15 (t4g.micro) | $35 (t4g.small) | $140 (m7g.large) |
-| ECS Fargate — API | $25 (1×0.5 vCPU) | $90 (2–3 tasks) | $600 (autoscaled) |
-| ECS Fargate — workers | $25 | $70 | $450 |
-| S3 + data transfer | $5 | $20 | $150 |
-| CloudFront + WAF | $15 | $40 | $200 |
-| Secrets, KMS, logs, metrics | $20 | $50 | $200 |
-| Email | $1 | $10 | $80 |
-| **Infrastructure** | **≈ $165** | **≈ $495** | **≈ $2,500** |
-| AI provider | usage | usage | usage |
-| Payments | ~2.9% + 30¢ | — | — |
+The table that stood here estimated closed beta at ≈$165/month and early
+production at ≈$495/month. Both were in the right order of magnitude and both
+were wrong in the same direction on the same line: they assumed workers could be
+sized by eye. Measured, a Celery worker at concurrency 2 peaks at 507.7 MB —
+99% of a 512 MiB limit — running the cheapest scheduled task in the product.
 
-**The scaling drivers, in order:** the database (Multi-AZ doubles it, and a read
-replica doubles it again), then worker compute, because analysis and
-optimization are CPU-bound and admission control is what stops them from being
-unbounded. The AI provider is usage-priced and explanations are generated only
-when a customer asks — the deterministic renderer answers when the model is
+What the modelled figures are now, at the same rates for both profiles:
+
+| | $/month |
+|---|---:|
+| `lean_launch` production, standing | 178.89 |
+| `lean_launch` production at 100 users | 187.06 |
+| `high_availability` production at 100 users | 733.38 |
+| ephemeral staging, per 2-day proving run | 11.76 |
+
+**The scaling drivers, in order:** Fargate across the five services (32% of the
+lean estate), then the NAT gateway (20%), then the database (16%). Multi-AZ on
+the database is the single largest step available — `db.t4g.small` single-AZ to
+`db.m7g.large` Multi-AZ is $25.55 to $270.98 — which is why the move between
+profiles is one deliberate line and is governed by measured triggers rather than
+by a date. The AI provider is usage-priced and explanations are generated only
+when a customer asks; the deterministic renderer answers when the model is
 unavailable, so an outage costs nothing and a budget cap degrades rather than
 breaks.
 
-Do not pre-provision for the third column. Multi-AZ from the first paying
+
 customer, a read replica when read latency says so, and nothing else early.
 
 ## 11. What this design does not decide
