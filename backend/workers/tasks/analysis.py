@@ -1,11 +1,10 @@
 """On-demand analysis task — runs the analysis orchestrator in a worker.
 
-Bridges Celery (sync) to the async service via asyncio.run inside a UoW bound
-to the requesting user (so RLS + audit see the actor).
+Bridges Celery (sync) to the async service via `workers.runtime.run_task`
+inside a UoW bound to the requesting user (so RLS + audit see the actor).
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from celery import Task
@@ -14,6 +13,7 @@ from app.database.session import unit_of_work
 from app.services.analysis.service import AnalysisService
 from app.services.privacy.preflight import refuse_if_deleting
 from workers.celery_app import celery_app
+from workers.runtime import run_task
 
 
 @celery_app.task(name="workers.tasks.analysis.run_analysis", bind=True, max_retries=3)
@@ -31,6 +31,6 @@ def run_analysis(self: Task, user_id: str, tax_year: int) -> str:
             return str(run.id)
 
     try:
-        return asyncio.run(_run())
+        return run_task(_run)
     except Exception as exc:  # noqa: BLE001
         raise self.retry(exc=exc, countdown=2 ** self.request.retries) from exc

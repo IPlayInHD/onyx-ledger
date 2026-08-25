@@ -2,12 +2,11 @@
 and analytics pipelines; these are the registered entry points + schedule."""
 from __future__ import annotations
 
-import asyncio
-
 from app.core.logging import get_logger
 from app.database.session import unit_of_work
 from app.services.admission.service import AdmissionService
 from workers.celery_app import celery_app
+from workers.runtime import run_task
 
 log = get_logger("onyx.worker")
 
@@ -49,7 +48,7 @@ def purge_admission_history() -> dict[str, int]:
                 break
         return totals
 
-    result = asyncio.run(_drain())
+    result = run_task(_drain)
     log.info("purge_admission_history", **result)
     return result
 

@@ -383,3 +383,107 @@ def test_a_failed_invocation_does_not_poison_the_ones_after_it():
     assert not failures, (
         "a failed invocation left the process unable to run the next task:\n  "
         + "\n  ".join(f[:200] for f in failures))
+
+
+# ---------------------------------------------------------------------------
+# The structural rule, added after the lean-launch entry found it violated
+# ---------------------------------------------------------------------------
+def test_the_worker_tree_contains_exactly_one_asyncio_run() -> None:
+    """`run_task` owns the event loop. Nothing else in `workers/` may open one.
+
+    WHY THIS EXISTS. Everything above certifies that `run_task` disposes the
+    engines. Nothing certified that the tasks USE it — and four entry points
+    did not. `workers/tasks/maintenance.py`, `analysis.py`, `ioe.py` and the
+    shared TKMS bridge each called `asyncio.run` for themselves, so their
+    pooled connections outlived the loop that opened them and every second
+    invocation in one worker process failed inside `asyncpg`:
+
+        bare asyncio.run          ok, RuntimeError, ok, RuntimeError, ok
+        workers.runtime.run_task  ok, ok, ok, ok, ok
+
+    (Measured five calls each, in separate processes. Separate processes
+    matter: run both modes in one, and the bare mode poisons the pool that the
+    `run_task` mode then inherits, which makes the helper look broken.)
+
+    The behavioural guard in `test_privacy_task_reentrancy.py` is an
+    enumeration, and an enumeration is what let this survive — that list said
+    "every task Entry 11B5 depends on", and these four were not in that entry.
+    So this one is structural instead: it does not care which tasks exist, it
+    cares that the loop is opened in exactly one place. A task added next year
+    is covered without anybody remembering to add it.
+
+    AST rather than grep, so the prose in this very docstring — which says
+    `asyncio.run` five times — is not mistaken for a call.
+    """
+    import ast
+    from pathlib import Path
+
+    workers_root = Path(__file__).resolve().parents[2] / "workers"
+    assert workers_root.is_dir(), f"no worker tree at {workers_root}"
+
+    offenders: list[str] = []
+    for source_file in sorted(workers_root.rglob("*.py")):
+        tree = ast.parse(source_file.read_text(), filename=str(source_file))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            target = node.func
+            name = (
+                f"{target.value.id}.{target.attr}"
+                if isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                else getattr(target, "id", "")
+            )
+            if name == "asyncio.run":
+                offenders.append(
+                    f"{source_file.relative_to(workers_root.parent)}:{node.lineno}"
+                )
+
+    # EXACTLY ONE, and it is the helper's. Asserting "at most one" would pass
+    # on a tree where `run_task` had stopped opening a loop at all, and this
+    # guard would then be watching nothing.
+    assert len(offenders) == 1 and offenders[0].startswith("workers/runtime.py:"), (
+        "asyncio.run must appear exactly once in the worker tree — inside "
+        "`workers.runtime.run_task`, which disposes every engine before the "
+        "loop closes. Found: "
+        + (", ".join(offenders) or "no call at all, so run_task no longer owns "
+           "the loop and this guard is watching nothing")
+    )
+
+
+def test_every_celery_task_reaches_its_async_body_through_run_task() -> None:
+    """The other half: a task module that never opens a loop must still use ours.
+
+    The structural rule above would also be satisfied by a task module that
+    simply stopped running its async body at all. This requires the positive:
+    every module under `workers/tasks/` that defines an `async def` inside a
+    task imports `run_task`, so the body has something to be handed to.
+    """
+    import ast
+    from pathlib import Path
+
+    tasks_root = Path(__file__).resolve().parents[2] / "workers" / "tasks"
+    missing: list[str] = []
+
+    for source_file in sorted(tasks_root.glob("*.py")):
+        text = source_file.read_text()
+        tree = ast.parse(text, filename=str(source_file))
+        has_async_body = any(
+            isinstance(node, ast.AsyncFunctionDef) for node in ast.walk(tree)
+        )
+        if not has_async_body:
+            continue
+        imports_run_task = any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "workers.runtime"
+            and any(alias.name == "run_task" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+        if not imports_run_task:
+            missing.append(source_file.name)
+
+    assert not missing, (
+        "these task modules define async bodies but never import `run_task`, "
+        "so nothing disposes their engines between invocations: "
+        + ", ".join(missing)
+    )

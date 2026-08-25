@@ -22,10 +22,29 @@ connection is handed out — which is worse than a clean alternation, because it
 looks like flakiness rather than a defect.
 
 WHY A SHARED HELPER RATHER THAN A `finally` IN EACH TASK. The same defect has
-now been found in four separate entry points, each written at a different time
+now been found in EIGHT separate entry points, each written at a different time
 by someone who had no reason to think about event loops. Putting the cleanup in
 the one place that owns the `asyncio.run` call means a task added next year
 inherits it by using the normal way of running a task body.
+
+FOUR OF THE EIGHT WERE FOUND AFTER THIS FILE WAS WRITTEN, which is the part
+worth recording. Entry 11B5J converted the four tasks that entry depended on
+and left `maintenance.purge_admission_history`, `analysis.run_analysis`,
+`ioe.run_optimization` and the shared TKMS bridge still calling `asyncio.run`
+for themselves — because the guard that certified the fix was an ENUMERATION
+("every task Entry 11B5 depends on") and those four were not in that entry.
+They kept failing every second invocation for three more entries while a green
+test said the class of defect was closed. Measured, five calls each in
+separate processes:
+
+    bare asyncio.run          ok, RuntimeError, ok, RuntimeError, ok
+    workers.runtime.run_task  ok, ok, ok, ok, ok
+
+So the enumeration is no longer the only guard.
+`tests/security/test_worker_runtime.py` now asserts the STRUCTURAL rule
+instead: `asyncio.run` appears exactly once in the worker tree, and it is the
+call below. A task module that opens its own loop fails that test whether or
+not anybody remembered to add it to a list.
 
 WHAT IT DOES NOT DO. It changes no identity and no privilege: the privileged
 runtimes keep their own DSNs and their own PostgreSQL principals, and PD-16

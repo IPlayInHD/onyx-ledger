@@ -20,7 +20,6 @@ Four rules hold for every task here:
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from celery import Task
@@ -90,7 +89,7 @@ def run_optimization(
         return str(outcome.run_id)
 
     try:
-        return asyncio.run(_run())
+        return run_task(_run)
     except ValueError as exc:
         # a malformed identifier will never succeed; do not retry
         log.error("ioe_run_optimization_invalid", error_code=ERROR_INVALID_PAYLOAD)

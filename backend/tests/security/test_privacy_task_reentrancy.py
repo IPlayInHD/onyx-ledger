@@ -193,6 +193,7 @@ def test_every_entry_11b5_task_survives_repeated_invocation_in_one_process():
         sweep_scenario_freshness,
         verify_sealed_integrity,
     )
+    from workers.tasks.maintenance import purge_admission_history
     from workers.tasks.privacy import run_account_deletion_phases
 
     cases = {
@@ -205,6 +206,20 @@ def test_every_entry_11b5_task_survives_repeated_invocation_in_one_process():
         "ioe.invalidate_scenarios_for_analysis":
             lambda: invalidate_scenarios_for_analysis.run(
                 str(_uuid.uuid4()), "BASELINE_INPUTS_CHANGED"),
+        # ADDED AFTER THE LEAN-LAUNCH ENTRY FOUND IT STILL BROKEN.
+        #
+        # This list was written as "every task Entry 11B5 depends on", and
+        # `purge_admission_history` was not one of them — so it kept calling
+        # `asyncio.run` directly for three more entries while this test passed.
+        # Measured then: call 1 ok, call 2 RuntimeError, call 3 ok.
+        #
+        # An enumeration goes stale exactly this way, which is why
+        # `test_worker_runtime.py` now also asserts the STRUCTURAL rule: the
+        # worker tree contains one `asyncio.run`, and it is the one inside
+        # `run_task`. This entry stays because a behavioural proof and a
+        # structural proof fail for different reasons.
+        "maintenance.purge_admission_history":
+            lambda: purge_admission_history.run(),
     }
 
     # FIVE consecutive calls, not three. The failure was never a clean

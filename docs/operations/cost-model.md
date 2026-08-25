@@ -53,14 +53,23 @@ it and refuses to plan when it exceeds the class limit.
 | `lean_launch` | 177 | 191 (`db.t4g.small`, 225 max) |
 | `high_availability` | 703 | 765 (`db.m7g.large`, 901 max) |
 
-**A defect observed while measuring, and not fixed here.** Firing three
-`purge_admission_history` tasks back to back, the first succeeded, engine
-disposal then failed with `Exception terminating connection`, and the second
-raised `RuntimeError: got Future attached to a different loop` — the exact
-failure `workers/runtime.py` exists to prevent, reached through the path that
-module's own docstring calls out as "cleanup was ATTEMPTED, not completed".
-This is a pre-existing product defect, unrelated to capacity, out of scope for a
-cost entry, and recorded here rather than silently repaired inside one.
+**A defect observed while measuring. FIXED SEPARATELY — see below.** Firing
+three `purge_admission_history` tasks back to back, the first succeeded and the
+second raised `RuntimeError: got Future attached to a different loop`.
+
+The diagnosis written here first blamed a failing disposal. It was simpler and
+worse than that: **the task never called `run_task` at all.** It ran
+`asyncio.run(_drain())` directly, so no engine was ever disposed and the pooled
+asyncpg connection outlived the loop that opened it. Three other entry points
+did the same — `analysis.run_analysis`, `ioe.run_optimization` and the shared
+TKMS bridge covering six stages. All four now route through `run_task`, and
+`tests/security/test_worker_runtime.py` asserts the structural rule that would
+have caught them: `asyncio.run` appears exactly once in the worker tree.
+
+The measurements in this section are unaffected. Memory, CPU and backend counts
+were the same whether a task raised on its way out or not, and the connection
+churn behind the 97-backend figure came from `run_task`'s per-invocation
+disposal in the workers that already used it.
 
 ---
 
