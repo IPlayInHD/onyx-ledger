@@ -42,6 +42,7 @@ import {
   TrustPair,
 } from '@/components/trust'
 import { humanize, isoDate, money, relativeDays } from '@/lib/format'
+import { level1, technical } from '@/lib/lexicon'
 import { useExplanation } from '@/lib/explanation'
 import { useAssurance, useLifecycle } from '@/lib/queries'
 import type { OpportunityLifecycleOut, TaxAssuranceOut } from '@/api/endpoints'
@@ -156,12 +157,19 @@ function Facet({ label, children }: { label: string; children: ReactNode }) {
  *  never shown — they are machine tokens, and `humanize` is a label
  *  transform, not a translation of what the code decided. */
 function ReasonList({ codes }: { codes: string[] }) {
-  if (codes.length === 0) return null
+  /* A code with no consumer wording is DROPPED, not prettified. Showing
+     nothing is honest; showing a reformatted identifier is a sentence nobody
+     wrote and nobody reviewed. The exhaustiveness guard is what stops this
+     from quietly hiding a state that should have been translated. */
+  const said = codes
+    .map((code) => ({ code, text: level1('reason', code) }))
+    .filter((entry): entry is { code: string; text: string } => entry.text !== null)
+  if (said.length === 0) return null
   return (
     <ul className="stack stack-2 pl-5">
-      {codes.map((code) => (
-        <li className="text-sm text-secondary" key={code}>
-          {humanize(code)}
+      {said.map((entry) => (
+        <li className="text-sm text-secondary" key={entry.code}>
+          {entry.text}
         </li>
       ))}
     </ul>
@@ -199,7 +207,9 @@ function Impediments({
                 nothing new and left five equal-weight labels competing on one
                 card. What the reader still needs is WHY. */}
             <span className="eyebrow">Why it is blocked</span>
-            <span className="text-sm text-secondary">{humanize(blocked)}</span>
+            <span className="text-sm text-secondary">
+              {level1('reason', blocked) ?? technical('reason', blocked) ?? humanize(blocked)}
+            </span>
           </div>
           {explain ? (
             <p className="text-sm text-muted measure">
@@ -216,7 +226,10 @@ function Impediments({
           <div className="row row-2 wrap">
             <span className="status status--attention">May be out of date</span>
             <span className="text-sm text-secondary">
-              {stale.map((code) => humanize(code)).join('. ')}
+              {stale
+                .map((code) => level1('reason', code))
+                .filter((text): text is string => text !== null)
+                .join('. ')}
             </span>
           </div>
           {explain ? (
@@ -242,7 +255,13 @@ function QueueRecord({ item }: { item: Opportunity }) {
   const status = statusTone(item.status)
   const action = actionTone(item.action)
   const urgency = urgencyTone(item.urgency)
-  const title = humanize(item.opportunity_code)
+  /* The finding's NAME. Was `humanize(item.opportunity_code)`, which rendered
+     INCREASE_RRSP_DEDUCTION as "Increase rrsp deduction" — a code, reformatted,
+     with a proper name case-folded. */
+  const title =
+    level1('opportunity', item.opportunity_code) ??
+    technical('opportunity', item.opportunity_code) ??
+    'Something worth checking'
   const headingId = `opp-${item.source_id}`
 
   return (
@@ -356,7 +375,8 @@ function QueueBody({ assurance }: { assurance: TaxAssuranceOut }) {
         {family ? (
           <p className="text-xs text-muted">
             Opportunity family: {statusTone(family.status).label}.{' '}
-            {humanize(family.reason_code)}.
+            {level1('reason', family.reason_code) ??
+              technical('reason', family.reason_code)}.
           </p>
         ) : null}
       </div>
@@ -443,7 +463,8 @@ function EvidenceFacet({ item }: { item: Opportunity }) {
                     {humanize(requirement.document_type_code)}
                   </span>
                   <span className="evidence-row__necessity">
-                    {humanize(requirement.necessity)}
+                    {level1('evidenceReadiness', requirement.necessity) ??
+                      humanize(requirement.necessity)}
                   </span>
                 </span>
                 <span className={`status status--${state.tone}`}>
@@ -519,7 +540,11 @@ function RecordFacets({ item }: { item: Opportunity }) {
 
       <div className="opp__grid">
         <Facet label="What it is">
-          <span className="text-sm">{humanize(item.opportunity_code)}</span>
+          <span className="text-sm">
+            {level1('opportunity', item.opportunity_code) ??
+              technical('opportunity', item.opportunity_code) ??
+              'Something worth checking'}
+          </span>
           <p className="text-xs text-muted">
             Named by the governed rule that produced it.
           </p>
@@ -893,7 +918,12 @@ function OpportunityRecord({
     <>
       <PageHead
         eyebrow={`Tax year ${taxYear} · Opportunity`}
-        title={item ? humanize(item.opportunity_code) : 'Opportunity'}
+        title={
+          (item &&
+            (level1('opportunity', item.opportunity_code) ??
+              technical('opportunity', item.opportunity_code))) ||
+          'Opportunity'
+        }
         lede={
           item
             ? 'The full governed record: what it is, why it may apply, and what stands between you and it.'

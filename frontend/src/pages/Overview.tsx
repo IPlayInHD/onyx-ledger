@@ -21,7 +21,8 @@ import {
   LoadingBlock,
 } from '@/components/states'
 import { Provenance, TrustPair } from '@/components/trust'
-import { money, percent, humanize } from '@/lib/format'
+import { money, percent } from '@/lib/format'
+import { level1, technical } from '@/lib/lexicon'
 import {
   latestAnalysisFor,
   useAnalyses,
@@ -34,22 +35,21 @@ import type { TaxAssuranceOut } from '@/api/endpoints'
 /* Map the backend's closed assurance vocabulary onto the ledger's stroke
    styles. An unknown status falls through to `unavailable`, the most cautious
    reading — never to `ready`, which would claim something nobody verified. */
-const FAMILY_TONE: Record<string, { rule: string; status: string; label: string }> = {
-  READY: { rule: 'ready', status: 'ready', label: 'Ready' },
-  EVIDENCE_REQUIRED: { rule: 'attention', status: 'attention', label: 'Needs evidence' },
-  REVIEW_REQUIRED: { rule: 'attention', status: 'attention', label: 'Needs a decision' },
-  BLOCKED: { rule: 'blocked', status: 'blocked', label: 'Blocked' },
-  UNAVAILABLE: { rule: 'unavailable', status: 'neutral', label: 'Not established yet' },
-  NOT_APPLICABLE: { rule: 'unavailable', status: 'neutral', label: 'Does not apply' },
+/* STROKE STYLE ONLY. What each status is CALLED now comes from the consumer
+   lexicon, so this table no longer carries words — it carries the two class
+   names that decide how a row is drawn. An unknown status still falls through
+   to `unavailable`, the most cautious reading, never to `ready`. */
+const FAMILY_TONE: Record<string, { rule: string; status: string }> = {
+  READY: { rule: 'ready', status: 'ready' },
+  EVIDENCE_REQUIRED: { rule: 'attention', status: 'attention' },
+  REVIEW_REQUIRED: { rule: 'attention', status: 'attention' },
+  BLOCKED: { rule: 'blocked', status: 'blocked' },
+  UNAVAILABLE: { rule: 'unavailable', status: 'neutral' },
+  NOT_APPLICABLE: { rule: 'unavailable', status: 'neutral' },
 }
 
 function familyTone(status: string) {
   return FAMILY_TONE[status] ?? FAMILY_TONE['UNAVAILABLE']!
-}
-
-/** `TAX_STATE` → `Tax state`. Presentation only. */
-function familyLabel(family: string): string {
-  return humanize(family)
 }
 
 function AssuranceLedger({ assurance }: { assurance: TaxAssuranceOut }) {
@@ -73,15 +73,27 @@ function AssuranceLedger({ assurance }: { assurance: TaxAssuranceOut }) {
           const tone = familyTone(family.status)
           return (
             <div className="afam" key={family.family}>
-              <span className="afam__name">{familyLabel(family.family)}</span>
+              <span className="afam__name">
+                {level1('family', family.family) ?? technical('family', family.family)}
+              </span>
               <span className="afam__count">
                 {family.item_count} {family.item_count === 1 ? 'item' : 'items'}
               </span>
               <span className={`afam__rule afam__rule--${tone.rule}`} />
               <span className="afam__meta">
-                <span className={`status status--${tone.status}`}>{tone.label}</span>
-                {family.reason_code ? (
-                  <span className="text-xs text-muted">{humanize(family.reason_code)}</span>
+                <span className={`status status--${tone.status}`}>
+                  {level1('assuranceStatus', family.status) ??
+                    technical('assuranceStatus', family.status)}
+                </span>
+                {/* A reason the customer can act on, or nothing. `describe`
+                    returns null for a state nobody has written words for and
+                    for states that describe Onyx rather than the customer —
+                    `RESERVED_NO_PRODUCER` was reaching a brand-new account's
+                    first screen as "Reserved no producer". */}
+                {level1('reason', family.reason_code) ? (
+                  <span className="text-xs text-muted">
+                    {level1('reason', family.reason_code)}
+                  </span>
                 ) : null}
               </span>
             </div>
@@ -102,9 +114,22 @@ function AssuranceLedger({ assurance }: { assurance: TaxAssuranceOut }) {
         <tbody>
           {families.map((family) => (
             <tr key={family.family}>
-              <th scope="row">{familyLabel(family.family)}</th>
-              <td>{familyTone(family.status).label}</td>
-              <td>{humanize(family.reason_code) || 'Not stated'}</td>
+              <th scope="row">
+                {level1('family', family.family) ?? technical('family', family.family)}
+              </th>
+              <td>
+                {level1('assuranceStatus', family.status) ??
+                  technical('assuranceStatus', family.status)}
+              </td>
+              {/* THE SAME WORDS THE VISUAL LEDGER SHOWS. The first version of
+                  this used the technical term here, which quietly handed a
+                  screen-reader user "Reserved — no producer" on a screen where
+                  a sighted user was shown nothing at all. This table is the
+                  accessible EQUIVALENT of the strokes above, so it says what
+                  they say. The formal term is reachable through the Level 4
+                  disclosure that the progressive-disclosure entry adds — it is
+                  demoted, not deleted, and `technical()` is already tested. */}
+              <td>{level1('reason', family.reason_code) ?? 'Not stated'}</td>
               <td className="numeric">{family.item_count}</td>
             </tr>
           ))}
@@ -141,10 +166,12 @@ function AttentionList({ assurance }: { assurance: TaxAssuranceOut }) {
             <span className="attention__rank">{index + 1}</span>
             <span>
               <span className="attention__title">
-                {humanize(item.opportunity_code)}
+                {level1('opportunity', item.opportunity_code) ??
+                  technical('opportunity', item.opportunity_code) ??
+                  'Something worth checking'}
               </span>
               <span className="attention__sub">
-                {humanize(item.action)}
+                {level1('action', item.action) ?? technical('action', item.action)}
                 {item.deadline
                   ? ` · ${item.deadline.days_remaining} days remaining`
                   : ''}
@@ -155,7 +182,7 @@ function AttentionList({ assurance }: { assurance: TaxAssuranceOut }) {
                 <Provenance kind="assumption" label="Assumption" />
               ) : null}
               <span className={`status status--${familyTone(item.status).status}`}>
-                {humanize(item.urgency)}
+                {level1('urgency', item.urgency) ?? technical('urgency', item.urgency)}
               </span>
             </span>
           </Link>
