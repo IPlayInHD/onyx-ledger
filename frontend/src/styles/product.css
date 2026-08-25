@@ -471,3 +471,64 @@
   text-underline-offset: 0.2em;
 }
 .why__body { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--c-ink-secondary); max-width: 54ch; }
+
+/* ------------------------------------------------------------- disclosure --
+   Progressive disclosure. Level 1 reads as ordinary prose; every control below
+   it is quiet, so the default state is a sentence rather than a widget.
+   Generalised from the `.why` pattern the onboarding step already used. */
+.disclose { display: block; }
+.disclose__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+}
+.disclose__level1 { min-width: 0; }
+.disclose__action { flex: 0 0 auto; }
+.disclose__toggle {
+  margin-top: var(--space-2);
+  background: none;
+  border: 0;
+  padding: var(--space-1) 0;
+  font-size: var(--text-xs);
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  /* A comfortable target on a phone without becoming a button-shaped thing. */
+  min-height: 2.75rem;
+  text-align: left;
+}
+.disclose__toggle--nested { min-height: 2.5rem; }
+.disclose__why {
+  margin-top: var(--space-2);
+  border-left: var(--border-thick) solid var(--c-rule-strong);
+  padding-left: var(--space-3);
+}
+.disclose__level2 {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--c-ink-secondary);
+  max-width: 58ch;
+}
+.disclose__nested { margin-top: var(--space-2); }
+.disclose__body {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--c-ink-secondary);
+  max-width: 58ch;
+}
+/* Stacked at every width. A two-column definition list is unreadable on a
+   narrow screen and this content is read, not scanned. */
+.disclose__list { margin: 0; display: grid; gap: var(--space-2); }
+.disclose__pair { display: grid; gap: var(--space-1); }
+.disclose__pair dt {
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-ink-muted);
+}
+.disclose__pair dd { margin: 0; font-size: var(--text-xs); color: var(--c-ink-secondary); }
+@media (min-width: 48rem) {
+  .disclose__pair { grid-template-columns: 14rem 1fr; gap: var(--space-3); align-items: baseline; }
+}

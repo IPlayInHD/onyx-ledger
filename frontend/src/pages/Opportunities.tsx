@@ -42,7 +42,8 @@ import {
   TrustPair,
 } from '@/components/trust'
 import { humanize, isoDate, money, relativeDays } from '@/lib/format'
-import { level1, technical } from '@/lib/lexicon'
+import { level1, level2, technical } from '@/lib/lexicon'
+import { DetailList, Disclosure } from '@/components/disclosure'
 import { useExplanation } from '@/lib/explanation'
 import { useAssurance, useLifecycle } from '@/lib/queries'
 import type { OpportunityLifecycleOut, TaxAssuranceOut } from '@/api/endpoints'
@@ -73,59 +74,80 @@ interface Tone {
   label: string
 }
 
-const STATUS: Record<string, Tone> = {
-  READY: { tone: 'ready', label: 'Ready' },
-  EVIDENCE_REQUIRED: { tone: 'attention', label: 'Needs evidence' },
-  REVIEW_REQUIRED: { tone: 'attention', label: 'Needs a decision' },
-  BLOCKED: { tone: 'blocked', label: 'Blocked' },
-  UNAVAILABLE: { tone: 'neutral', label: 'Not established yet' },
-  NOT_APPLICABLE: { tone: 'neutral', label: 'Does not apply' },
+/* STROKE AND BADGE TONE ONLY.
+   These tables used to carry WORDS as well, which made them a second consumer
+   vocabulary sitting beside the lexicon and disagreeing with it in small ways
+   — "Evidence is needed" here, "We need a document" there, for the same
+   governed state. The words now come from one place. What stays here is the
+   class name that decides how a badge is drawn, which is presentation and
+   belongs to the page. */
+const STATUS_TONE: Record<string, string> = {
+  READY: 'ready',
+  EVIDENCE_REQUIRED: 'attention',
+  REVIEW_REQUIRED: 'attention',
+  BLOCKED: 'blocked',
+  UNAVAILABLE: 'neutral',
+  NOT_APPLICABLE: 'neutral',
 }
 
-const ACTION: Record<string, Tone> = {
-  ACTION_AVAILABLE: { tone: 'ready', label: 'Action available' },
-  DECISION_REQUIRED: { tone: 'attention', label: 'A decision is needed' },
-  EVIDENCE_REQUIRED: { tone: 'attention', label: 'Evidence is needed' },
-  BLOCKED: { tone: 'blocked', label: 'Nothing can be done yet' },
+const ACTION_TONE: Record<string, string> = {
+  ACTION_AVAILABLE: 'ready',
+  DECISION_REQUIRED: 'attention',
+  EVIDENCE_REQUIRED: 'attention',
+  BLOCKED: 'blocked',
 }
 
-const URGENCY: Record<string, Tone> = {
-  NO_DEADLINE: { tone: 'neutral', label: 'No deadline recorded' },
-  NORMAL: { tone: 'neutral', label: 'Deadline not near' },
-  APPROACHING: { tone: 'attention', label: 'Deadline approaching' },
-  URGENT: { tone: 'attention', label: 'Deadline urgent' },
-  EXPIRED: { tone: 'blocked', label: 'Deadline passed' },
+const URGENCY_TONE: Record<string, string> = {
+  NO_DEADLINE: 'neutral',
+  NORMAL: 'neutral',
+  APPROACHING: 'attention',
+  URGENT: 'attention',
+  EXPIRED: 'blocked',
 }
 
 /** Whether the documents a governed rule demands are held. Deliberately not
  *  folded into the item's status: a document gap and a rule exclusion are
  *  different problems with different fixes. */
-const READINESS: Record<string, Tone> = {
-  READY: { tone: 'ready', label: 'Documents held' },
-  PARTIAL: { tone: 'attention', label: 'Some documents held' },
-  MISSING: { tone: 'attention', label: 'Documents missing' },
-  NOT_REQUIRED: { tone: 'neutral', label: 'No documents required' },
-  UNKNOWN: { tone: 'neutral', label: 'Not determined' },
+const READINESS_TONE: Record<string, string> = {
+  READY: 'ready',
+  PARTIAL: 'attention',
+  MISSING: 'attention',
+  NOT_REQUIRED: 'neutral',
+  UNKNOWN: 'neutral',
+}
+
+/** An unrecognised code must not become "no deadline" or "ready" — that would
+ *  be a claim about the item rather than an admission about the label. The
+ *  lexicon returns null for anything it has no words for, and this says so
+ *  rather than prettifying the code. */
+const UNDETERMINED = 'Not determined'
+
+function toned(
+  table: Record<string, string>,
+  vocabulary: Parameters<typeof level1>[0],
+  code: string,
+  cautious: string,
+): Tone {
+  return {
+    tone: table[code] ?? cautious,
+    label: level1(vocabulary, code) ?? technical(vocabulary, code) ?? UNDETERMINED,
+  }
 }
 
 function statusTone(code: string): Tone {
-  return STATUS[code] ?? STATUS['UNAVAILABLE']!
+  return toned(STATUS_TONE, 'assuranceStatus', code, 'neutral')
 }
 
 function actionTone(code: string): Tone {
-  return ACTION[code] ?? ACTION['BLOCKED']!
+  return toned(ACTION_TONE, 'action', code, 'blocked')
 }
 
-/** An unrecognised band must not become "no deadline" — that would be a claim
- *  about the item rather than an admission about the label. */
-const UNDETERMINED_BAND: Tone = { tone: 'neutral', label: 'Not determined' }
-
 function urgencyTone(code: string): Tone {
-  return URGENCY[code] ?? UNDETERMINED_BAND
+  return toned(URGENCY_TONE, 'urgency', code, 'neutral')
 }
 
 function readinessTone(code: string): Tone {
-  return READINESS[code] ?? READINESS['UNKNOWN']!
+  return toned(READINESS_TONE, 'evidenceReadiness', code, 'neutral')
 }
 
 function edgeClass(eligibility: string): string {
@@ -208,7 +230,7 @@ function Impediments({
                 card. What the reader still needs is WHY. */}
             <span className="eyebrow">Why it is blocked</span>
             <span className="text-sm text-secondary">
-              {level1('reason', blocked) ?? technical('reason', blocked) ?? humanize(blocked)}
+              {level1('reason', blocked) ?? technical('reason', blocked) ?? UNDETERMINED}
             </span>
           </div>
           {explain ? (
@@ -280,35 +302,79 @@ function QueueRecord({ item }: { item: Opportunity }) {
       </div>
 
       <div className="stack stack-3">
-        <div className="row row-3 wrap">
-          <span className={`status status--${action.tone}`}>{action.label}</span>
-          <span className={`status status--${urgency.tone}`}>
-            {urgency.label}
-          </span>
-          {item.assumption_dependent ? (
-            <Provenance kind="assumption" label="Depends on an assumption" />
-          ) : null}
-        </div>
-
-        {item.deadline ? (
-          <p className="text-sm text-secondary">
-            {humanize(item.deadline.deadline_code)} —{' '}
-            {isoDate(item.deadline.deadline_date)},{' '}
-            {relativeDays(item.deadline.days_remaining)}.
-          </p>
-        ) : null}
+        {/* LEVEL 1 AND THE ACTION STAY TOGETHER, ABOVE EVERY DISCLOSURE.
+            What needs doing, whether time is short, and the way to act on it
+            are the three things a first-time filer must see without opening
+            anything. Progressive disclosure is for explanation; burying the
+            task behind it is the failure this pattern exists to avoid. */}
+        <Disclosure
+          about={title}
+          action={
+            <Link
+              className="btn btn--secondary"
+              to={`/app/opportunities/${encodeURIComponent(item.source_id)}`}
+            >
+              Open the record
+              <span className="sr-only"> for {title}</span>
+            </Link>
+          }
+          level1={
+            <div className="stack stack-2">
+              <div className="row row-3 wrap">
+                <span className={`status status--${action.tone}`}>{action.label}</span>
+                <span className={`status status--${urgency.tone}`}>{urgency.label}</span>
+                {item.assumption_dependent ? (
+                  <Provenance kind="assumption" label="Depends on an assumption" />
+                ) : null}
+              </div>
+              {item.deadline ? (
+                <p className="text-sm text-secondary">
+                  {isoDate(item.deadline.deadline_date)},{' '}
+                  {relativeDays(item.deadline.days_remaining)}.
+                </p>
+              ) : null}
+            </div>
+          }
+          level2={level2('opportunity', item.opportunity_code)}
+          detail={
+            /* LEVEL 3 — supporting state the contract already carries. Nothing
+               here is computed at render time and nothing is inferred. */
+            <DetailList
+              items={[
+                { label: 'Where this stands', value: status.label },
+                { label: 'What Onyx needs', value: action.label },
+                { label: 'Documents', value: readinessTone(item.evidence_readiness).label },
+                { label: 'Deadline', value: urgency.label },
+                {
+                  label: 'Depends on an assumption',
+                  value: item.assumption_dependent ? 'Yes' : 'No',
+                },
+              ]}
+            />
+          }
+          technical={
+            /* LEVEL 4 — the formal register. The internal codes are NOT
+               reproduced raw; each is the lexicon's approved technical term,
+               which is the name a person auditing this would use. `source_id`
+               is here because it is the handle support and the customer would
+               both quote; nothing else identifier-shaped is. */
+            <DetailList
+              items={[
+                { label: 'Formal name', value: technical('opportunity', item.opportunity_code) },
+                { label: 'Assurance status', value: technical('assuranceStatus', item.status) },
+                { label: 'Action state', value: technical('action', item.action) },
+                { label: 'Deadline band', value: technical('urgency', item.urgency) },
+                {
+                  label: 'Evidence readiness',
+                  value: technical('evidenceReadiness', item.evidence_readiness),
+                },
+                { label: 'Record reference', value: item.source_id },
+              ]}
+            />
+          }
+        />
 
         <Impediments item={item} />
-
-        <div>
-          <Link
-            className="btn btn--secondary"
-            to={`/app/opportunities/${encodeURIComponent(item.source_id)}`}
-          >
-            Open the record
-            <span className="sr-only"> for {title}</span>
-          </Link>
-        </div>
       </div>
     </article>
   )
@@ -462,9 +528,16 @@ function EvidenceFacet({ item }: { item: Opportunity }) {
                   <span className="evidence-row__name">
                     {humanize(requirement.document_type_code)}
                   </span>
+                  {/* SAFE PRESENTATION, NOT A GOVERNED STATE. `necessity` is
+                      rule-authored free text on a `Text` column ("required",
+                      "conditional"), not a closed enum, so it cannot be mapped
+                      exhaustively and generic humanisation is appropriate.
+                      The previous entry looked it up against `evidenceReadiness`,
+                      a DIFFERENT vocabulary — the lookup never matched and
+                      humanize() silently did all the work, which reads like a
+                      translation and is not one. */}
                   <span className="evidence-row__necessity">
-                    {level1('evidenceReadiness', requirement.necessity) ??
-                      humanize(requirement.necessity)}
+                    {humanize(requirement.necessity)}
                   </span>
                 </span>
                 <span className={`status status--${state.tone}`}>
@@ -1016,9 +1089,9 @@ function OpportunityRecord({
                         body={
                           data.opportunity_authority === 'READY'
                             ? 'The lifecycle view does not currently carry this opportunity. It may have been replaced by a newer run.'
-                            : `The lifecycle view has no governing run to read for this year: ${humanize(
-                                data.opportunity_authority_reason,
-                              )}.`
+                            : `The lifecycle view has no governing run to read for this year. ${
+                                level1('reason', data.opportunity_authority_reason) ?? ''
+                              }`.trim()
                         }
                       />
                     )
