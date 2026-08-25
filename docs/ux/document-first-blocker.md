@@ -1,5 +1,18 @@
 # Document-first consumer input — BLOCKED on a missing backend capability
 
+> **UPDATE — the first blocking step is now partly closed.** A later entry
+> ("start the extraction worker") added `app/services/document_processing/text.py`,
+> `DocumentService.extract_from_storage`, and `workers/tasks/documents.py`.
+> **Onyx now reads a stored `text/plain` or `text/csv` document itself** and
+> extracts fields from its real content — so for those media types the
+> `document_backed` provenance claim is true rather than a lie.
+>
+> **PDF and image are still not readable**, and they are what a real filer
+> uploads, so the consumer journey below remains blocked. The statements marked
+> ✅ CORRECTED further down were true when written and are not any more; they
+> are corrected in place rather than deleted, because the reasoning that
+> followed from them is still the reasoning that governed the decision.
+
 **Status: reported, not implemented.** No application code was changed by the
 entry that produced this file. The only modification is this document.
 
@@ -33,12 +46,18 @@ exist.
 2. No worker reads a stored document. `workers/tasks/documents.py` **does not
    exist**, although `celery_app.py` routes `workers.tasks.documents.*` to the
    `documents` queue. The route is dead.
+   *(✅ CORRECTED: the worker now exists and the route reaches it. It reads text
+   media only.)*
 3. **No OCR or PDF-text dependency is installed.** The only AWS/parsing library
    in `requirements.lock.txt` is `boto3`. There is no `pytesseract`,
    `pdfplumber`, `pypdf`, `pdfminer` or equivalent.
 4. `DocumentService.process`'s own docstring says so: *"dev/demo: pass
    structured `fields` or OCR `text`. Production: a worker OCRs the object in
    storage and calls the same service."* **That worker was never written.**
+   *(✅ CORRECTED: written. It reads the object through `ObjectStorage.get` and
+   calls `DocumentService.process`, as that docstring described — but it does
+   not OCR, and it refuses the media types it cannot read rather than passing
+   empty text through.)*
 
 The only integration test for the pipeline
 (`tests/integration/test_documents.py`) drives `process` with structured
@@ -99,12 +118,17 @@ it before widening the implementation."*
 
 In dependency order. None is UI work.
 
-1. **A document extraction worker** — `workers/tasks/documents.py`, consuming
-   the `documents` queue that is already routed, reading the object with
-   `ObjectStorage.get`, converting it to text, and calling the existing
-   `DocumentService.process`. This is where the missing dependency choice lives
-   (native-text PDF vs scanned image OCR are different problems; a photographed
-   T4 needs the second).
+1. **A document extraction worker** — ✅ **DONE for text media, still open for
+   PDF and image.** `workers/tasks/documents.py` now consumes the `documents`
+   queue, reads the object with `ObjectStorage.get`, and calls
+   `DocumentService.process`. `text.py` names the media types it cannot read and
+   records them as `failed` instead of extracting nothing from empty text.
+   The dependency choice this step was really about — native-text PDF vs scanned
+   image OCR, which are different problems with different honest confidences —
+   is **still unmade**, and a photographed T4 still needs the second.
+   Nothing enqueues the task yet either: bytes are not in storage when
+   `POST /documents` returns its presigned URL, so enqueuing there would race
+   the upload.
 2. **An extraction-result read contract** — a way for the client to poll or
    fetch the current extraction and its fields, plus enough on `GET /documents`
    to render a list.
@@ -127,3 +151,33 @@ It is honest, and it is not a consumer journey: a first-time filer has a PDF or
 a photo of a T4, not a text file of one. Recorded here so the option is on the
 record rather than discovered again later, and **not** built, because shipping
 it as "document-first tax input" would describe the product inaccurately.
+
+
+## Found while building the worker: the box-number regexes miss on real layouts
+
+Feeding the extractor **realistic** slip text for the first time showed that
+`SLIP_MAP`'s box-number patterns almost never match. Each allows at most **12**
+non-digit characters between the box number and the amount, and a real T4 line
+puts the box *label* in that gap:
+
+| Line | Characters between box number and amount |
+|---|---|
+| `Box 14  Employment income      42,680.00` | 25 |
+| `Box 16  CPP contributions       2,430.15` | 26 |
+| `Box 18  EI premiums               743.60` | 28 |
+| `Box 22  Income tax deducted     5,910.00` | 26 |
+
+All four exceed the bound, so **every box-number pattern misses**. The only T4
+field that extracts at all is `employmentIncome`, and not by its box 14 pattern
+either — by its `employment income` *label* fallback, which is the only fallback
+any T4 field has.
+
+**Not fixed in the worker entry.** Changing these regexes changes what the
+already-certified `POST /documents/{id}/process` endpoint extracts, which is a
+governed extraction-behaviour change and not what "start the extraction worker"
+asked for. The consequence today is contained: of the four T4 fields, only
+`employmentIncome` appears in `FIELD_TARGET`, so the three that miss would reach
+no financial row even if they did match. It is pinned by
+`test_the_box_number_patterns_do_not_survive_a_realistic_slip_layout` so it
+cannot be quietly forgotten, and that test is written to fail — deliberately —
+the day the patterns are fixed.

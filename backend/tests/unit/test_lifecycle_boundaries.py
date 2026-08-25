@@ -235,7 +235,11 @@ def test_the_worker_scan_finds_the_tasks_it_is_meant_to_cover():
     """The parametrized test above passes vacuously against an empty task
     list — which is exactly what a decorator rename would produce."""
     found = {f"{m.name}::{n.name}" for m, n in _user_scoped_tasks()}
-    assert found == {"analysis.py::run_analysis", "ioe.py::run_optimization"}, found
+    assert found == {
+        "analysis.py::run_analysis",
+        "documents.py::extract_document",
+        "ioe.py::run_optimization",
+    }, found
 
 
 # ---------------------------------------------------------------------------

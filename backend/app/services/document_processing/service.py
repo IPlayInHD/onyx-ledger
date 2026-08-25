@@ -8,12 +8,14 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import DomainError, NotFound, ValidationError
+from app.core.logging import get_logger
 from app.database.base import uuid7
 from app.database.models import (
     Document,
@@ -30,10 +32,16 @@ from app.domain.ports import DeleteOutcome, UploadAuthorization
 from app.integrations.storage import get_object_storage
 from app.services.admission.limits import MAX_DOCUMENT_BYTES
 from app.services.document_processing.ocr import FIELD_FACT, FIELD_TARGET, extract_fields
+from app.services.document_processing.text import (
+    DocumentUnreadable,
+    text_from,
+)
 from app.services.ioe.freshness_producers import (
     on_document_status_changed,
     on_financial_data_changed,
 )
+
+log = get_logger("onyx.documents")
 
 LOW_CONFIDENCE = 0.75
 
@@ -217,6 +225,85 @@ class DocumentService:
         await self.s.flush()
         return extraction
 
+    #: The object was registered but its bytes are not in storage. A distinct
+    #: reason from "we cannot read this kind of file": one is a broken upload,
+    #: the other is a capability Onyx does not have yet, and a customer needs
+    #: different things from them.
+    REASON_OBJECT_MISSING = "STORED_OBJECT_UNREADABLE"
+
+    async def extract_from_storage(
+        self, user_id: uuid.UUID, document_id: uuid.UUID
+    ) -> DocumentExtraction:
+        """Read the document the customer actually uploaded, and extract from it.
+
+        THE STEP THAT DID NOT EXIST. `process()` has always been able to extract
+        from text; nothing produced the text. The only way to reach it was for
+        the caller to supply `text` or `fields`, which for a browser would mean
+        the customer typing numbers that the pipeline then recorded as
+        `document_backed` — a provenance claim about a document Onyx never
+        opened. This closes that: the bytes come from object storage, under the
+        document's own key, and the text is whatever those bytes decode to.
+
+        OWNERSHIP IS CHECKED EXPLICITLY, as `confirm()` does. `docs.document` is
+        ENABLE + FORCE row level security, so a foreign row is already invisible
+        and this comparison is belt and braces — but the read that follows hands
+        a customer's tax document to an extractor, and a second lock on that
+        door costs one comparison.
+
+        WHAT FAILURE LOOKS LIKE. A document that cannot be read is recorded as
+        `failed`, never as a successful extraction with no fields. Empty text
+        runs through the regexes perfectly happily and produces zero fields at
+        zero confidence, which reads as "we read your T4 and it was blank". The
+        schema already carries `failed` on both tables, so saying so honestly
+        needs no migration.
+        """
+        doc = await self.s.get(Document, document_id)
+        if not doc or doc.user_id != user_id or doc.deleted_at is not None:
+            raise NotFound("Document not found")
+
+        try:
+            data = self.storage.get(doc.bucket, doc.object_key)
+        except Exception as exc:  # noqa: BLE001 - provider errors are not a closed set
+            # The provider's message can carry the bucket and the key. Recorded
+            # as a closed reason and a type name only.
+            log.error("document_object_unreadable",
+                      operation="extract_from_storage", outcome="failed",
+                      reason=self.REASON_OBJECT_MISSING,
+                      error_type=type(exc).__name__,
+                      document_id=str(document_id))
+            await self._record_unreadable(doc, self.REASON_OBJECT_MISSING)
+            raise DocumentUnreadable(self.REASON_OBJECT_MISSING) from None
+
+        try:
+            extracted = text_from(doc.mime_type, data)
+        except DocumentUnreadable as unreadable:
+            log.info("document_not_readable",
+                     operation="extract_from_storage", outcome="refused",
+                     reason=unreadable.reason,
+                     media_type=unreadable.media_type,
+                     document_id=str(document_id))
+            await self._record_unreadable(doc, unreadable.reason)
+            raise
+
+        return await self.process(document_id, text=extracted.text)
+
+    async def _record_unreadable(self, doc: Document, reason: str) -> None:
+        """Write the refusal down where the rest of the pipeline can see it.
+
+        `engine` carries the reason. It is a `text` column describing what tried
+        to produce the extraction, and "the reader that declined, and why" is
+        exactly that — which is what lets this be honest without a migration.
+        """
+        doc.status = "failed"
+        self.s.add(DocumentExtraction(
+            document_id=doc.id,
+            engine=f"unread:{reason}",
+            status="failed",
+            confidence=Decimal("0"),
+            extracted_at=datetime.now(tz=UTC),
+        ))
+        await self.s.flush()
+
     async def confirm(self, user_id: uuid.UUID, document_id: uuid.UUID, tax_year: int) -> dict:
         """Turn the latest extraction into income/expense rows + provenance links."""
         doc = await self.s.get(Document, document_id)
@@ -228,6 +315,20 @@ class DocumentService:
         )
         if not extraction:
             raise ValidationError("No extraction to confirm; process the document first")
+        if extraction.status == "failed":
+            # A `failed` extraction became reachable when storage-backed reading
+            # was added; before that every row here was processed or
+            # needs_review. It carries NO fields, so the loop below would create
+            # nothing and return {"income": 0, "expense": 0} — a silent success
+            # meaning "confirmed", for a document Onyx could not read.
+            #
+            # Falling back to the last SUCCESSFUL extraction instead would be
+            # worse: it would confirm figures from a read that a later attempt
+            # has already contradicted.
+            raise ValidationError(
+                "The last attempt to read this document failed; there is "
+                "nothing to confirm"
+            )
 
         income_types = {t.code: t.id for t in await self.s.scalars(select(IncomeType))}
         categories = {c.code: c.id for c in await self.s.scalars(select(ExpenseCategory))}
