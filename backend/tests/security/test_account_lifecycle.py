@@ -565,11 +565,13 @@ async def test_a_worker_starting_after_the_cutoff_creates_no_user_data(client):
     runs = "SELECT count(*) FROM analysis.analysis_run WHERE user_id = %s"
     before = _count(runs, str(user_id))
 
-    # The task body calls `asyncio.run` — that is how Celery executes it in
-    # production — which cannot nest inside this test's loop. Running it in a
-    # worker thread reproduces the real execution shape rather than a test-only
-    # one. The engine is disposed either side because its pooled asyncpg
-    # connections belong to whichever loop opened them.
+    # The task body goes through `workers.runtime.run_task`, which owns a fresh
+    # event loop — that is how Celery executes it in production — and a new loop
+    # cannot nest inside this test's. Running it in a worker thread reproduces
+    # the real execution shape rather than a test-only one. The engine is
+    # disposed either side because its pooled asyncpg connections belong to
+    # whichever loop opened them; `run_task` now disposes on its way out too,
+    # but this test predates that and does not rely on it.
     await engine.dispose()
     assert await asyncio.to_thread(run_analysis.run, str(user_id), 2025) == ""
     await engine.dispose()
