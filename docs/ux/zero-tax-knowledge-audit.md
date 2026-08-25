@@ -181,7 +181,7 @@ Onyx's mental model.
 |---|---|---|---|
 | 1 | **P0** | No return, no filing, no refund — the product cannot complete the job a mass-market filer arrives to do | whole API surface |
 | 2 | **P0** | First signed-in screen leads with an inventory of 10 internal families, 9 empty, with raw reason codes | `pages/Overview.tsx:52,84,107` |
-| 3 | **P0** | The document pipeline exists in the backend and is unreachable from the UI — the single largest automation win is built and unused | `backend/app/api/v1/documents/routes.py`; zero `type="file"` in `frontend/src` |
+| 3 | **P0** | ~~The document pipeline exists in the backend and is unreachable from the UI~~ **CORRECTED — the pipeline is not complete: nothing converts an uploaded document into text, so the "Onyx reads it" step does not exist.** See `document-first-blocker.md` | `backend/app/services/document_processing/ocr.py`; no OCR dependency; `workers/tasks/documents.py` absent |
 | 4 | **P0** | Onboarding asks for **"Contribution room available"** — a number a first-time filer cannot know (it is on a Notice of Assessment they have never received) | `pages/Onboarding.tsx` |
 | 5 | **P0** | Income must be classified by the user into 8 tax categories, including *Eligible dividends* vs *Non-eligible dividends* | `pages/Onboarding.tsx:78` |
 | 6 | **P0** | No "I don't know" / "I'm not sure" option exists anywhere in the product | all of `pages/Onboarding.tsx` |
@@ -367,7 +367,7 @@ What is already there:
 | Closed action vocabulary driving what a customer can close | `ActionStatus`: `EVIDENCE_REQUIRED`, `DECISION_REQUIRED`, `ACTION_AVAILABLE`, `BLOCKED` | **Built** |
 | Evidence-gap detection | `_EVIDENCE_GAP` = `MISSING` ∪ `PARTIAL` ∪ `UNKNOWN` | **Built** |
 | Closed review-reason vocabulary | `GOVERNED_RE_EVALUATION_REQUESTED`, `INPUTS_CHANGED_SINCE_EVALUATION`, `ELIGIBILITY_INDETERMINATE` | **Built** |
-| Document upload → process → extract → **confirm into income/expense rows** | `backend/app/api/v1/documents/routes.py` (`POST /`, `/{id}/process`, `/{id}/confirm`, `DELETE`, `GET`) | **Built, no UI** |
+| Document upload → ~~process → extract~~ → confirm into income/expense rows | `backend/app/api/v1/documents/routes.py` | **PARTIAL — upload and confirm are real; extraction from a stored document does not exist.** See `document-first-blocker.md` |
 | Explanation with a correct authority boundary | `POST /ai/explanations` | **Built** |
 
 What is missing — and all of it is presentation or mapping, not authority:
