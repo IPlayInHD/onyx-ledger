@@ -532,6 +532,196 @@ def test_a_budget_exists_and_it_never_acts_on_the_estate() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Erasure is a privilege, and it belongs to exactly one identity
+# ---------------------------------------------------------------------------
+def test_only_the_privacy_worker_can_erase_an_object_version() -> None:
+    """The invariant `iam.tf` states in prose, enforced.
+
+    The API policy carries this comment: "Notably it CANNOT delete an object
+    version: erasure is the privacy worker's job and the API has no reason to
+    hold the capability." That was true when written and nothing kept it true.
+
+    THE DISTINCTION IS THE VERSION, NOT THE DELETE. `s3:DeleteObject` is
+    legitimately held by the API — `DELETE /api/v1/documents/{id}` is a product
+    feature and it purges the binary synchronously. On a VERSIONED bucket that
+    call writes a delete marker and leaves every prior version in place, which
+    is the correct semantics for "the customer removed a document".
+
+    Erasure is the other thing. B2A's hard erasure removes every version, and
+    that needs `DeleteObjectVersion` plus `ListBucketVersions` to enumerate
+    them. Those two are the privacy worker's alone: they are the capability to
+    make data unrecoverable, and the identity that holds them should not also
+    be the one reachable from the internet.
+    """
+    iam = _strip_comments(_tf("modules", "compute", "iam.tf"))
+
+    policies = dict(
+        re.findall(r'resource\s+"aws_iam_role_policy"\s+"([^"]+)"\s*\{(.*?)\n\}', iam, re.S)
+    )
+    assert "worker_privacy" in policies, "the privacy worker has no policy of its own"
+    assert "api" in policies, "the API has no policy; the walker is stale"
+
+    for action in ("s3:DeleteObjectVersion", "s3:ListBucketVersions"):
+        holders = {name for name, body in policies.items() if f'"{action}"' in body}
+        assert holders == {"worker_privacy"}, (
+            f"{action} is granted to {sorted(holders)}; it must be held by "
+            "worker_privacy alone. That action is what makes a customer's tax "
+            "documents unrecoverable, and iam.tf's own comment says the API "
+            "must not hold it."
+        )
+
+    # Non-vacuous on the privacy side: a version-aware erasure that cannot
+    # enumerate versions deletes the current object and silently leaves every
+    # prior one behind — which is B2A's failure mode, not its guarantee.
+    body = policies["worker_privacy"]
+    for action in ("s3:DeleteObjectVersion", "s3:ListBucketVersions"):
+        assert f'"{action}"' in body, (
+            f"the privacy worker lacks {action}; version-aware hard erasure "
+            "cannot be performed without it"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The buckets stay private, versioned and encrypted
+# ---------------------------------------------------------------------------
+#: Buckets that receive AWS log DELIVERY and therefore cannot use a
+#: customer-managed KMS key — the S3 and CloudFront log delivery services
+#: refuse it. They are SSE-S3 encrypted instead, and `infra/modules/storage`
+#: carries a matching `tfsec:ignore`. Named explicitly so the exception is a
+#: short list somebody has to join a bucket to, rather than a weaker rule.
+_SSE_S3_LOG_BUCKETS = frozenset({"access_logs"})
+
+
+def test_every_bucket_is_private_versioned_and_encrypted() -> None:
+    """Three properties, asserted per bucket rather than per repository.
+
+    `tests/security/test_s3_adapter_contract.py` covers the client's behaviour
+    — what the adapter sends. It reads no Terraform at all, so the bucket
+    itself has been unasserted: an adapter that faithfully sets encryption
+    headers against a bucket whose versioning was switched off is a correct
+    client of a broken store.
+
+    Versioning is load-bearing beyond durability. The erasure path above
+    deletes VERSIONS; a bucket without versioning silently changes what
+    `DeleteObjectVersion` means, so these two tests are one property split in
+    half.
+    """
+    storage = _strip_comments(_tf("modules", "storage", "main.tf"))
+
+    buckets = set(re.findall(r'resource\s+"aws_s3_bucket"\s+"([^"]+)"', storage))
+    assert len(buckets) >= 3, f"only {sorted(buckets)} found; the walker is stale"
+
+    for bucket in sorted(buckets):
+        blocked = _block(storage, "resource", "aws_s3_bucket_public_access_block", bucket)
+        assert blocked, f"{bucket} has no public access block"
+        for knob in (
+            "block_public_acls",
+            "block_public_policy",
+            "ignore_public_acls",
+            "restrict_public_buckets",
+        ):
+            assert re.search(rf"{knob}\s*=\s*true", blocked), (
+                f"{bucket} does not set {knob} = true; it is one bucket policy "
+                "away from being world-readable"
+            )
+
+        versioning = _block(storage, "resource", "aws_s3_bucket_versioning", bucket)
+        assert versioning and re.search(r'status\s*=\s*"Enabled"', versioning), (
+            f"{bucket} is not versioned; version-aware erasure and recovery "
+            "from an overwrite both depend on it"
+        )
+
+        encryption = _block(
+            storage, "resource", "aws_s3_bucket_server_side_encryption_configuration", bucket
+        )
+        assert encryption, f"{bucket} declares no server-side encryption at all"
+
+        if bucket in _SSE_S3_LOG_BUCKETS:
+            # S3 and CloudFront log DELIVERY cannot write to a bucket encrypted
+            # with a customer-managed KMS key, so this one is SSE-S3 and the
+            # tfsec rule is waived in-tree. It must still be encrypted, and the
+            # waiver must stay confined to log buckets — which is what the set
+            # above is for. A data bucket added to it would be caught below.
+            assert re.search(r'sse_algorithm\s*=\s*"AES256"', encryption), (
+                f"{bucket} is listed as a log bucket but is not SSE-S3 encrypted"
+            )
+            continue
+
+        assert re.search(r'sse_algorithm\s*=\s*"aws:kms"', encryption), (
+            f"{bucket} is not encrypted with KMS. If it is a log-delivery "
+            "bucket that cannot accept a customer-managed key, add it to "
+            "_SSE_S3_LOG_BUCKETS with the reason — do not relax this branch."
+        )
+        assert "kms_master_key_id" in encryption, (
+            f"{bucket} uses KMS without naming a key; the default S3 key is not "
+            "the customer-managed key the rest of the estate is held to"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Lean means one NAT, and staging can never be pointed at production
+# ---------------------------------------------------------------------------
+def test_the_lean_profile_runs_exactly_one_nat_gateway() -> None:
+    """The HA side of this was asserted; the lean side was not.
+
+    `test_the_high_availability_profile_is_preserved_and_complete` requires
+    `single_nat_gateway = false` for HA, which catches a profile that stops
+    being highly available. Nothing caught the opposite: lean quietly acquiring
+    a NAT per availability zone. That is a $36.50/month line item — the second
+    largest in the standing estate — doubling with no review signal, which is
+    exactly the bill-shock shape §11 exists to prevent.
+    """
+    lean = _profile_body(_strip_comments(CAPACITY.read_text()), "lean_launch")
+    assert lean, "the lean_launch profile is missing"
+    assert re.search(r"single_nat_gateway\s*=\s*true", lean), (
+        "lean_launch does not pin itself to one NAT gateway; lean would pay "
+        "HA's egress bill while providing lean's availability"
+    )
+
+
+def test_staging_and_production_cannot_share_terraform_state() -> None:
+    """Ephemeral staging made this dangerous, and it is otherwise unasserted.
+
+    `infra/staging_cycle.sh` runs `terraform destroy`. That is safe only while
+    the staging root's state describes staging and nothing else. Two roots
+    sharing a state key — one copy-paste in a `backend.hcl` — turns a routine
+    `staging-down` into the destruction of production, and the failure is
+    silent until it is total.
+
+    Asserted on the checked-in examples, which are what an operator copies.
+    """
+    keys = {}
+    for env in ENV_ROOTS:
+        example = INFRA / "envs" / env / "backend.hcl.example"
+        assert example.exists(), f"envs/{env} ships no backend.hcl.example to copy"
+        text = _strip_comments(example.read_text())
+
+        key = re.search(r'key\s*=\s*"([^"]+)"', text)
+        assert key, f"envs/{env}/backend.hcl.example declares no state key"
+        keys[env] = key.group(1)
+
+        assert env in keys[env], (
+            f"envs/{env} stores its state at {keys[env]!r}, which does not name "
+            f"{env}; an operator cannot tell from the key which estate it is "
+            "about to destroy"
+        )
+        assert re.search(r"encrypt\s*=\s*true", text), (
+            f"envs/{env} does not encrypt its state, which holds every "
+            "resource identifier in the estate"
+        )
+        assert re.search(r"dynamodb_table\s*=", text), (
+            f"envs/{env} takes no state lock; two concurrent applies would "
+            "interleave writes to one state file"
+        )
+
+    assert keys["staging"] != keys["production"], (
+        f"both roots store state at {keys['staging']!r}. `staging_cycle.sh` "
+        "runs terraform destroy against that state — this is the configuration "
+        "in which staging-down destroys production."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Non-vacuity
 # ---------------------------------------------------------------------------
 BREAKAGES: tuple[tuple[str, str, str, str, str], ...] = (
@@ -596,6 +786,41 @@ BREAKAGES: tuple[tuple[str, str, str, str, str], ...] = (
         "a connection ceiling that is computed and ignored",
     ),
     (
+        "test_only_the_privacy_worker_can_erase_an_object_version",
+        "modules/compute/iam.tf",
+        'Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]',
+        'Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:AbortMultipartUpload"]',
+        "an API that can erase a document version",
+    ),
+    (
+        "test_every_bucket_is_private_versioned_and_encrypted",
+        "modules/storage/main.tf",
+        '  bucket = aws_s3_bucket.documents.id\n  versioning_configuration { status = "Enabled" }',
+        '  bucket = aws_s3_bucket.documents.id\n  versioning_configuration { status = "Suspended" }',
+        "a documents bucket that stopped keeping versions",
+    ),
+    (
+        "test_the_lean_profile_runs_exactly_one_nat_gateway",
+        "modules/capacity/main.tf",
+        "      single_nat_gateway = true",
+        "      single_nat_gateway = false",
+        "a lean profile paying for a NAT per zone",
+    ),
+    (
+        "test_staging_and_production_cannot_share_terraform_state",
+        "envs/staging/backend.hcl.example",
+        'key            = "staging/terraform.tfstate"',
+        'key            = "production/terraform.tfstate"',
+        "a staging root whose destroy would take production",
+    ),
+    (
+        "test_every_staging_verb_reads_state_only_after_initialising",
+        "staging_cycle.sh",
+        "  down)\n    ensure_init\n",
+        "  down)\n",
+        "a down verb that reads state before init",
+    ),
+    (
         "test_destroying_an_environment_cannot_destroy_the_registry_or_evidence",
         "envs/shared/main.tf",
         "  lifecycle { prevent_destroy = true }\n\n  tags = local.tags\n}\n\nresource \"aws_ecr_lifecycle_policy\"",
@@ -651,3 +876,63 @@ def test_the_guards_are_not_vacuous(
     # The same test now passes — so the failure above was caused by the
     # breakage, and not by pointing the test at a directory that was not there.
     globals()[test_name]()
+
+
+def test_every_staging_verb_reads_state_only_after_initialising() -> None:
+    """The defect this pins was live for about ten minutes and is worth keeping out.
+
+    `terraform state list` in an uninitialised directory FAILS, and
+    `standing()` swallows that failure into an empty result — which reads
+    exactly like "the environment is already gone". Ephemeral staging is
+    recreated from a fresh checkout by design, so the uninitialised directory
+    is the NORMAL case, not the edge one.
+
+    Without `ensure_init` first, `staging_cycle.sh down` on a fresh checkout
+    prints "nothing is standing; nothing to destroy", exits 0, and leaves the
+    whole estate running. A cost-optimisation entry that shipped that would
+    have built a more efficient way to lose money.
+
+    Also asserts there is exactly ONE destroy path. `cycle` traps `cleanup` and
+    `down` calls it; a second inline `terraform destroy` would be a copy that
+    drifts from the one the trap runs.
+    """
+    script = (INFRA / "staging_cycle.sh").read_text()
+
+    body = script[script.index('case "${1:-cycle}" in'):]
+    branches = dict(re.findall(r"^  ([a-z]+)\)\n(.*?)^    ;;", body, re.S | re.M))
+    assert {"cycle", "up", "certify", "down", "rebuild"} <= set(branches), (
+        f"the staging verbs are {sorted(branches)}; §3 requires up, certify, "
+        "down and rebuild alongside the default cycle"
+    )
+
+    for verb, branch in branches.items():
+        if "standing" not in branch:
+            continue
+        # Presence asserted separately from ORDER: `.index` on a missing
+        # substring raises ValueError, which would crash this test rather than
+        # failing it — and a guard that crashes is a guard whose message nobody
+        # reads.
+        assert "ensure_init" in branch, (
+            f"`{verb}` reads Terraform state and never initialises. On a fresh "
+            "checkout `terraform state list` fails, `standing()` reports "
+            "nothing, and `down` declines to destroy a live estate."
+        )
+        assert branch.index("ensure_init") < branch.index("standing"), (
+            f"`{verb}` reads Terraform state before initialising. On a fresh "
+            "checkout that reads as 'nothing is standing' whatever is actually "
+            "running, so `down` would decline to destroy a live estate."
+        )
+
+    destroys = re.findall(r"terraform -chdir=\"\$STAGING\" destroy", script)
+    assert len(destroys) == 1, (
+        f"{len(destroys)} destroy commands; there must be exactly one so the "
+        "trapped path and the `down` verb cannot diverge"
+    )
+
+    # `up` and `certify` leave the estate standing on purpose. Each must say so,
+    # or the money runs quietly.
+    for verb in ("up", "certify"):
+        assert "remind" in branches[verb], (
+            f"`{verb}` leaves staging running without printing the `down` "
+            "command; that is how an ephemeral environment stops being ephemeral"
+        )

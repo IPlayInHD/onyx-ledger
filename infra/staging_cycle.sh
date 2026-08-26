@@ -33,6 +33,24 @@
 # the persistent roots are untouched by it. The one thing to get wrong is
 # leaving the environment half-destroyed after a failure — so STEP 10 is
 # unconditional, and STEP 11 reports what is still standing.
+#
+# THE FOUR VERBS, and which of them carries the destroy:
+#
+#   ./staging_cycle.sh cycle     up, certify, down — destroy TRAPPED on exit.
+#                                The default, and the only one that cannot
+#                                leave an environment standing.
+#   ./staging_cycle.sh up        provision and STOP. No trap: the environment
+#                                stands, and it bills, until `down`.
+#   ./staging_cycle.sh certify   run steps 2-9 against a standing environment.
+#                                No trap either — a failed proof is the case
+#                                where you most want the estate to look at.
+#   ./staging_cycle.sh down      destroy. Idempotent; safe to run twice.
+#   ./staging_cycle.sh rebuild   down, then up.
+#
+# `up` AND `certify` DELIBERATELY DO NOT DESTROY, and that is the one way to
+# leave money running. Both print the exact `down` command on the way out, and
+# `cycle` remains the default precisely so that the safe path is the one you
+# get by typing nothing. Anything automated should call `cycle`.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -54,14 +72,43 @@ cleanup() {
   step "STEP 11  what remains"
   terraform -chdir="$STAGING" state list || true
 }
-trap cleanup EXIT
+ensure_init() {
+  # MUST run before anything reads state. `terraform state list` in an
+  # uninitialised directory fails, and `standing()` cannot tell that apart from
+  # "the environment is already gone" — so without this, `down` on a fresh
+  # checkout reports nothing to destroy and exits 0 while staging keeps
+  # billing. That is the exact failure this whole script exists to prevent.
+  #
+  # Idempotent and cheap. If it fails (no credentials, unreachable backend)
+  # `set -e` stops here, loudly, rather than proceeding on a false reading.
+  terraform -chdir="$STAGING" init -input=false >/dev/null
+}
 
+standing() {
+  # What `down` would remove. Empty output means nothing is standing, which is
+  # what makes `down` safe to run twice and `rebuild` safe to run first.
+  # Only meaningful AFTER ensure_init.
+  terraform -chdir="$STAGING" state list 2>/dev/null || true
+}
+
+remind() {
+  printf '\n%s\n' "STAGING IS STANDING AND IS BILLING. Bring it down with:"
+  printf '%s\n\n' "    RUN_ID=$RUN_ID EVIDENCE_BUCKET=$EVIDENCE $0 down"
+}
+
+provision() {
 step "STEP 1   provision"
 terraform -chdir="$STAGING" init -input=false
 terraform -chdir="$STAGING" apply -auto-approve -input=false
 terraform -chdir="$STAGING" output -json > "$OUT/outputs.json"
 keep "$OUT/outputs.json"
 
+CLUSTER=$(terraform -chdir="$STAGING" output -raw cluster_name)
+MIGRATION=$(terraform -chdir="$STAGING" output -raw migration_task_family)
+
+}
+
+certify() {
 CLUSTER=$(terraform -chdir="$STAGING" output -raw cluster_name)
 MIGRATION=$(terraform -chdir="$STAGING" output -raw migration_task_family)
 
@@ -119,3 +166,46 @@ fi
 
 aws s3 ls "s3://$EVIDENCE/$RUN_ID/" | tee "$OUT/manifest.txt"
 grep -q . "$OUT/manifest.txt" || { echo "nothing was preserved"; exit 1; }
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+case "${1:-cycle}" in
+  cycle)
+    # The safe default: whatever happens below, STEP 10 runs.
+    trap cleanup EXIT
+    provision
+    certify
+    ;;
+  up)
+    provision
+    remind
+    ;;
+  certify)
+    ensure_init
+    [ -n "$(standing)" ] || { echo "nothing is standing; run '$0 up' first"; exit 1; }
+    certify
+    remind
+    ;;
+  down)
+    ensure_init
+    # Idempotent. `cleanup` is the same code the trap runs, so there is exactly
+    # one destroy path in this file rather than two that can drift apart.
+    if [ -z "$(standing)" ]; then
+      echo "nothing is standing; nothing to destroy"
+      exit 0
+    fi
+    cleanup
+    ;;
+  rebuild)
+    ensure_init
+    if [ -n "$(standing)" ]; then cleanup; fi
+    provision
+    remind
+    ;;
+  *)
+    echo "usage: $0 [cycle|up|certify|down|rebuild]" >&2
+    exit 64
+    ;;
+esac

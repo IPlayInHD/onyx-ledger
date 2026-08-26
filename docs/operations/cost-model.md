@@ -175,6 +175,31 @@ Staging is created for a proving run and destroyed at the end of it
 hourly, so the cost of a run is the standing rate — $0.2451/hour — times the
 hours it stands, plus a few cents of traffic.
 
+### The five verbs
+
+| Command | What it does | Leaves it standing? |
+|---|---|---|
+| `staging_cycle.sh` (or `cycle`) | up → certify → down, destroy **trapped** on exit | No — cannot |
+| `staging_cycle.sh up` | provision and stop | **Yes** |
+| `staging_cycle.sh certify` | steps 2–9 against a standing estate | **Yes** |
+| `staging_cycle.sh down` | destroy; idempotent | No |
+| `staging_cycle.sh rebuild` | down, then up | **Yes** |
+
+`cycle` is the default because it is the only verb that cannot leave money
+running: its destroy is a trap, so it fires on failure and on interrupt too.
+`up` and `certify` deliberately do not destroy — a failed proof is exactly when
+you want the estate still there to look at — and both print the `down` command
+on the way out. Anything automated should call `cycle`.
+
+**`down` initialises before it reads state, and that is not a detail.**
+`terraform state list` fails in an uninitialised directory, and an
+ephemeral environment is recreated from a fresh checkout by definition, so the
+uninitialised directory is the normal case. Without the init, `down` reads
+"nothing is standing" whatever is actually running, exits 0, and leaves the
+entire estate billing. `test_every_staging_verb_reads_state_only_after_
+initialising` pins it, and its non-vacuity case removes the init and requires
+the guard to notice.
+
 | Staging lifetime | $/run |
 |---|---:|
 | 2 days | 11.76 |
@@ -476,3 +501,29 @@ treated as a claim to verify, not a number to model.
 * That the per-user assumptions in §3 are right. They are assumptions, labelled
   as such, and the variable lines should be re-derived from the first real bill.
 * That $181/month is what will be charged. It is what the rates multiply out to.
+
+---
+
+## 10. What the profiles are actually held to
+
+Five invariants were added after the profiles were built, each because the
+property was real but rested on a comment or on nothing at all. All five are in
+`backend/tests/security/test_capacity_profiles.py` and all five have a
+non-vacuity case that breaks the property on a copy of `infra/` and requires
+the guard to fail.
+
+| Guard | What it prevents | Was it asserted before? |
+|---|---|---|
+| `test_only_the_privacy_worker_can_erase_an_object_version` | The API gaining `s3:DeleteObjectVersion` — the capability that makes a customer's documents unrecoverable | No. `iam.tf` asserted it **in a comment** |
+| `test_every_bucket_is_private_versioned_and_encrypted` | A bucket losing public-access blocking, versioning, or KMS | No. The S3 tests cover the client, and read no Terraform |
+| `test_the_lean_profile_runs_exactly_one_nat_gateway` | Lean quietly acquiring a NAT per AZ — the second largest standing line, doubling | Only the **HA** side was |
+| `test_staging_and_production_cannot_share_terraform_state` | `staging-down` destroying production | No |
+| `test_every_staging_verb_reads_state_only_after_initialising` | `down` silently declining to destroy a live estate | No — the defect it pins was introduced and caught in this entry |
+
+The distinction the first one draws is worth keeping straight: the API
+legitimately holds `s3:DeleteObject`, because `DELETE /api/v1/documents/{id}`
+is a product feature and on a versioned bucket that writes a delete marker and
+keeps every prior version — which is the right meaning of "the customer removed
+a document". Erasure is the other thing, it needs `DeleteObjectVersion` and
+`ListBucketVersions` to enumerate what to destroy, and those two belong to the
+privacy worker alone.
