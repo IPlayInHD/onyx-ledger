@@ -527,3 +527,42 @@ keeps every prior version — which is the right meaning of "the customer remove
 a document". Erasure is the other thing, it needs `DeleteObjectVersion` and
 `ListBucketVersions` to enumerate what to destroy, and those two belong to the
 privacy worker alone.
+
+---
+
+## 11. Two defects in the staging cycle, and one gap it cannot close
+
+The cycle script had never been executed — its own header says so — and
+splitting it into verbs surfaced two things that would have failed a real run.
+
+**STEP 8 named a test path that has never existed.** It ran
+`run_backend_tests.sh tests/acceptance`; git shows the string `tests/acceptance`
+was introduced by the commit that wrote the script, and no such directory has
+ever been in this repository. Under `set -euo pipefail` the run dies there —
+with the whole estate provisioned and billing, because STEP 8 is a long way
+after `terraform apply`.
+
+**STEP 8 also proved nothing about staging.** `run_backend_tests.sh` DROPS AND
+CREATES its own `onyx_test` database on `$PGHOST`. It never connects to the
+deployed environment. Labelled "twelve-persona tax regression" inside a staging
+proving run, it read as an assurance about the estate; it is an assurance about
+the image.
+
+Both are fixed. STEP 0 now checks every path the run will use **before**
+provisioning — a failed check costs nothing, a failure at STEP 8 costs an
+estate-hour — and STEP 8 runs the tax regression that exists (golden replay and
+pinned-rule evaluation) under a label that says what it covers.
+`test_the_staging_cycle_only_names_paths_that_exist` fails if either drifts.
+
+### The gap that remains
+
+**There is no twelve-persona tax regression driven through a deployed API.**
+The name implied one and no implementation exists. What exists is deterministic
+tax regression against a local database, which is genuinely valuable and is not
+the same claim. Writing an estate-targeted persona suite is tax work, not
+infrastructure work, and this entry did not do it.
+
+That matters for the staging apply: a real proving run will exercise the
+estate's networking, identity, storage and erasure paths, and will exercise its
+tax behaviour **only to the extent the local regression already did.** Anyone
+reading a green staging run should not conclude more than that.

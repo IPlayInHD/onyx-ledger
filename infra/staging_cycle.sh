@@ -57,6 +57,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 RUN_ID="${RUN_ID:?set RUN_ID to something that identifies this proving run}"
 EVIDENCE="${EVIDENCE_BUCKET:?set EVIDENCE_BUCKET (see envs/shared outputs)}"
 STAGING="$HERE/envs/staging"
+
+#: The tax regression this run executes. One place, so the preflight check and
+#: the step that runs it cannot name different things.
+TAX_REGRESSION="tests/integration/test_golden_replay.py tests/integration/test_pinned_rule_evaluation.py"
 OUT="$(mktemp -d)"
 
 step() { printf '\n=== %s\n' "$*"; }
@@ -72,6 +76,35 @@ cleanup() {
   step "STEP 11  what remains"
   terraform -chdir="$STAGING" state list || true
 }
+preflight() {
+  # BEFORE `terraform apply`, not after. Every path below is handed to a runner
+  # partway through a proving run, and a typo in one of them surfaces only once
+  # the estate is already standing and already billing. Checking first turns a
+  # $10 mistake into a zero-dollar one.
+  local missing=0 path
+  for path in \
+    "$HERE/../backend/scripts/prove_security_gate.sh" \
+    "$HERE/../backend/scripts/document_storage_audit.py" \
+    "$HERE/../backend/scripts/run_backend_tests.sh" \
+    "$HERE/../frontend"
+  do
+    [ -e "$path" ] || { echo "MISSING: $path"; missing=1; }
+  done
+
+  # TAX_REGRESSION holds SEVERAL space-separated paths and is deliberately
+  # UNQUOTED here so the shell splits it. Quoting it checks one nonsense path
+  # made of all of them joined — which is what the first version of this
+  # function did, and it reported the real configuration as missing.
+  # shellcheck disable=SC2086
+  for path in $TAX_REGRESSION; do
+    [ -e "$HERE/../backend/$path" ] || { echo "MISSING: backend/$path"; missing=1; }
+  done
+  [ "$missing" = "0" ] || {
+    echo "refusing to provision: the run would fail partway and cost money"
+    exit 1
+  }
+}
+
 ensure_init() {
   # MUST run before anything reads state. `terraform state list` in an
   # uninitialised directory fails, and `standing()` cannot tell that apart from
@@ -97,6 +130,9 @@ remind() {
 }
 
 provision() {
+step "STEP 0   preflight — check the run can finish before paying for it"
+preflight
+
 step "STEP 1   provision"
 terraform -chdir="$STAGING" init -input=false
 terraform -chdir="$STAGING" apply -auto-approve -input=false
@@ -145,10 +181,23 @@ aws rds describe-db-instances --db-instance-identifier "$db" \
 # docs/operations/runbooks.md, "Restoring the database".
 keep "$OUT/pitr.txt"
 
-step "STEP 8   twelve-persona tax regression"
+step "STEP 8   tax regression — OF THE CODE, against a local database"
+# TWO THINGS THIS IS NOT, both of which the previous wording implied.
+#
+# It is not a twelve-persona suite. `tests/acceptance` was named here and has
+# never existed in this repository — the step could not have run. The tax
+# regression that DOES exist is golden replay plus pinned-rule evaluation, and
+# that is what runs.
+#
+# It is not a proof about the staging estate. `run_backend_tests.sh` DROPS AND
+# CREATES its own `onyx_test` database on $PGHOST; it never connects to
+# staging. So this establishes that the image's tax behaviour is unchanged —
+# which is worth establishing — and establishes nothing about the deployed
+# environment. A persona regression driven through the staging API is a real
+# gap; see docs/operations/cost-model.md §11.
 ( cd "$HERE/../backend" && PGHOST=localhost PGPORT=5432 PGSUPER=onyx_migrator \
-  ./scripts/run_backend_tests.sh tests/acceptance ) 2>&1 | tee "$OUT/personas.log"
-keep "$OUT/personas.log"
+  ./scripts/run_backend_tests.sh $TAX_REGRESSION ) 2>&1 | tee "$OUT/tax-regression.log"
+keep "$OUT/tax-regression.log"
 
 step "STEP 9   evidence preserved"
 # The CloudWatch log group belongs to the environment and dies with it, so the

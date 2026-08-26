@@ -821,6 +821,13 @@ BREAKAGES: tuple[tuple[str, str, str, str, str], ...] = (
         "a down verb that reads state before init",
     ),
     (
+        "test_the_staging_cycle_only_names_paths_that_exist",
+        "staging_cycle.sh",
+        'TAX_REGRESSION="tests/integration/test_golden_replay.py',
+        'TAX_REGRESSION="tests/acceptance',
+        "a staging run that names a test path nobody wrote",
+    ),
+    (
         "test_destroying_an_environment_cannot_destroy_the_registry_or_evidence",
         "envs/shared/main.tf",
         "  lifecycle { prevent_destroy = true }\n\n  tags = local.tags\n}\n\nresource \"aws_ecr_lifecycle_policy\"",
@@ -936,3 +943,53 @@ def test_every_staging_verb_reads_state_only_after_initialising() -> None:
             f"`{verb}` leaves staging running without printing the `down` "
             "command; that is how an ephemeral environment stops being ephemeral"
         )
+
+
+def test_the_staging_cycle_only_names_paths_that_exist() -> None:
+    """The defect this pins shipped in the previous entry and was never noticed.
+
+    `staging_cycle.sh` STEP 8 ran `run_backend_tests.sh tests/acceptance`.
+    **`tests/acceptance` has never existed in this repository** — git says the
+    string was introduced by the commit that wrote the script. Under
+    `set -euo pipefail` the run dies there, so the ephemeral proving cycle
+    could not complete; and because nothing has ever executed the script, no
+    test and no review caught it.
+
+    The cost of finding it at runtime is not zero: STEP 8 is reached long after
+    `terraform apply`, so the failure happens with the whole estate standing
+    and billing. That is why the script now checks its paths in STEP 0, before
+    it provisions anything, and why this test checks the same set statically.
+    """
+    script = (INFRA / "staging_cycle.sh").read_text()
+    backend = REPO / "backend"
+
+    referenced = set(re.findall(r'\$HERE/\.\./backend/([A-Za-z0-9_./-]+)', script))
+    assert referenced, "no backend paths found; the walker is stale"
+
+    for relative in sorted(referenced):
+        if relative.startswith("$"):
+            continue
+        assert (backend / relative).exists(), (
+            f"staging_cycle.sh runs {relative}, which does not exist. The run "
+            "would fail after provisioning, with the estate standing."
+        )
+
+    # The tax regression is named once and used twice. If those two ever name different
+    # things, the preflight checks one path and the run executes another.
+    declared = re.search(r'TAX_REGRESSION="([^"]+)"', script)
+    assert declared, "TAX_REGRESSION is not declared in one place"
+    for path in declared.group(1).split():
+        assert (backend / path).exists(), (
+            f"TAX_REGRESSION names {path}, which does not exist"
+        )
+
+    assert 'run_backend_tests.sh $TAX_REGRESSION' in script, (
+        "STEP 8 does not run the declared TAX_REGRESSION paths; the preflight "
+        "would be checking something the run does not execute"
+    )
+
+    # And the preflight must come before the money.
+    assert script.index("preflight\n") < script.index("terraform -chdir=\"$STAGING\" apply"), (
+        "preflight runs after apply; checking whether the run can finish only "
+        "matters before the estate is paid for"
+    )
