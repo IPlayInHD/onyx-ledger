@@ -25,7 +25,11 @@ from tests.security.test_pd1_tenant_isolation import PD1_TABLES, pk
 #: Roles that must not be able to touch these tables at all.
 _NO_ACCESS_ROLES = ("onyx_freshness_worker", "onyx_privacy_worker", "public")
 
-#: Schemas whose tables are tenant-owned. Used by the regression guard below.
+#: The nine tenant-data schemas whose DEFAULT ACLs are inspected below. This
+#: list bounds ONLY `test_default_privileges_are_known_and_bounded`, which asks
+#: a deliberately narrower question than tenant coverage — see its docstring.
+#: The FORCE-RLS regression guard no longer uses any schema list: it derives
+#: its bound from the protected set (tests/security/rls_protection.py).
 _TENANT_SCHEMAS = ("ai", "analysis", "billing", "docs", "finance", "ioe",
                    "profile", "reco", "wealth")
 
@@ -139,6 +143,22 @@ def test_no_other_role_can_reach_these_tables(table, role):
 def test_default_privileges_are_known_and_bounded():
     """§9 — what does a NEW table in a tenant schema inherit?
 
+    DELIBERATELY SCOPED TO A HAND-NAMED LIST, and the list's meaning is
+    stated exactly so it cannot be mistaken for coverage. This test asks a
+    narrower question than "which tables need a tenant boundary": it inspects
+    what `pg_default_acl` grants in the nine tenant-DATA schemas named in
+    `_TENANT_SCHEMAS`. Fourteen schemas in this database carry default ACLs
+    (16_rls_grants.sql, 18_admin_grants.sql, 19_tkms.sql, 21_ioe.sql among
+    others); the five outside this list — identity, audit, admin, rules,
+    tax_kb, tkms — are operator, reference, or pre-authentication surfaces
+    whose grants are asserted by their own suites. Membership here means "a
+    schema where a forgotten policy on a new CRUD-granted table would be a
+    tenant leak", which is a design statement, not a derivation.
+
+    Tenant COVERAGE is not this test's job and no longer has any schema list:
+    `test_every_tenant_owned_table_has_a_forced_policy` below derives its
+    bound from the protected set.
+
     `ALTER DEFAULT PRIVILEGES` grants `onyx_app_rw` full CRUD in every tenant
     schema. That is deliberate and matches the model: the runtime role writes
     user data. What it does NOT do is give the new table a policy — which is
@@ -175,38 +195,33 @@ def test_default_privileges_are_known_and_bounded():
 
 
 def test_every_tenant_owned_table_has_a_forced_policy():
-    """THE REGRESSION GUARD for §9.
+    """THE REGRESSION GUARD for §9, now derived rather than list-bound.
 
     A new table in a tenant schema inherits CRUD from default privileges and
     inherits no policy. This is what makes that combination fail the build
     instead of shipping: any table carrying a `user_id`, or reachable from one
     by foreign key, must have RLS enabled, FORCED, and at least one policy —
-    unless it is in the justified non-RLS registry.
+    unless it is in the justified non-RLS registry, or registered sealed
+    default-deny (stricter than a policy, not weaker).
+
+    THE BOUND USED TO BE `_TENANT_SCHEMAS`, which is how a user-derived table
+    in a schema outside those nine names — a future `billshield` schema —
+    escaped this guard entirely while looking covered. The bound is now the
+    protected set (tests/security/rls_protection.py): catalogue-derived
+    user-derived tables in ANY schema, foreign-key children included, minus
+    only NON_RLS. `LIFECYCLE.rls=False` records what the database does; it
+    exempts nothing.
     """
-    from app.privacy.classification import NON_RLS
+    from tests.security.rls_protection import (
+        forced_rls_violations,
+        protected_tables,
+    )
 
-    with owner_cursor() as cur:
-        cur.execute("""
-            SELECT c.relnamespace::regnamespace::text || '.' || c.relname,
-                   c.relrowsecurity, c.relforcerowsecurity,
-                   (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)
-              FROM pg_class c
-              JOIN pg_attribute a ON a.attrelid = c.oid
-             WHERE c.relkind IN ('r', 'p')
-               AND c.relnamespace::regnamespace::text = ANY(%s)
-               AND a.attname = 'user_id' AND a.attnum > 0 AND NOT a.attisdropped
-        """, (list(_TENANT_SCHEMAS),))
-        rows = cur.fetchall()
-
-    assert rows, "no tenant-owned tables found; the query is wrong"
-    unguarded = [
-        f"{name} (rls={rls} force={force} policies={policies})"
-        for name, rls, force, policies in rows
-        if name not in NON_RLS and not (rls and force and policies)
-    ]
+    assert protected_tables(), "the protected set is empty; the derivation is wrong"
+    unguarded = forced_rls_violations()
     assert not unguarded, (
-        "these tables carry a user_id and have no enforced tenant boundary:\n  "
-        + "\n  ".join(unguarded)
+        "these tables hold user-derived data and have no enforced tenant "
+        "boundary:\n  " + "\n  ".join(unguarded)
         + "\nAdd RLS with FORCE and a policy, or justify the exception in "
           "app/privacy/classification.py."
     )

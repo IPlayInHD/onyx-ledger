@@ -265,32 +265,41 @@ def test_definer_owners_can_reach_every_application_schema():
 
 
 def test_every_user_derived_table_in_every_schema_has_forced_rls():
-    """Catalogue-driven across ALL user-data schemas, so a table added to any of
-    them later is covered without editing this test."""
-    conn, cur = _owner_cursor()
-    try:
-        cur.execute("""
-            SELECT n.nspname || '.' || c.relname,
-                   c.relrowsecurity, c.relforcerowsecurity
-              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-             WHERE c.relkind = 'r'
-               AND n.nspname IN ('ioe','finance','wealth','analysis','reco',
-                                 'profile','docs','billing')
-               AND EXISTS (
-                   SELECT 1 FROM pg_attribute a
-                    WHERE a.attrelid = c.oid AND a.attname = 'user_id'
-                      AND NOT a.attisdropped
-               )
-             ORDER BY 1
-        """)
-        rows = cur.fetchall()
-    finally:
-        conn.close()
+    """Protected-set derived, so a table in a schema created later is covered.
 
-    assert rows, "no user_id-bearing tables found — query is wrong"
-    missing = [name for name, enabled, forced in rows if not (enabled and forced)]
-    assert not missing, (
-        f"tables carrying user_id without ENABLE+FORCE row level security: {missing}"
+    THE EARLIER VERSION OF THIS TEST LIED IN ITS DOCSTRING. It claimed coverage
+    of "ALL user-data schemas" while its query named eight of them, so a
+    user-derived table in any schema outside that list — the shape a future
+    `billshield` schema takes — passed with ENABLE and no FORCE. Reproduced
+    before the fix: such a table, classified in LIFECYCLE with rls=False and
+    absent from NON_RLS, survived this test and the whole privacy suite.
+
+    Now the bound is the protected set (tests/security/rls_protection.py):
+    every catalogue-derived user-derived table — foreign-key children included,
+    in every schema — minus only the tables NON_RLS explicitly waives. Each
+    member must have ENABLE, FORCE, and at least one policy (or be a registered
+    sealed default-deny table, which is stricter). `LIFECYCLE.rls=False` is
+    recorded evidence, never an exemption.
+
+    Non-vacuity lives in test_future_schema_rls_guard.py, which plants exactly
+    the table this test used to miss and proves it is now caught.
+    """
+    from tests.security.rls_protection import (
+        forced_rls_violations,
+        protected_tables,
+    )
+
+    protected = protected_tables()
+    assert len(protected) > 50, (
+        f"the protected set holds only {len(protected)} tables — the "
+        "derivation is broken, not the schema"
+    )
+    violations = forced_rls_violations()
+    assert not violations, (
+        "user-derived tables without an enforced tenant boundary:\n  "
+        + "\n  ".join(violations)
+        + "\nAdd ENABLE+FORCE row level security and a policy, or record a "
+          "reviewed waiver in app/privacy/classification.py:NON_RLS."
     )
 
 

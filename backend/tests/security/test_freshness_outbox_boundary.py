@@ -589,6 +589,15 @@ def test_the_worker_role_cannot_read_any_user_financial_table():
 
     The worker role exists to move queue rows. If it could read a financial
     table, the narrowness of the functions would not matter.
+
+    THE SCHEMA BOUND IS NOW DERIVED, NOT NAMED. This test used to enumerate
+    nine schemas by hand while test_privilege_invariants.py's
+    test_the_worker_role_has_no_direct_table_privilege_in_any_schema asserted
+    the same property over every schema in the catalogue — two definitions of
+    coverage, one of which went stale the day a tenth schema appeared. The
+    catalogue-wide test remains the broader statement (it also checks views,
+    partitions, TRUNCATE and REFERENCES); this one keeps the boundary file's
+    local statement of the same rule, now over every schema that exists.
     """
     conn = psycopg2.connect(OWNER_DSN)
     try:
@@ -597,14 +606,23 @@ def test_the_worker_role_cannot_read_any_user_financial_table():
             SELECT n.nspname, c.relname
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
              WHERE c.relkind = 'r'
-               AND n.nspname IN ('finance','wealth','analysis','reco','ioe',
-                                 'identity','profile','docs','billing')
+               AND n.nspname NOT LIKE 'pg\\_%'
+               AND n.nspname <> 'information_schema'
                AND (has_table_privilege('onyx_freshness_worker', c.oid, 'SELECT')
                  OR has_table_privilege('onyx_freshness_worker', c.oid, 'INSERT')
                  OR has_table_privilege('onyx_freshness_worker', c.oid, 'UPDATE')
                  OR has_table_privilege('onyx_freshness_worker', c.oid, 'DELETE'))
         """)
         reachable = cur.fetchall()
+        # Non-vacuity: the derivation must still be looking at a populated
+        # catalogue, or an empty result proves only that the query broke.
+        cur.execute("""
+            SELECT count(*) FROM pg_namespace
+             WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema'
+        """)
+        schemas_checked = cur.fetchone()[0]
+        assert schemas_checked >= 10, (
+            "the schema derivation found suspiciously few schemas")
         assert not reachable, (
             "the freshness worker role can reach user tables directly: "
             f"{reachable}"
