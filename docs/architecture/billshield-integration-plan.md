@@ -185,7 +185,17 @@ protected  =  { all catalogue-derived user-derived tables }
                 reviewed user-derived justification }
 ```
 
-with "user-derived" computed exactly as `test_privacy_inventory.py::_user_derived()` already computes it — seeded on every `user_id` column plus `identity.user_account`, propagated along foreign keys, unioned with `MANUALLY_DECLARED_USER_DERIVED` — so foreign-key-derived **children** are inside the set without being named. Every table in `protected` must have `ENABLE`, `FORCE`, **and at least one policy**. Nothing else exempts a table: not `LIFECYCLE.rls=False`, not the absence of a `LIFECYCLE` entry, not a schema that no list happens to mention.
+with "user-derived" computed exactly as `test_privacy_inventory.py::_user_derived()` already computes it — seeded on every `user_id` column plus `identity.user_account`, propagated along foreign keys, unioned with `MANUALLY_DECLARED_USER_DERIVED` — so foreign-key-derived **children** are inside the set without being named. The subtraction **fails closed**: an entry waives protection only when it is explicitly `user_derived=True`, is not a recorded defect, and carries a non-empty note and access model; a table merely *named* in `NON_RLS` with a half-written or contradictory entry stays protected.
+
+The requirement on every protected table, **corrected by Slice 0A measurement**:
+
+- `ENABLE` and `FORCE` — always, no waiver of any kind.
+- **Normally at least one policy.**
+- A deliberately keyhole-only table may *instead* appear in a closed `SEALED_DEFAULT_DENY` registry with a written reason, **exactly zero policies, and zero non-owner table- or column-level ACL grants** (PUBLIC included, read from `pg_class.relacl`/`pg_attribute.attacl`). Default-deny is stricter than any policy, not weaker; the registry proves that claim from `pg_catalog` on every run and says nothing about superusers, whom no ACL restrains.
+
+`identity.account_subject` is the baseline — and so far only — example: Slice 0A's measurement of the live catalogue found it ENABLE+FORCE with zero policies *by design* (`50_audit_auth_deidentification.sql` revokes ALL and routes every access through SECURITY DEFINER keyholes), a state the plan's original "at least one policy" rule would have flagged as a defect. The sealed registry is **not** a `NON_RLS` exemption, is **not** reachable by writing `LIFECYCLE.rls=False`, and is **not** a shortcut for BillShield operational tables — those carry real tenant policies, without exception.
+
+Nothing else exempts a table: not `LIFECYCLE.rls=False`, not the absence of a `LIFECYCLE` entry, not a schema that no list happens to mention.
 
 Slice 0A should implement that algorithm, correct the misleading docstring, and retire or make dynamic the redundant freshness list. It should **not** claim that the entire privacy suite is schema-blind — it is not, and saying so would misdescribe the repository in the direction that flatters it.
 
@@ -1448,9 +1458,9 @@ Slice 0 is **split into three separately governed slices**. They were one slice 
 Work:
 
 - Implement the protected-set algorithm of §4.1 exactly:
-  `protected = {catalogue-derived user-derived tables} − {tables in NON_RLS with a coherent reviewed user-derived justification}`, with user-derivation computed as `test_privacy_inventory.py::_user_derived()` does it, so foreign-key-derived children are covered without being named.
-- Require `ENABLE`, `FORCE`, **and at least one policy** for every table in `protected`.
-- **`LIFECYCLE.rls=False` is not an exemption** and must not be consulted as one. It is recorded evidence; `NON_RLS` is the only reviewed waiver.
+  `protected = {catalogue-derived user-derived tables} − {tables whose NON_RLS entry is a coherent reviewed waiver}`, with user-derivation computed as `test_privacy_inventory.py::_user_derived()` does it, so foreign-key-derived children are covered without being named. The subtraction fails closed: `user_derived=True`, not a defect, non-empty note and access model — or the table stays protected.
+- Require `ENABLE` and `FORCE` for every table in `protected`, and **normally at least one policy**. The one alternative to the policy requirement is the closed `SEALED_DEFAULT_DENY` registry of §4.1 — written reason, exactly zero policies, zero non-owner table/column ACL grants, proven from `pg_catalog` — a condition discovered by Slice 0A's own measurement (`identity.account_subject`). Membership waives only the policy count, never `ENABLE`, `FORCE`, catalogue existence, or privilege closure, and it is not available to ordinary BillShield tenant tables.
+- **`LIFECYCLE.rls=False` is not an exemption** and must not be consulted as one. It is recorded evidence; a coherent `NON_RLS` entry is the only reviewed waiver.
 - Replace the hardcoded schema list in `test_every_user_derived_table_in_every_schema_has_forced_rls` (`test_privilege_invariants.py:277`) with that invariant, covering **any** non-system schema.
 - Correct its docstring, which currently claims coverage of "ALL user-data schemas" that the query does not provide.
 - Make `test_every_tenant_owned_table_has_a_forced_policy` (`test_pd1_privilege_invariants.py:177`) **dynamic**, replacing its `_TENANT_SCHEMAS` bound with the same protected set.
@@ -1923,22 +1933,35 @@ Task B — the protected set, defined subtractively:
 
       protected = { all catalogue-derived user-derived tables }
                   MINUS
-                  { tables explicitly present in NON_RLS with a coherent,
-                    reviewed user-derived justification }
+                  { tables whose NON_RLS entry is a COHERENT reviewed waiver:
+                    user_derived=True, not a defect entry, non-empty note,
+                    non-empty access_model }
 
+  The subtraction FAILS CLOSED: mere presence in NON_RLS exempts nothing.
 - Compute "user-derived" the way test_privacy_inventory.py::_user_derived()
   already does: seed on every user_id column plus identity.user_account,
   propagate along foreign keys, union MANUALLY_DECLARED_USER_DERIVED. This is
   what puts foreign-key-derived CHILD tables inside the set without naming
   them.
-- Require ENABLE, FORCE, and at least one policy for every table in
-  `protected`.
+- Require ENABLE and FORCE for every table in `protected`, and normally at
+  least one policy. The one alternative to the policy count — discovered by
+  Slice 0A's own measurement of identity.account_subject — is a closed
+  SEALED_DEFAULT_DENY registry: written reason, exactly zero policies, zero
+  non-owner table- or column-level ACL grants (PUBLIC included, read from
+  pg_class.relacl and pg_attribute.attacl via aclexplode, never
+  information_schema.role_table_grants). Membership waives ONLY the policy
+  count — never ENABLE, FORCE, catalogue existence, or privilege closure —
+  and is not a shortcut for ordinary tenant tables, BillShield's included.
 - LIFECYCLE.entry.rls=False is NOT an exemption and must not be consulted as
   one. It is recorded evidence of what the database does; it carries no
   authority to waive tenant protection, and a guard that honours it can be
-  defeated by editing a Python file. NON_RLS is the only reviewed waiver.
+  defeated by editing a Python file. A coherent NON_RLS entry is the only
+  reviewed waiver.
 - A table that is user-derived, ENABLE, not FORCE, LIFECYCLE rls=False and
   absent from NON_RLS MUST FAIL the new invariant. Prove this exact case.
+- An INCOHERENT NON_RLS entry (user_derived=False, a defect classification,
+  or an empty note/access_model) must exempt nothing. Prove this directly
+  against the guard's own verdict.
 
 Task C — apply it to the existing guards:
 - Replace the hardcoded schema list in
