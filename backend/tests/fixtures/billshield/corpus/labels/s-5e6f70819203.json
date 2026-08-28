@@ -1,0 +1,54 @@
+{
+  "charges": [
+    {
+      "amount": "51.99",
+      "cadence": {
+        "state": "present",
+        "value": "MONTHLY"
+      },
+      "kind": "RECURRING_FIXED",
+      "label": "TV Essentials package"
+    }
+  ],
+  "expected_outcome": "success",
+  "fields": {
+    "amount_due": {
+      "state": "present",
+      "value": "59.79"
+    },
+    "bill_issuer_name": {
+      "state": "present",
+      "value": "Rivière TV"
+    },
+    "billing_period": {
+      "state": "present",
+      "value": {
+        "end": "2026-07-14",
+        "start": "2026-06-15"
+      }
+    },
+    "payments_applied": {
+      "state": "absent_on_document"
+    },
+    "previous_balance": {
+      "state": "absent_on_document"
+    },
+    "service_category": {
+      "state": "present",
+      "value": "TV"
+    },
+    "statement_date": {
+      "state": "absent_on_document"
+    },
+    "subtotal_before_tax": {
+      "state": "present",
+      "value": "51.99"
+    },
+    "total_tax": {
+      "state": "present",
+      "value": "7.80"
+    }
+  },
+  "label_schema_version": "1.0.0",
+  "promotions": []
+}

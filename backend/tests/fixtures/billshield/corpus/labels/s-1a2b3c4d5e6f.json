@@ -1,0 +1,72 @@
+{
+  "charges": [
+    {
+      "amount": "75.00",
+      "cadence": {
+        "state": "present",
+        "value": "MONTHLY"
+      },
+      "kind": "RECURRING_FIXED",
+      "label": "Forfait mobile 5G"
+    },
+    {
+      "amount": "5.00",
+      "cadence": null,
+      "kind": "FEE",
+      "label": "Frais de réseau"
+    },
+    {
+      "amount": "11.25",
+      "cadence": null,
+      "kind": "TAX",
+      "label": "Taxes (TPS/TVQ)"
+    }
+  ],
+  "expected_outcome": "success",
+  "fields": {
+    "amount_due": {
+      "state": "present",
+      "value": "91.25"
+    },
+    "bill_issuer_name": {
+      "state": "present",
+      "value": "Maple Télécom"
+    },
+    "billing_period": {
+      "state": "present",
+      "value": {
+        "end": "2026-07-31",
+        "start": "2026-07-01"
+      }
+    },
+    "payments_applied": {
+      "state": "absent_on_document"
+    },
+    "previous_balance": {
+      "state": "absent_on_document"
+    },
+    "service_category": {
+      "state": "present",
+      "value": "MOBILE"
+    },
+    "statement_date": {
+      "state": "present",
+      "value": "2026-07-15"
+    },
+    "subtotal_before_tax": {
+      "state": "present",
+      "value": "80.00"
+    },
+    "total_tax": {
+      "state": "present",
+      "value": "11.25"
+    }
+  },
+  "label_schema_version": "1.0.0",
+  "promotions": [
+    {
+      "charge_ref": 0,
+      "expiry_date": "2026-09-30"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "expected_outcome": "refusal",
+  "label_schema_version": "1.0.0",
+  "refusal_code": "UNSUPPORTED_SERVICE_SCOPE"
+}

@@ -329,6 +329,24 @@ DOMAIN_KNOWLEDGE_SPEC = "knowledge_spec"
 # identity that says exactly which knowledge published together — without a
 # release table nothing would need to query.
 DOMAIN_KNOWLEDGE_PACK = "knowledge_pack"
+# BillShield Slice 1. Registering here is how the one-canonicalizer rule is
+# REUSED rather than restated: `domain_hash` refuses an unregistered domain, so
+# BillShield cannot grow a second hash construction. Raw bill artifacts and
+# label files keep plain byte SHA-256 — file integrity is not a semantic
+# canonicalization operation and never hashes under a domain tag.
+#
+# A validated extraction's semantic identity — the candidates a strict parse
+# accepted, never the provider's raw response. This is the "response hash" the
+# secure file pipeline will persist instead of provider output (plan §9.5).
+DOMAIN_BILLSHIELD_EXTRACTION = "billshield_extraction"
+# The evaluation corpus manifest: which samples, under which digests and
+# provenance states, an evaluation claims to have run over. Bound into every
+# evaluation report so a result names exactly what it measured.
+DOMAIN_BILLSHIELD_EVAL_MANIFEST = "billshield_eval_manifest"
+# The evaluation report body. Hashed WITHOUT the hash inside it — the envelope
+# carries {body, report_hash}, so verification recomputes from the body and a
+# report edited after the fact cannot keep its predecessor's identity.
+DOMAIN_BILLSHIELD_EVAL_REPORT = "billshield_eval_report"
 
 ALL_HASH_DOMAINS = (
     DOMAIN_OPTIMIZATION_SPEC, DOMAIN_OPTIMIZATION_RESULT,
@@ -340,6 +358,8 @@ ALL_HASH_DOMAINS = (
     DOMAIN_RETENTION_SNAPSHOT, DOMAIN_RETENTION_CHANGE,
     DOMAIN_SOURCE_LOCATOR,
     DOMAIN_KNOWLEDGE_SPEC, DOMAIN_KNOWLEDGE_PACK,
+    DOMAIN_BILLSHIELD_EXTRACTION, DOMAIN_BILLSHIELD_EVAL_MANIFEST,
+    DOMAIN_BILLSHIELD_EVAL_REPORT,
 )
 
 

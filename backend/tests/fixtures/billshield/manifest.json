@@ -1,0 +1,62 @@
+{
+  "corpus_id": "c-0a1b2c3d4e5f",
+  "label_schema_version": "1.0.0",
+  "manifest_schema_version": "1.0.0",
+  "samples": [
+    {
+      "artifact_format": "pdf_native",
+      "artifact_sha256": "d12dd851410edde6c53be471b5e0ecc045f2000ce935bd36d7a46d5a804edb07",
+      "consent_state": "not_applicable",
+      "label_sha256": "cb1a18610aed3c78741039b7e12767d9cfb17bcbcf41285f1cecb16284c51c0e",
+      "language_layout": "bilingual",
+      "origin": "synthetic",
+      "page_count": 2,
+      "redaction_state": "not_applicable",
+      "sample_id": "s-1a2b3c4d5e6f"
+    },
+    {
+      "artifact_format": "pdf_scanned",
+      "artifact_sha256": "964d383355d416a96d1844b3ccb212bb30d33ccf070d88c83e48913e89f2cba0",
+      "consent_state": "not_applicable",
+      "label_sha256": "0049f614ee600446addb4ce28e7793c9956452ae56339207b437b209d0ac6494",
+      "language_layout": "en",
+      "origin": "synthetic",
+      "page_count": 1,
+      "redaction_state": "not_applicable",
+      "sample_id": "s-2b3c4d5e6f70"
+    },
+    {
+      "artifact_format": "image_png",
+      "artifact_sha256": "32ae4709c69d0a751a1d12a5abc446084cd953865896073db57811c19e57c262",
+      "consent_state": "not_applicable",
+      "label_sha256": "4204953f2831bfd69af90417bd72ae6f6fa4719c393c67fbadca9c8d4be12130",
+      "language_layout": "en",
+      "origin": "synthetic",
+      "page_count": 1,
+      "redaction_state": "not_applicable",
+      "sample_id": "s-3c4d5e6f7081"
+    },
+    {
+      "artifact_format": "image_jpeg",
+      "artifact_sha256": "614b5fb531d8a414cd350bf5553317a5ac1a5059f312779158170f22a63ee69e",
+      "consent_state": "not_applicable",
+      "label_sha256": "2238cc4646d77319c56492137aa3734dc508fd951519a43dc80c365302d84d6f",
+      "language_layout": "fr",
+      "origin": "synthetic",
+      "page_count": 1,
+      "redaction_state": "not_applicable",
+      "sample_id": "s-4d5e6f708192"
+    },
+    {
+      "artifact_format": "pdf_native",
+      "artifact_sha256": "f51f6044e8ef2544a02a4c8d2a625bbd7be1ddd6af3b98aff153288282baf0a0",
+      "consent_state": "not_applicable",
+      "label_sha256": "cce83fe0214af8297bc70755398970acb4775317f212451b9b8e83419af33257",
+      "language_layout": "bilingual",
+      "origin": "synthetic",
+      "page_count": 3,
+      "redaction_state": "not_applicable",
+      "sample_id": "s-5e6f70819203"
+    }
+  ]
+}

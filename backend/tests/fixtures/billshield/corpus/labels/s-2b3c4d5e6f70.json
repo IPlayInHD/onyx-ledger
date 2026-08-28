@@ -1,0 +1,64 @@
+{
+  "charges": [
+    {
+      "amount": "89.99",
+      "cadence": {
+        "state": "present",
+        "value": "MONTHLY"
+      },
+      "kind": "RECURRING_FIXED",
+      "label": "Fibre 500 unlimited"
+    },
+    {
+      "amount": "49.99",
+      "cadence": {
+        "state": "absent_on_document"
+      },
+      "kind": "ONE_TIME",
+      "label": "Installation fee"
+    }
+  ],
+  "expected_outcome": "success",
+  "fields": {
+    "amount_due": {
+      "state": "present",
+      "value": "112.98"
+    },
+    "bill_issuer_name": {
+      "state": "present",
+      "value": "Northern Internet Co."
+    },
+    "billing_period": {
+      "state": "present",
+      "value": {
+        "end": "2026-07-04",
+        "start": "2026-06-05"
+      }
+    },
+    "payments_applied": {
+      "state": "present",
+      "value": "-63.00"
+    },
+    "previous_balance": {
+      "state": "present",
+      "value": "63.00"
+    },
+    "service_category": {
+      "state": "present",
+      "value": "INTERNET"
+    },
+    "statement_date": {
+      "state": "present",
+      "value": "2026-07-08"
+    },
+    "subtotal_before_tax": {
+      "state": "absent_on_document"
+    },
+    "total_tax": {
+      "state": "present",
+      "value": "13.00"
+    }
+  },
+  "label_schema_version": "1.0.0",
+  "promotions": []
+}

@@ -355,6 +355,27 @@ def test_decimal_bounds_are_semantic_type_specific():
     assert c.MAX_SIGNIFICANT_DIGITS > 30    # a sanity guard, not a policy bound
 
 
+def test_billshield_domains_are_registered_and_separated():
+    """BillShield Slice 1 registered three domains; this pins them by name.
+
+    The generic domain-separation test above already covers whatever is in
+    ALL_HASH_DOMAINS, which means it would keep passing if these were removed —
+    so their registration is asserted explicitly, and their separation from
+    each other is what stops an extraction standing in for the report that
+    evaluated it.
+    """
+    billshield = (
+        c.DOMAIN_BILLSHIELD_EXTRACTION,
+        c.DOMAIN_BILLSHIELD_EVAL_MANIFEST,
+        c.DOMAIN_BILLSHIELD_EVAL_REPORT,
+    )
+    for domain in billshield:
+        assert domain in c.ALL_HASH_DOMAINS, f"{domain} is not registered"
+    payload = {"same": "payload"}
+    digests = {c.domain_hash(domain, payload) for domain in billshield}
+    assert len(digests) == 3, "billshield domains failed to separate"
+
+
 def test_score_breakdown_with_large_raw_value_canonicalizes():
     """Regression: ScoreComponent.raw_value holds NUMERIC(18,6) quantities."""
     from app.services.ioe.domain.enums import ScoreFactor

@@ -1,0 +1,785 @@
+{
+  "32ae4709c69d0a751a1d12a5abc446084cd953865896073db57811c19e57c262": {
+    "refusal": {
+      "code": "UNSUPPORTED_SERVICE_SCOPE"
+    },
+    "schema_version": "1.0.0"
+  },
+  "614b5fb531d8a414cd350bf5553317a5ac1a5059f312779158170f22a63ee69e": {
+    "extraction": {
+      "amount_due": {
+        "confidence": "0.98",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.95",
+            "y0": "0.9",
+            "y1": "0.94"
+          }
+        ],
+        "state": "present",
+        "value": "16.99"
+      },
+      "bill_issuer_name": {
+        "confidence": "0.94",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.45",
+            "y0": "0.03",
+            "y1": "0.07"
+          }
+        ],
+        "state": "present",
+        "value": "Ruisseau Streaming"
+      },
+      "billing_period": {
+        "confidence": "0.93",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.55",
+            "x1": "0.95",
+            "y0": "0.07",
+            "y1": "0.1"
+          }
+        ],
+        "state": "present",
+        "value": {
+          "end": "2026-07-31",
+          "start": "2026-07-01"
+        }
+      },
+      "charges": [
+        {
+          "amount": {
+            "confidence": "0.97",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.7",
+                "x1": "0.92",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "16.99"
+          },
+          "cadence": {
+            "confidence": "0.9",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.56",
+                "x1": "0.64",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "MONTHLY"
+          },
+          "kind": "RECURRING_FIXED",
+          "kind_confidence": "0.95",
+          "label": {
+            "confidence": "0.98",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.55",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "Abonnement mensuel"
+          },
+          "service_period": {
+            "state": "no_candidate"
+          }
+        }
+      ],
+      "currency": "CAD",
+      "payments_applied": {
+        "state": "no_candidate"
+      },
+      "previous_balance": {
+        "state": "no_candidate"
+      },
+      "promotions": [],
+      "service_category": {
+        "confidence": "0.92",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.3",
+            "y0": "0.08",
+            "y1": "0.11"
+          }
+        ],
+        "state": "present",
+        "value": "STREAMING"
+      },
+      "statement_date": {
+        "confidence": "0.95",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.6",
+            "x1": "0.9",
+            "y0": "0.03",
+            "y1": "0.06"
+          }
+        ],
+        "state": "present",
+        "value": "2026-07-01"
+      },
+      "subtotal_before_tax": {
+        "state": "no_candidate"
+      },
+      "total_tax": {
+        "state": "no_candidate"
+      }
+    },
+    "schema_version": "1.0.0"
+  },
+  "964d383355d416a96d1844b3ccb212bb30d33ccf070d88c83e48913e89f2cba0": {
+    "extraction": {
+      "amount_due": {
+        "confidence": "0.97",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.95",
+            "y0": "0.9",
+            "y1": "0.94"
+          }
+        ],
+        "state": "present",
+        "value": "112.98"
+      },
+      "bill_issuer_name": {
+        "confidence": "0.92",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.45",
+            "y0": "0.03",
+            "y1": "0.07"
+          }
+        ],
+        "state": "present",
+        "value": "Northern Internet Co."
+      },
+      "billing_period": {
+        "confidence": "0.9",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.55",
+            "x1": "0.95",
+            "y0": "0.07",
+            "y1": "0.1"
+          }
+        ],
+        "state": "present",
+        "value": {
+          "end": "2026-07-04",
+          "start": "2026-06-05"
+        }
+      },
+      "charges": [
+        {
+          "amount": {
+            "confidence": "0.97",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.7",
+                "x1": "0.92",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "89.99"
+          },
+          "cadence": {
+            "confidence": "0.9",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.56",
+                "x1": "0.64",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "MONTHLY"
+          },
+          "kind": "RECURRING_FIXED",
+          "kind_confidence": "0.94",
+          "label": {
+            "confidence": "0.98",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.55",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "Fibre 500 unlimited"
+          },
+          "service_period": {
+            "state": "no_candidate"
+          }
+        },
+        {
+          "amount": {
+            "confidence": "0.97",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.7",
+                "x1": "0.92",
+                "y0": "0.46",
+                "y1": "0.49"
+              }
+            ],
+            "state": "present",
+            "value": "49.99"
+          },
+          "cadence": {
+            "state": "no_candidate"
+          },
+          "kind": "ONE_TIME",
+          "kind_confidence": "0.9",
+          "label": {
+            "confidence": "0.98",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.55",
+                "y0": "0.46",
+                "y1": "0.49"
+              }
+            ],
+            "state": "present",
+            "value": "Installation fee"
+          },
+          "service_period": {
+            "state": "no_candidate"
+          }
+        }
+      ],
+      "currency": "CAD",
+      "payments_applied": {
+        "confidence": "0.9",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.9",
+            "y0": "0.24",
+            "y1": "0.27"
+          }
+        ],
+        "state": "present",
+        "value": "-63.00"
+      },
+      "previous_balance": {
+        "confidence": "0.9",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.9",
+            "y0": "0.2",
+            "y1": "0.23"
+          }
+        ],
+        "state": "present",
+        "value": "63.00"
+      },
+      "promotions": [],
+      "service_category": {
+        "confidence": "0.9",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.3",
+            "y0": "0.08",
+            "y1": "0.11"
+          }
+        ],
+        "state": "present",
+        "value": "INTERNET"
+      },
+      "statement_date": {
+        "confidence": "0.95",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.6",
+            "x1": "0.9",
+            "y0": "0.03",
+            "y1": "0.06"
+          }
+        ],
+        "state": "present",
+        "value": "2026-07-08"
+      },
+      "subtotal_before_tax": {
+        "state": "no_candidate"
+      },
+      "total_tax": {
+        "confidence": "0.9",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.9",
+            "y0": "0.8",
+            "y1": "0.83"
+          }
+        ],
+        "state": "present",
+        "value": "13.00"
+      }
+    },
+    "schema_version": "1.0.0"
+  },
+  "d12dd851410edde6c53be471b5e0ecc045f2000ce935bd36d7a46d5a804edb07": {
+    "extraction": {
+      "amount_due": {
+        "confidence": "0.99",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.95",
+            "y0": "0.9",
+            "y1": "0.94"
+          },
+          {
+            "page": 2,
+            "x0": "0.7",
+            "x1": "0.95",
+            "y0": "0.1",
+            "y1": "0.14"
+          }
+        ],
+        "state": "present",
+        "value": "91.25"
+      },
+      "bill_issuer_name": {
+        "confidence": "0.97",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.4",
+            "y0": "0.03",
+            "y1": "0.07"
+          }
+        ],
+        "state": "present",
+        "value": "Maple Télécom"
+      },
+      "billing_period": {
+        "confidence": "0.94",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.6",
+            "x1": "0.95",
+            "y0": "0.07",
+            "y1": "0.1"
+          }
+        ],
+        "state": "present",
+        "value": {
+          "end": "2026-07-31",
+          "start": "2026-07-01"
+        }
+      },
+      "charges": [
+        {
+          "amount": {
+            "confidence": "0.97",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.7",
+                "x1": "0.92",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "75.00"
+          },
+          "cadence": {
+            "confidence": "0.9",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.56",
+                "x1": "0.64",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "MONTHLY"
+          },
+          "kind": "RECURRING_FIXED",
+          "kind_confidence": "0.95",
+          "label": {
+            "confidence": "0.98",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.55",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "Forfait mobile 5G"
+          },
+          "service_period": {
+            "state": "no_candidate"
+          }
+        },
+        {
+          "amount": {
+            "confidence": "0.97",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.7",
+                "x1": "0.92",
+                "y0": "0.46",
+                "y1": "0.49"
+              }
+            ],
+            "state": "present",
+            "value": "5.00"
+          },
+          "cadence": {
+            "state": "no_candidate"
+          },
+          "kind": "FEE",
+          "kind_confidence": "0.9",
+          "label": {
+            "confidence": "0.98",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.55",
+                "y0": "0.46",
+                "y1": "0.49"
+              }
+            ],
+            "state": "present",
+            "value": "Frais de réseau"
+          },
+          "service_period": {
+            "state": "no_candidate"
+          }
+        },
+        {
+          "amount": {
+            "confidence": "0.97",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.7",
+                "x1": "0.92",
+                "y0": "0.52",
+                "y1": "0.55"
+              }
+            ],
+            "state": "present",
+            "value": "11.25"
+          },
+          "cadence": {
+            "state": "no_candidate"
+          },
+          "kind": "TAX",
+          "kind_confidence": "0.92",
+          "label": {
+            "confidence": "0.98",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.55",
+                "y0": "0.52",
+                "y1": "0.55"
+              }
+            ],
+            "state": "present",
+            "value": "Taxes (TPS/TVQ)"
+          },
+          "service_period": {
+            "state": "no_candidate"
+          }
+        }
+      ],
+      "currency": "CAD",
+      "payments_applied": {
+        "state": "no_candidate"
+      },
+      "previous_balance": {
+        "state": "no_candidate"
+      },
+      "promotions": [
+        {
+          "charge_index": 0,
+          "expiry_date": {
+            "confidence": "0.88",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.6",
+                "y0": "0.58",
+                "y1": "0.61"
+              }
+            ],
+            "state": "present",
+            "value": "2026-09-30"
+          }
+        }
+      ],
+      "service_category": {
+        "confidence": "0.93",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.3",
+            "y0": "0.08",
+            "y1": "0.11"
+          }
+        ],
+        "state": "present",
+        "value": "MOBILE"
+      },
+      "statement_date": {
+        "confidence": "0.96",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.6",
+            "x1": "0.9",
+            "y0": "0.03",
+            "y1": "0.06"
+          }
+        ],
+        "state": "present",
+        "value": "2026-07-15"
+      },
+      "subtotal_before_tax": {
+        "confidence": "0.95",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.92",
+            "y0": "0.78",
+            "y1": "0.81"
+          }
+        ],
+        "state": "present",
+        "value": "80.00"
+      },
+      "total_tax": {
+        "confidence": "0.95",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.92",
+            "y0": "0.82",
+            "y1": "0.85"
+          }
+        ],
+        "state": "present",
+        "value": "11.25"
+      }
+    },
+    "schema_version": "1.0.0"
+  },
+  "f51f6044e8ef2544a02a4c8d2a625bbd7be1ddd6af3b98aff153288282baf0a0": {
+    "extraction": {
+      "amount_due": {
+        "confidence": "0.98",
+        "evidence": [
+          {
+            "page": 3,
+            "x0": "0.7",
+            "x1": "0.95",
+            "y0": "0.9",
+            "y1": "0.94"
+          }
+        ],
+        "state": "present",
+        "value": "59.79"
+      },
+      "bill_issuer_name": {
+        "confidence": "0.95",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.35",
+            "y0": "0.03",
+            "y1": "0.07"
+          }
+        ],
+        "state": "present",
+        "value": "Rivière TV"
+      },
+      "billing_period": {
+        "confidence": "0.93",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.55",
+            "x1": "0.95",
+            "y0": "0.07",
+            "y1": "0.1"
+          }
+        ],
+        "state": "present",
+        "value": {
+          "end": "2026-07-14",
+          "start": "2026-06-15"
+        }
+      },
+      "charges": [
+        {
+          "amount": {
+            "confidence": "0.97",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.7",
+                "x1": "0.92",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "51.99"
+          },
+          "cadence": {
+            "confidence": "0.9",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.56",
+                "x1": "0.64",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "MONTHLY"
+          },
+          "kind": "RECURRING_FIXED",
+          "kind_confidence": "0.96",
+          "label": {
+            "confidence": "0.98",
+            "evidence": [
+              {
+                "page": 1,
+                "x0": "0.05",
+                "x1": "0.55",
+                "y0": "0.40",
+                "y1": "0.43"
+              }
+            ],
+            "state": "present",
+            "value": "TV Essentials package"
+          },
+          "service_period": {
+            "state": "no_candidate"
+          }
+        }
+      ],
+      "currency": "CAD",
+      "payments_applied": {
+        "state": "no_candidate"
+      },
+      "previous_balance": {
+        "state": "no_candidate"
+      },
+      "promotions": [],
+      "service_category": {
+        "confidence": "0.92",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.05",
+            "x1": "0.2",
+            "y0": "0.08",
+            "y1": "0.11"
+          }
+        ],
+        "state": "present",
+        "value": "TV"
+      },
+      "statement_date": {
+        "state": "no_candidate"
+      },
+      "subtotal_before_tax": {
+        "confidence": "0.94",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.92",
+            "y0": "0.78",
+            "y1": "0.81"
+          }
+        ],
+        "state": "present",
+        "value": "51.99"
+      },
+      "total_tax": {
+        "confidence": "0.9",
+        "evidence": [
+          {
+            "page": 1,
+            "x0": "0.7",
+            "x1": "0.92",
+            "y0": "0.82",
+            "y1": "0.85"
+          }
+        ],
+        "state": "present",
+        "value": "7.80"
+      }
+    },
+    "schema_version": "1.0.0"
+  }
+}
