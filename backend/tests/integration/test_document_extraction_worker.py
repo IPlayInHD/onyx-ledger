@@ -371,11 +371,26 @@ def _run_task(*args, **kwargs):
 
 
 def test_the_task_is_registered_and_routed_to_the_queue_that_was_already_waiting():
-    """The route existed and pointed at nothing. This is what it points at now."""
+    """The route existed and pointed at nothing. This is what it points at now.
+
+    REGISTERED FOR A REAL WORKER, not for this process. The import at the top
+    of this file has already run the registering decorator here, so asserting
+    against this process's `celery_app.tasks` would pass with `include`
+    emptied entirely — which is exactly how the task stayed declared, routed,
+    and unregistered in production for as long as it did (integration plan
+    §4.2). The evidence instead comes from a fresh subprocess that imports
+    only `workers.celery_app` and performs the worker's own default-module
+    loading, the shape a real `celery -A workers.celery_app worker` start has.
+    """
+    from tests.security.test_celery_registration import clean_worker_start_evidence
     from workers.celery_app import celery_app
 
     assert extract_document.name == "workers.tasks.documents.extract_document"
-    assert extract_document.name in celery_app.tasks
+    assert extract_document.name in clean_worker_start_evidence()["registered"], (
+        "the task this file exercises is not registered by a clean worker "
+        "start — its module is missing from celery_app include, so the "
+        "documents queue is consumed by workers that reject every message"
+    )
     assert celery_app.conf.task_routes["workers.tasks.documents.*"] == {"queue": "documents"}
 
 

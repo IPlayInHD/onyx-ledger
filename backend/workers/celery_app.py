@@ -20,6 +20,7 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=[
         "workers.tasks.analysis",
+        "workers.tasks.documents",
         "workers.tasks.maintenance",
         "workers.tasks.privacy",
         "workers.tasks.tkms",
