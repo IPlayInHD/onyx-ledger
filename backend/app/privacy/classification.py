@@ -827,6 +827,68 @@ _ENTRIES: tuple[TableLifecycle, ...] = (
              "Deletion must also revoke it at the provider — "
              "EXTERNAL_PROVIDER_REVIEW_REQUIRED."),
 
+    # ----------------------------------------------------------- billshield
+    # The BillShield database foundation. Retention is RETAINED_PENDING_REVIEW
+    # throughout: the plan's §7.5 durations are RECOMMENDATIONS awaiting legal
+    # sign-off, and RetentionClass deliberately names a policy rather than a
+    # number so the engineering can be built before the number is agreed.
+    _e("billshield.bill", (P.DOCUMENT_BINARY, P.PSEUDONYMOUS_IDENTIFIER),
+       S.SOURCE, R.RETAINED_PENDING_REVIEW, D.CUSTOM_WORKFLOW, rls=True,
+       on_user_deletion=U.SOFT_DELETE,
+       notes="The row is metadata; the bill bytes live in the encrypted "
+             "versioned bucket. `storage_key` is GENERATED from user_id and id, "
+             "so it can carry no filename and can name no other tenant's row. "
+             "Deletion is TWO facts kept apart: `deleted_at` is logical — the "
+             "customer asked and the artifact stops being served immediately — "
+             "and `erased_at` is stamped only once the privacy worker has "
+             "proven every object version gone, which is Slice 3 work. "
+             "CUSTOM_WORKFLOW because the account-deletion path must erase the "
+             "source object through the extended DOCUMENTS phase BEFORE the "
+             "database cascade removes the row that names it."),
+    _e("billshield.extraction_run",
+       (P.DOCUMENT_EXTRACTED_DATA, P.FINANCIAL_SOURCE_DATA),
+       S.DERIVED, R.RETAINED_PENDING_REVIEW, D.CASCADE_DELETE, rls=True,
+       immutable=True,
+       on_user_deletion=U.VIA_PARENT, purge=G.VIA_PARENT_CASCADE,
+       notes="One extraction attempt: normalized bill-level candidates with "
+             "amounts read off the document, adapter provenance, and the "
+             "response hash. It stores NO raw provider payload and no provider "
+             "exception text. RLS resolves through billshield.bill; the "
+             "composite FK binds it to that bill's finalized digest, so it can "
+             "never be repointed at another artifact. A NULL candidate means "
+             "the extractor produced no candidate — never that the document "
+             "lacked the field."),
+    _e("billshield.charge_candidate",
+       (P.DOCUMENT_EXTRACTED_DATA, P.FINANCIAL_SOURCE_DATA),
+       S.DERIVED, R.RETAINED_PENDING_REVIEW, D.CASCADE_DELETE, rls=True,
+       immutable=True,
+       on_user_deletion=U.VIA_PARENT, purge=G.VIA_PARENT_CASCADE,
+       notes="Unconfirmed charge candidates: label, exact Decimal amount, kind "
+             "and per-field evidence locations. IMMUTABLE by trigger — a user's "
+             "correction is not an edit here, it becomes a structurally "
+             "distinct confirmed observation in a later slice, so the "
+             "extraction stays reproducible and its hash recomputable. RLS "
+             "resolves through extraction_run to bill."),
+    _e("billshield.promotion_candidate", (P.DOCUMENT_EXTRACTED_DATA,),
+       S.DERIVED, R.RETAINED_PENDING_REVIEW, D.CASCADE_DELETE, rls=True,
+       immutable=True,
+       on_user_deletion=U.VIA_PARENT, purge=G.VIA_PARENT_CASCADE,
+       notes="An expiry date PRINTED on the bill, never inferred, bound to a "
+             "charge position within the same extraction run. Carries no "
+             "amount, which is why it holds no FINANCIAL_SOURCE_DATA. "
+             "Immutable; RLS resolves through extraction_run to bill."),
+    _e("billshield.job_outbox",
+       (P.PSEUDONYMOUS_IDENTIFIER, P.OPERATIONAL_TELEMETRY),
+       S.OPERATIONAL, R.SHORT_OPERATIONAL, D.CASCADE_DELETE, rls=True,
+       on_user_deletion=U.NOT_USER_DELETABLE,
+       notes="Transactional job intent: identifiers, one closed task code, an "
+             "opaque dedupe key and relay bookkeeping. No column here can hold "
+             "bill content, a filename, or provider exception text. Owned "
+             "compositely by (bill_id, user_id) so a job can never name one "
+             "tenant beside another tenant's bill. The API's grant is a "
+             "COLUMN-SCOPED enqueue insert; claim, complete and fail are Slice "
+             "3 keyholes."),
+
     # ---------------------------------------------------------------- audit
     _e("audit.security_event", (P.AUDIT_SECURITY_RECORD,),
        S.AUDIT, R.BOUNDED_AUDIT, D.DE_IDENTIFY,
@@ -1060,6 +1122,24 @@ _NON_RLS: tuple[NonRlsTable, ...] = (
        "Named planning assumptions shared by every scenario."),
     _n("ioe.assumption_set", N.GLOBAL_SYSTEM_STATE, _GRANTS_RO,
        "Versioned collections of the above."),
+    _n("billshield.provider", N.GLOBAL_REFERENCE_OR_REGISTRY,
+       "SELECT only to onyx_app_rw; written by migrations/operators under "
+       "onyx_migrator; no administrative writer exists until the catalogue "
+       "slice; PUBLIC revoked",
+       "Global commercial-provider identity — code, name, country. No tenant "
+       "data of any kind, so RLS would protect nothing and would break the "
+       "shared catalogue every tenant reads. Deliberately carries NO category "
+       "column: a Canadian provider spans mobile, internet, television, home "
+       "phone and bundles, and a scalar would have to lie about all but one. "
+       "Nothing joins it to the untrusted bill_issuer_name extracted from a "
+       "document; that deterministic resolver is a later slice."),
+    _n("billshield.provider_category", N.GLOBAL_REFERENCE_OR_REGISTRY,
+       "SELECT only to onyx_app_rw; written by migrations/operators under "
+       "onyx_migrator; PUBLIC revoked",
+       "Which governed service categories a provider offers, one row per "
+       "capability, unique per (provider, category). Global reference data "
+       "mirroring the committed extraction contract's ServiceCategory "
+       "vocabulary; no tenant data, no issuer inference."),
     _n("billing.plan", N.GLOBAL_SYSTEM_STATE, _GRANTS_RO,
        "Product catalogue. No customer data."),
     _n("ai.knowledge_embedding", N.GLOBAL_SYSTEM_STATE, _GRANTS_RW,

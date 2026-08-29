@@ -79,6 +79,96 @@
       "reason": "Governed column-comment divergence."
     },
     {
+      "key": "modify_comment|billshield|bill|deleted_at",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "deleted_at",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|bill|erased_at",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "erased_at",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|bill|storage_key",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "storage_key",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|extraction_run|input_sha256",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "input_sha256",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|extraction_run|issuer_name_value",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "issuer_name_value",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|extraction_run|response_hash",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "response_hash",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|job_outbox|claim_state",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "claim_state",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|job_outbox|dedupe_key",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "dedupe_key",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
+      "key": "modify_comment|billshield|provider|code",
+      "kind": "modify_comment",
+      "schema": "billshield",
+      "table": "provider",
+      "object": "code",
+      "detail": "",
+      "class": "COLUMN_COMMENT_METADATA",
+      "reason": "Governed column-comment divergence."
+    },
+    {
       "key": "modify_comment|identity|account_lifecycle_phase|last_failure_code",
       "kind": "modify_comment",
       "schema": "identity",
@@ -414,6 +504,66 @@
       "schema": "billing",
       "table": "subscription",
       "object": "status",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|billshield|bill|row_version",
+      "kind": "modify_default",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "row_version",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|billshield|bill|status",
+      "kind": "modify_default",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "status",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|billshield|extraction_run|status",
+      "kind": "modify_default",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "status",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|billshield|job_outbox|attempts",
+      "kind": "modify_default",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "attempts",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|billshield|job_outbox|claim_state",
+      "kind": "modify_default",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "claim_state",
+      "detail": "",
+      "class": "SERVER_DEFAULT_OWNED_BY_SQL",
+      "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
+    },
+    {
+      "key": "modify_default|billshield|provider|country",
+      "kind": "modify_default",
+      "schema": "billshield",
+      "table": "provider",
+      "object": "country",
       "detail": "",
       "class": "SERVER_DEFAULT_OWNED_BY_SQL",
       "reason": "Server default declared in backend/db/sql. The ORM sets its Python-side default instead, so the two are describing different layers."
@@ -2465,6 +2615,356 @@
       "table": "subscription",
       "object": "status",
       "detail": "TEXT->String",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|amount",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "amount",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|amount_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "amount_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|amount_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "amount_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|cadence_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "cadence_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|cadence_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "cadence_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|kind_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "kind_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|label_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "label_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|label_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "label_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|service_period_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "service_period_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|charge_candidate|service_period_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "service_period_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|amount_due_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "amount_due_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|amount_due_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "amount_due_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|amount_due_value",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "amount_due_value",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|billing_period_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "billing_period_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|billing_period_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "billing_period_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|issuer_name_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "issuer_name_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|issuer_name_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "issuer_name_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|payments_applied_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "payments_applied_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|payments_applied_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "payments_applied_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|payments_applied_value",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "payments_applied_value",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|previous_balance_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "previous_balance_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|previous_balance_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "previous_balance_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|previous_balance_value",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "previous_balance_value",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|service_category_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "service_category_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|service_category_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "service_category_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|statement_date_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "statement_date_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|statement_date_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "statement_date_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|subtotal_before_tax_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "subtotal_before_tax_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|subtotal_before_tax_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "subtotal_before_tax_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|subtotal_before_tax_value",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "subtotal_before_tax_value",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|total_tax_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "total_tax_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|total_tax_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "total_tax_evidence",
+      "detail": "DOMAIN->JSONB",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|extraction_run|total_tax_value",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "total_tax_value",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|promotion_candidate|expiry_confidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "promotion_candidate",
+      "object": "expiry_confidence",
+      "detail": "DOMAIN->Numeric",
+      "class": "TYPE_AFFINITY",
+      "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
+    },
+    {
+      "key": "modify_type|billshield|promotion_candidate|expiry_evidence",
+      "kind": "modify_type",
+      "schema": "billshield",
+      "table": "promotion_candidate",
+      "object": "expiry_evidence",
+      "detail": "DOMAIN->JSONB",
       "class": "TYPE_AFFINITY",
       "reason": "PostgreSQL-specific type the ORM column declares generically: TEXT for an unbounded String, CITEXT for a case-insensitive one, or a money_amt domain for Numeric. The stored type is the specific one; the recorded type pair is part of this entry's identity, so a change to a DIFFERENT type is not covered by it."
     },
@@ -4984,6 +5484,616 @@
       "schema": "billing",
       "table": "subscription",
       "object": "subscription_status_check",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_artifact_format",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_artifact_format",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_artifact_is_whole",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_artifact_is_whole",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_byte_size",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_byte_size",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_deletion_timestamps",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_deletion_timestamps",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_erasure_follows_deletion",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_erasure_follows_deletion",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_file_sha256",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_file_sha256",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_page_count",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_page_count",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_pending_is_not_finalized",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_pending_is_not_finalized",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_processing_has_artifact",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_processing_has_artifact",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_row_version",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_row_version",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|bill|ck_billshield_bill_status",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ck_billshield_bill_status",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_cadence_kind",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_cadence_kind",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_cadence_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_cadence_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_cadence_value",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_cadence_value",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_confidence_bounds",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_confidence_bounds",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_kind",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_kind",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_label_length",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_label_length",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_position",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_position",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_service_period_ordered",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_service_period_ordered",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_service_period_quad",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_service_period_quad",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|charge_candidate|ck_billshield_charge_sign",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ck_billshield_charge_sign",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_adapter_pair",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_adapter_pair",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_currency",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_currency",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_failure_code",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_failure_code",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_failure_coherent",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_failure_coherent",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_input_sha256",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_input_sha256",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_prompt_needs_adapter",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_prompt_needs_adapter",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_refusal_code",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_refusal_code",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_refusal_coherent",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_refusal_coherent",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_response_hash",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_response_hash",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_status",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_status",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_success_coherent",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_success_coherent",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_terminal_identity",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_terminal_identity",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_extraction_run_terminal_is_stamped",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_extraction_run_terminal_is_stamped",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_amount_due_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_amount_due_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_billing_period_ordered",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_billing_period_ordered",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_billing_period_quad",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_billing_period_quad",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_confidence_bounds",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_confidence_bounds",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_issuer_name_length",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_issuer_name_length",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_issuer_name_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_issuer_name_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_payments_applied_sign",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_payments_applied_sign",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_payments_applied_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_payments_applied_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_previous_balance_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_previous_balance_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_service_category_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_service_category_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_service_category_value",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_service_category_value",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_statement_date_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_statement_date_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_subtotal_before_tax_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_subtotal_before_tax_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|extraction_run|ck_billshield_run_total_tax_triple",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ck_billshield_run_total_tax_triple",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|job_outbox|ck_billshield_job_outbox_attempts",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ck_billshield_job_outbox_attempts",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|job_outbox|ck_billshield_job_outbox_claim_is_coherent",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ck_billshield_job_outbox_claim_is_coherent",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|job_outbox|ck_billshield_job_outbox_claim_state",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ck_billshield_job_outbox_claim_state",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|job_outbox|ck_billshield_job_outbox_claimed_by",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ck_billshield_job_outbox_claimed_by",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|job_outbox|ck_billshield_job_outbox_task_code",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ck_billshield_job_outbox_task_code",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|job_outbox|ck_billshield_job_outbox_terminal_is_stamped",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ck_billshield_job_outbox_terminal_is_stamped",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|promotion_candidate|ck_billshield_promotion_charge_position",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "promotion_candidate",
+      "object": "ck_billshield_promotion_charge_position",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|promotion_candidate|ck_billshield_promotion_confidence_bounds",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "promotion_candidate",
+      "object": "ck_billshield_promotion_confidence_bounds",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|promotion_candidate|ck_billshield_promotion_position",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "promotion_candidate",
+      "object": "ck_billshield_promotion_position",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|provider_category|ck_billshield_provider_category_value",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "provider_category",
+      "object": "ck_billshield_provider_category_value",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|provider|ck_billshield_provider_code",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "provider",
+      "object": "ck_billshield_provider_code",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|provider|ck_billshield_provider_country",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "provider",
+      "object": "ck_billshield_provider_country",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_CHECK",
+      "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
+    },
+    {
+      "key": "remove_constraint|billshield|provider|ck_billshield_provider_name",
+      "kind": "remove_constraint",
+      "schema": "billshield",
+      "table": "provider",
+      "object": "ck_billshield_provider_name",
       "detail": "",
       "class": "RAW_SQL_MANAGED_CHECK",
       "reason": "CHECK constraint created by backend/db/sql. Enumerations and range guards live with the DDL that owns them; duplicating them in the ORM would let two sources try to create the same constraint."
@@ -8439,6 +9549,116 @@
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
     },
     {
+      "key": "remove_index|billshield|bill|ix_billshield_bill_deletion_pending",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ix_billshield_bill_deletion_pending",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|bill|ix_billshield_bill_user",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "ix_billshield_bill_user",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|charge_candidate|ix_billshield_charge_candidate_run",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "ix_billshield_charge_candidate_run",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|extraction_run|ix_billshield_extraction_run_bill",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "ix_billshield_extraction_run_bill",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|extraction_run|uq_billshield_extraction_run_live",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "uq_billshield_extraction_run_live",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|job_outbox|ix_billshield_job_outbox_bill",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ix_billshield_job_outbox_bill",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|job_outbox|ix_billshield_job_outbox_claimed",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ix_billshield_job_outbox_claimed",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|job_outbox|ix_billshield_job_outbox_pending",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ix_billshield_job_outbox_pending",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|job_outbox|ix_billshield_job_outbox_user",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "ix_billshield_job_outbox_user",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|promotion_candidate|ix_billshield_promotion_candidate_run",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "promotion_candidate",
+      "object": "ix_billshield_promotion_candidate_run",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_index|billshield|provider_category|ix_billshield_provider_category_provider",
+      "kind": "remove_index",
+      "schema": "billshield",
+      "table": "provider_category",
+      "object": "ix_billshield_provider_category_provider",
+      "detail": "",
+      "class": "RAW_SQL_MANAGED_INDEX",
+      "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
       "key": "remove_index|docs|document_extraction|ix_extraction_document",
       "kind": "remove_index",
       "schema": "docs",
@@ -9877,6 +11097,76 @@
       "detail": "",
       "class": "RAW_SQL_MANAGED_INDEX",
       "reason": "Index created by backend/db/sql, including partial, expression, and HNSW vector indexes the ORM cannot express."
+    },
+    {
+      "key": "remove_table_comment|billshield|bill|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "billshield",
+      "table": "bill",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|billshield|charge_candidate|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "billshield",
+      "table": "charge_candidate",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|billshield|extraction_run|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "billshield",
+      "table": "extraction_run",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|billshield|job_outbox|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "billshield",
+      "table": "job_outbox",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|billshield|promotion_candidate|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "billshield",
+      "table": "promotion_candidate",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|billshield|provider_category|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "billshield",
+      "table": "provider_category",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
+    },
+    {
+      "key": "remove_table_comment|billshield|provider|<table_comment>",
+      "kind": "remove_table_comment",
+      "schema": "billshield",
+      "table": "provider",
+      "object": "<table_comment>",
+      "detail": "",
+      "class": "TABLE_COMMENT_METADATA",
+      "reason": "Governed table-comment divergence."
     },
     {
       "key": "remove_table_comment|identity|account_subject|<table_comment>",

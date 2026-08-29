@@ -47,6 +47,15 @@ from app.database.models.billing import (  # noqa: F401
     Plan,
     Subscription,
 )
+from app.database.models.billshield import (  # noqa: F401
+    Bill,
+    ChargeCandidate,
+    ExtractionRun,
+    JobOutbox,
+    PromotionCandidate,
+    Provider,
+    ProviderCategory,
+)
 from app.database.models.docs import (  # noqa: F401
     Document,
     DocumentExtraction,

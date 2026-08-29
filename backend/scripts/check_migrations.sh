@@ -14,12 +14,19 @@ HEAD=$(PYTHONPATH=. alembic heads 2>/dev/null | awk '{print $1}' | head -1)
 CUR=$(PYTHONPATH=. alembic current 2>/dev/null | awk '{print $1}' | head -1)
 [ -n "$HEAD" ] && [ "$CUR" = "$HEAD" ] || { echo "FAIL: current($CUR) != head($HEAD)"; exit 1; }
 N=$(psql "postgres://${SUPER}@/onyx_migrate?host=${PGHOST}&port=${PGPORT}" -tAc \
-  "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND NOT c.relispartition AND n.nspname IN ('ref','identity','profile','finance','wealth','tax_kb','rules','analysis','reco','ai','docs','admin','billing','audit');")
+  "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND NOT c.relispartition AND n.nspname IN ('ref','identity','profile','finance','wealth','tax_kb','rules','analysis','reco','ai','docs','admin','billing','audit','billshield');")
 echo "alembic upgrade head -> $N tables"
 [ "$N" -ge 80 ] || { echo "FAIL: expected >=80 tables, got $N"; exit 1; }
 
+# The repository-wide floor above cannot notice a domain that failed to build:
+# 80 is met with or without BillShield. Assert its seven base tables by name.
+BS=$(psql "postgres://${SUPER}@/onyx_migrate?host=${PGHOST}&port=${PGPORT}" -tAc \
+  "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND NOT c.relispartition AND n.nspname='billshield';")
+[ "$BS" = "7" ] || { echo "FAIL: expected 7 billshield tables, got $BS"; exit 1; }
+echo "billshield foundation -> $BS tables"
+
 PYTHONPATH=. alembic downgrade base
 LEFT=$(psql "postgres://${SUPER}@/onyx_migrate?host=${PGHOST}&port=${PGPORT}" -tAc \
-  "SELECT count(*) FROM information_schema.schemata WHERE schema_name IN ('ref','identity','profile','finance','wealth','tax_kb','rules','analysis','reco','ai','docs','admin','billing','audit');")
+  "SELECT count(*) FROM information_schema.schemata WHERE schema_name IN ('ref','identity','profile','finance','wealth','tax_kb','rules','analysis','reco','ai','docs','admin','billing','audit','billshield');")
 [ "$LEFT" = "0" ] || { echo "FAIL: $LEFT schemas left after downgrade base"; exit 1; }
 echo "migration smoke OK (upgrade head + downgrade base)"

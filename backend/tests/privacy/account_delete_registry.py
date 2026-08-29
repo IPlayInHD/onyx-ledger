@@ -197,6 +197,110 @@ REGISTRY: dict[str, Entry] = {
     "billing.entitlement": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.payment_method_ref": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
     "billing.subscription": Entry(state=UNCLASSIFIED_BLOCKING, depth=1),
+    "billshield.bill": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="LIVE_USER_DATA_DELETE",
+        reason_code="CONTENT_ERASED_BEFORE_ACCOUNT_REMOVAL",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "Live customer data: one uploaded bill's metadata, deleted with "
+            "the account by its own ON DELETE CASCADE from "
+            "identity.user_account. The row holds no bytes and no filename — "
+            "storage_key is GENERATED from user_id and id — so the row's "
+            "removal destroys nothing that has to survive. The SOURCE OBJECT "
+            "is a separate obligation: the extended DOCUMENTS privacy phase "
+            "erases it before terminal removal, and `erased_at` is the column "
+            "that records that it happened. That worker is Slice 3; until it "
+            "exists the feature is disabled and no customer bill can be here."
+        ),
+        evidence_references=(
+            "db/sql/67_billshield_foundation.sql:216",
+            "app/privacy/classification.py:830",
+        ),
+        row_state_dependent=True,
+        state_conditioned_cleanup=(
+            "A bill in deletion_pending carries deleted_at and no erased_at: "
+            "logically gone for the customer, physically still in the bucket. "
+            "Account deletion must not treat that state as finished — the "
+            "DOCUMENTS phase erases the object and stamps erased_at, and only "
+            "then does the cascade remove the row."
+        ),
+    ),
+    "billshield.job_outbox": Entry(
+        state=CLASSIFIED,
+        depth=1,
+        classification="DERIVED_DELETE",
+        reason_code="OPERATIONAL_QUEUE",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "Transient relay queue, the same shape as ioe.freshness_outbox: "
+            "identifiers, one closed task code, an opaque dedupe key and lease "
+            "bookkeeping. No column can hold bill content, a filename or "
+            "provider text, so nothing here is evidence that must outlive its "
+            "own drain. It cascades from the account directly and, "
+            "compositely, from the bill it names."
+        ),
+        evidence_references=(
+            "db/sql/67_billshield_foundation.sql:436",
+            "db/sql/29_ioe_outbox_and_projection.sql:114",
+        ),
+    ),
+    "billshield.extraction_run": Entry(
+        state=CLASSIFIED,
+        depth=2,
+        classification="DERIVED_DELETE",
+        reason_code="DERIVED_FROM_DELETED_SOURCE",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "Everything here is derived from one customer bill: normalized "
+            "candidates, adapter provenance and a response hash. When the bill "
+            "goes the derivation has no subject, and nothing retains it — no "
+            "replay contract depends on it, and the raw provider payload it "
+            "deliberately does not store could not be reconstructed anyway. "
+            "Reached at depth 2 through the composite FK to billshield.bill."
+        ),
+        evidence_references=(
+            "db/sql/67_billshield_foundation.sql:289",
+            "app/privacy/classification.py:846",
+        ),
+    ),
+    "billshield.charge_candidate": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="DERIVED_DELETE",
+        reason_code="DERIVED_FROM_DELETED_SOURCE",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "Unconfirmed extracted charges belonging to one extraction of one "
+            "bill. They are immutable extracted facts, never a user's "
+            "confirmed record — a correction becomes a structurally distinct "
+            "observation in a later slice — so deleting them with their bill "
+            "destroys no decision the customer made. Cascades through "
+            "extraction_run at depth 3."
+        ),
+        evidence_references=(
+            "db/sql/67_billshield_foundation.sql:389",
+            "app/privacy/classification.py:858",
+        ),
+    ),
+    "billshield.promotion_candidate": Entry(
+        state=CLASSIFIED,
+        depth=3,
+        classification="DERIVED_DELETE",
+        reason_code="DERIVED_FROM_DELETED_SOURCE",
+        evidence_quality="DIRECT_SCHEMA_EVIDENCE",
+        rationale=(
+            "An expiry date printed on one bill, bound to a charge of the same "
+            "extraction. Same derivation and same fate as its sibling "
+            "candidates: it carries no amount and no confirmed user decision, "
+            "and it cannot outlive the bill it was read from."
+        ),
+        evidence_references=(
+            "db/sql/67_billshield_foundation.sql:424",
+            "app/privacy/classification.py:870",
+        ),
+    ),
     "docs.document": Entry(
         state=CLASSIFIED,
         depth=1,

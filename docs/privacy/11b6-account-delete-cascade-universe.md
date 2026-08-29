@@ -4,9 +4,25 @@ The exact set of tables reachable from `identity.user_account` through
 all-CASCADE paths, computed with the corrected walker (recurse only when the
 edge being traversed is `confdeltype='c'`) and independently reconfirmed.
 
-    cascade-reachable tables   73
+    cascade-reachable tables   79
     maximum depth               3 (shortest-path representation)
     direct inbound FKs         39  (35 CASCADE, 4 SET NULL)
+
+Direct-edge figures re-measured against a freshly migrated database with the
+repository's own `direct_inbound_edges()` walker, before and after the
+BillShield foundation revision:
+
+    at revision 0073 (pre-BillShield)   37  (33 CASCADE, 4 SET NULL)
+    at head        (post-BillShield)    39  (35 CASCADE, 4 SET NULL)
+
+The delta is exactly the two new CASCADE edges BillShield adds —
+`billshield.bill.user_id` and `billshield.job_outbox.user_id` — and no SET NULL
+edge moved. Note what that means for the line above: **39 / 35 / 4 is the
+measured post-BillShield figure**, so it is correct as written and was left
+unchanged. It was the PRE-BillShield document that overstated its own live
+count by two; the number is right today by measurement, not by luck being
+undisturbed. Anyone re-checking it should re-measure rather than reason from
+this paragraph.
 
 Widened from 70 by the Tax Decision Journal entry (migration 0068), which adds
 `ioe.decision_journal` (depth 1) and `ioe.decision_journal_event` (depth 2) —
@@ -19,6 +35,25 @@ baseline, classified LIVE_USER_DATA_DELETE before the migration shipped. Its
 self-referencing `supersedes_checkpoint_id` FK is also CASCADE, so a successor
 checkpoint cannot outlive the predecessor it supersedes; the table's shortest
 path from `identity.user_account` remains depth 1 through its own `user_id`.
+
+Widened to 74 by the legal-acceptance entry, which adds
+`identity.legal_acceptance` (depth 1).
+
+Widened again to 79 by the BillShield database foundation, which adds five
+tenant-derived tables: `billshield.bill` and `billshield.job_outbox` (depth 1,
+each by its own `user_id` CASCADE), `billshield.extraction_run` (depth 2,
+through the composite key that binds it to its bill and that bill's finalized
+digest), and `billshield.charge_candidate` and
+`billshield.promotion_candidate` (depth 3, through the extraction run). All
+five were classified from schema evidence before the migration shipped, per the
+registry workflow. The two BillShield GLOBAL tables — `billshield.provider` and
+`billshield.provider_category` — hold no tenant data, have no FK path from the
+account, and are therefore absent from this set by construction; their waiver
+is a reviewed `NON_RLS` entry, not an omission.
+
+The header figure above was still reading 73 when the legal-acceptance row was
+added; it is corrected here rather than left to drift further, and the row set
+below is the authority either way.
 
 Superseded figures: **73 tables**, **31 protected**, **6-edge cut-set**. Those
 came from the walker that gated on the inbound edge's action and are not to be
@@ -37,6 +72,7 @@ reused.
 | `ai` | 4 |
 | `docs` | 4 |
 | `billing` | 4 |
+| `billshield` | 5 |
 | `reco` | 3 |
 | `audit` | 1 |
 
@@ -54,6 +90,8 @@ An unclassified row is an open item, not a default.
 | 1 | `billing.entitlement` | — |
 | 1 | `billing.payment_method_ref` | — |
 | 1 | `billing.subscription` | — |
+| 1 | `billshield.bill` | — |
+| 1 | `billshield.job_outbox` | — |
 | 1 | `docs.document` | — |
 | 1 | `finance.expense_record` | — |
 | 1 | `finance.expense_record_default` | — |
@@ -91,6 +129,7 @@ An unclassified row is an open item, not a default.
 | 2 | `analysis.analysis_line_item` | — |
 | 2 | `analysis.reconciliation_check` | — |
 | 2 | `billing.invoice` | — |
+| 2 | `billshield.extraction_run` | — |
 | 2 | `docs.document_extraction` | — |
 | 2 | `docs.document_link` | — |
 | 2 | `ioe.decision_journal_event` | — |
@@ -113,6 +152,8 @@ An unclassified row is an open item, not a default.
 | 2 | `wealth.registered_account_detail` | — |
 | 3 | `ai.ai_message_citation` | — |
 | 3 | `ai.ai_prompt_context` | — |
+| 3 | `billshield.charge_candidate` | — |
+| 3 | `billshield.promotion_candidate` | — |
 | 3 | `docs.extraction_field` | — |
 | 3 | `ioe.candidate_cost` | — |
 | 3 | `ioe.candidate_economic_effect` | — |

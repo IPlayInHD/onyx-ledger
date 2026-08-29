@@ -58,7 +58,7 @@ def test_the_registry_covers_the_certified_universe_exactly():
             assert m.group(2) not in doc, f"duplicate row in universe doc: {m.group(2)}"
             doc[m.group(2)] = int(m.group(1))
 
-    assert len(doc) == 74, f"the universe doc parsed to {len(doc)} tables, not 74"
+    assert len(doc) == 79, f"the universe doc parsed to {len(doc)} tables, not 79"
     assert sorted(set(doc) - set(REGISTRY)) == []
     assert sorted(set(REGISTRY) - set(doc)) == []
     assert {t: e.depth for t, e in REGISTRY.items()} == doc
@@ -194,8 +194,8 @@ def test_the_evidenced_classifications_are_exactly_the_ones_that_were_read():
     counted.
     """
     classified = sorted(t for t, e in REGISTRY.items() if e.state == CLASSIFIED)
-    assert len(classified) == 70, (
-        f"{len(classified)} classified, expected 70. Every entry here was "
+    assert len(classified) == 75, (
+        f"{len(classified)} classified, expected 75. Every entry here was "
         "argued from a writer, a reader and a measured lifecycle fate — a "
         "count that moved without that work is the failure this file exists "
         "to catch."
@@ -285,7 +285,7 @@ def test_question_b_the_terminal_delete_gate_fails_closed():
         assert_terminal_account_delete_ready()
 
     message = str(excinfo.value)
-    assert "4" in message and "74" in message
+    assert "4" in message and "79" in message
     assert "UNCLASSIFIED_BLOCKING" in message, (
         "the failure must name the workflow state, or the reader will read it as "
         "a retention verdict"
@@ -360,8 +360,8 @@ def test_every_unresolved_surface_has_a_stated_reason():
     )
 
 
-def test_the_accounting_reconciles_to_seventy_two():
-    """70 classified plus 4 explained, and nothing else.
+def test_the_accounting_reconciles_to_the_certified_universe():
+    """75 classified plus 4 explained, and nothing else.
 
     Widened twice, and each widening was the classification work rather than a
     number being edited. Migration 0068 (Decision Journal) added two
@@ -369,10 +369,14 @@ def test_the_accounting_reconciles_to_seventy_two():
     one more — argued from its writer, its single reader (the gate), and a
     measured lifecycle fate: untouched by all four privacy phases and removed
     by the account cascade, with the surviving evidence deliberately placed in
-    audit.consent_log instead."""
+    audit.consent_log instead. The BillShield database foundation added five
+    more — two roots that cascade from the account and three derivations that
+    cascade from a bill — each argued from the schema that creates it, and none
+    of them moving the blocker count, which is the number that may only change
+    when a POLICY question is answered."""
     classified = {t for t, e in REGISTRY.items() if e.state == CLASSIFIED}
     accounted = set().union(*UNRESOLVED_REASONS.values())
-    assert len(classified) + len(accounted) == 74
+    assert len(classified) + len(accounted) == 79
     assert classified.isdisjoint(accounted)
     assert classified | accounted == set(REGISTRY)
 

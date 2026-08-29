@@ -19,6 +19,7 @@ SQL_DIR = Path(__file__).resolve().parents[2] / "db" / "sql"
 SCHEMAS = [
     "ref", "identity", "profile", "finance", "wealth", "tax_kb", "rules",
     "analysis", "reco", "ai", "docs", "admin", "billing", "audit", "tkms", "ioe",
+    "billshield",
 ]
 ROLES = ["onyx_app_rw", "onyx_app_ro", "onyx_kb_admin", "onyx_audit_writer", "onyx_migrator"]
 

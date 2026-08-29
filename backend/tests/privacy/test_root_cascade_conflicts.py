@@ -163,14 +163,15 @@ def test_the_registry_did_not_shrink_when_the_graph_did(cur):
     `DROP CONSTRAINT`.
 
     THE NUMBER MAY GROW, and has: 73 to 74 when B4 added
-    identity.legal_acceptance. Growth is a migration widening what deletion
+    identity.legal_acceptance, and 74 to 79 when the BillShield database
+    foundation added its five tenant-derived tables. Growth is a migration widening what deletion
     destroys, and the oracle beside this file demands a registry entry before a
     table may enter the closure at all. What THIS assertion forbids is the
     opposite — a table quietly leaving because somebody dropped a foreign key.
     """
     live = set(cascade_reachable(cur, ROOT))
-    assert len(REGISTRY) == 74, (
-        f"the certified privacy universe is {len(REGISTRY)} tables, not 74"
+    assert len(REGISTRY) == 79, (
+        f"the certified privacy universe is {len(REGISTRY)} tables, not 79"
     )
     assert len(live) < len(REGISTRY), (
         "the live closure is no smaller than the certified universe; 0060's "
