@@ -344,6 +344,18 @@ def freshness_dsn() -> str:
     return _runtime_dsn("ONYX_FRESHNESS_DATABASE_URL", "onyx_freshness_test")
 
 
+def billshield_dsn() -> str:
+    """The dedicated BillShield-worker login. Not a member of `onyx_app_rw`.
+
+    The BillShield security suite makes its SUCCESS claims through this login
+    rather than through `SET ROLE` from the owner connection, because the owner
+    is a cluster superuser in the harness and a superuser bypasses RLS
+    unconditionally — a tenant-isolation assertion made from that session would
+    pass against a database with every policy removed (plan §5.4.8).
+    """
+    return _runtime_dsn("ONYX_BILLSHIELD_DATABASE_URL", "onyx_billshield_test")
+
+
 def frozen_snapshot(
     *, tax_year: int = 2025, jurisdiction: str = "ON", **fields
 ) -> tuple[dict, str]:

@@ -81,6 +81,34 @@ TIER2_PATHS = (
     "app/integrations/bill_extraction.py",
 )
 
+#: The generic request-path unit of work. BillShield BACKGROUND code may not
+#: reach it (§5.4.4); BillShield API routes may, because the API is
+#: `onyx_app_rw` by design and a BillShield route is an ordinary request.
+GENERIC_UNIT_OF_WORK = "app.database.session"
+
+#: The Tier 2 members that are BACKGROUND processing — the split of §5.4.4 and
+#: §5.4.11 row 15. Everything in TIER2_PATHS that is not listed here is request
+#: handling and keeps the shared path.
+#:
+#: THE PROHIBITION IS NOT "IT WOULD RUN AS onyx_app_rw". Under the required
+#: `db_secret = "billshield"` the container's generic engine authenticates as
+#: the restricted credential too. The three accurate grounds are: it bypasses
+#: the named, no-fallback `billshield_database_url` contract; it makes the
+#: engine registry non-load-bearing, and with it fail-closed configuration and
+#: single-path disposal; and it can activate a second connection pool, which is
+#: exactly what the capacity ceiling of §5.4.10 turns on.
+TIER2_BACKGROUND_PATHS = (
+    "app/services/billshield/service.py",
+    "workers/tasks/billshield.py",
+    "app/integrations/bill_extraction.py",
+)
+
+#: Slice 3A's restricted units of work, which background code uses INSTEAD.
+BILLSHIELD_UNITS_OF_WORK = (
+    "app.database.privacy_session.billshield_claim_unit_of_work",
+    "app.database.privacy_session.billshield_unit_of_work",
+)
+
 #: Packages that OWN tax semantics and must never import BillShield. An
 #: explicit roster, reviewed like RESERVED_ROUTES: platform packages are
 #: deliberately absent because the shared API process must reach BillShield.
@@ -184,6 +212,23 @@ def tier2_violations(files: Iterable[Path], root: Path) -> list[str]:
     return violations
 
 
+def background_session_violations(files: Iterable[Path], root: Path) -> list[str]:
+    """BillShield BACKGROUND modules reaching the generic request session.
+
+    Judged on the resolved dotted target, so `from app.database.session import
+    unit_of_work`, `from app.database import session`, and
+    `import app.database.session` are all caught — the binding is what matters,
+    not how it is spelt.
+    """
+    violations: list[str] = []
+    for source_file in files:
+        parts = _package_parts(source_file, root)
+        for target in sorted(_import_targets(source_file, parts)):
+            if _matches(target, GENERIC_UNIT_OF_WORK):
+                violations.append(f"{source_file.relative_to(root)}: {target}")
+    return violations
+
+
 def tax_owned_violations(files: Iterable[Path], root: Path) -> list[str]:
     """Tax-owned code may not import BillShield — the §16.1 direction that
     has no grant behind it."""
@@ -208,6 +253,31 @@ def _tier1_files() -> list[Path]:
 def _tier2_files() -> list[Path]:
     files: list[Path] = []
     for entry in TIER2_PATHS:
+        path = BACKEND / entry
+        if path.is_dir():
+            files.extend(_python_files(path))
+        elif path.is_file():
+            files.append(path)
+    return files
+
+
+def _tier2_background_files() -> list[Path]:
+    files: list[Path] = []
+    for entry in TIER2_BACKGROUND_PATHS:
+        path = BACKEND / entry
+        if path.is_dir():
+            files.extend(_python_files(path))
+        elif path.is_file():
+            files.append(path)
+    return files
+
+
+def _tier2_request_files() -> list[Path]:
+    background = set(TIER2_BACKGROUND_PATHS)
+    files: list[Path] = []
+    for entry in TIER2_PATHS:
+        if entry in background:
+            continue
         path = BACKEND / entry
         if path.is_dir():
             files.extend(_python_files(path))
@@ -262,6 +332,36 @@ def test_tax_owned_code_does_not_import_billshield():
     assert not violations, (
         "tax-owned code imported BillShield — §13.4's static direction:\n  "
         + "\n  ".join(violations))
+
+
+# ---------------------------------------------------------------------------
+# The background / request split (§5.4.4, §5.4.11 row 15)
+# ---------------------------------------------------------------------------
+def test_billshield_background_modules_do_not_reach_the_generic_session():
+    """Membership is empty until Slice 3C adds the task — and that is the
+    point: the RULE exists now, so the slice that adds a background module adds
+    a file, not an exemption."""
+    violations = background_session_violations(_tier2_background_files(), BACKEND)
+    assert not violations, (
+        "BillShield background processing must use "
+        f"{' or '.join(BILLSHIELD_UNITS_OF_WORK)}, never the generic request "
+        "session:\n  " + "\n  ".join(violations))
+
+
+def test_the_background_roster_is_a_strict_subset_of_tier_two():
+    """A background path that fell out of TIER2_PATHS would be scanned by
+    neither guard."""
+    assert set(TIER2_BACKGROUND_PATHS) < set(TIER2_PATHS)
+
+
+def test_the_restricted_units_of_work_the_split_points_at_actually_exist():
+    """Naming a replacement that does not exist would make the prohibition a
+    dead end rather than a redirection."""
+    import importlib
+    for dotted in BILLSHIELD_UNITS_OF_WORK:
+        module_name, _, attribute = dotted.rpartition(".")
+        module = importlib.import_module(module_name)
+        assert hasattr(module, attribute), dotted
 
 
 # ---------------------------------------------------------------------------
@@ -333,3 +433,51 @@ def test_relative_imports_resolve_before_judgement(tmp_path):
                "from . import codes\nfrom .contract import Present\n"),
     ]
     assert tier1_violations(planted, tmp_path) == []
+
+
+def test_the_background_split_fails_on_a_planted_generic_session_import(tmp_path):
+    """Non-vacuity for §5.4.11 row 15, in both directions on one tree.
+
+    The forbidden background import must be caught however it is spelt, and the
+    permitted API-route import must pass — otherwise the rule would be either
+    decorative or a ban on the request path the API legitimately uses.
+    """
+    background = [
+        _plant(tmp_path, "workers/tasks/billshield.py",
+               "from app.database.session import unit_of_work\n"),
+        _plant(tmp_path, "app/services/billshield/service.py",
+               "from app.database import session\n"),
+        _plant(tmp_path, "app/integrations/bill_extraction.py",
+               "import app.database.session\n"),
+    ]
+    violations = background_session_violations(background, tmp_path)
+    assert len(violations) == 3, violations
+    assert all("app.database.session" in v for v in violations)
+
+
+def test_the_background_split_permits_the_api_route_and_the_restricted_uow(
+        tmp_path):
+    # A BillShield API route is an ordinary request: the shared path is correct
+    # for it, and banning it repository-wide would be wrong. The exemption is
+    # structural — the route is a Tier 2 member that the BACKGROUND roster
+    # deliberately omits — so that is what is asserted, rather than feeding the
+    # route to a scanner whose whole job is to reject that import.
+    assert "app/api/v1/billshield" in TIER2_PATHS
+    assert "app/api/v1/billshield" not in TIER2_BACKGROUND_PATHS, (
+        "the split must not reach request handling"
+    )
+    _plant(tmp_path, "app/api/v1/billshield/routes.py",
+           "from app.database.session import unit_of_work\n")
+    assert not any(
+        "app/api/v1/billshield" in str(path)
+        for path in _tier2_background_files()
+    ), "an API route entered the background roster"
+
+    background = [
+        _plant(tmp_path, "workers/tasks/billshield_ok.py",
+               "from app.database.privacy_session import "
+               "billshield_unit_of_work, billshield_claim_unit_of_work\n"),
+    ]
+    assert background_session_violations(background, tmp_path) == [], (
+        "the restricted units of work are what background code SHOULD reach"
+    )

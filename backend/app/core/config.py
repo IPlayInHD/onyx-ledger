@@ -68,8 +68,28 @@ class Settings(BaseSettings):
     #: as `privacy_database_url`: PD-16 is precisely this capability being
     #: reachable from the application identity.
     freshness_database_url: str | None = None
+    #: The RESTRICTED BillShield worker connection. Same contract and same
+    #: reason as the two above, pointing the other way: this identity is not
+    #: privileged, it is CONFINED, and a silent fallback to `database_url` would
+    #: collapse the confinement back to `onyx_app_rw` on any host where the
+    #: operator forgot to set it. It would do so invisibly — the worker would
+    #: run, the bills would process, and the isolation would simply not exist.
+    #: Absent means the BillShield worker refuses to run.
+    billshield_database_url: str | None = None
     db_pool_size: int = 10
     db_max_overflow: int = 20
+
+    # --- BillShield ---
+    #: THE ONE SWITCH. It decides three things at once: whether the production
+    #: DSN validator below applies, whether BillShield refuses customer work
+    #: before any database write or enqueue, and whether a zero worker count is
+    #: a legitimate deployment rather than a routed-but-undrained queue.
+    #:
+    #: Defaulted to false because BillShield ships dormant. That is also why the
+    #: DSN validator is CONDITIONAL: an unconditional one would refuse to start
+    #: production for a feature nobody can reach, which is a guard whose only
+    #: effect is an outage.
+    billshield_enabled: bool = False
 
     # --- redis ---
     redis_url: str = "redis://localhost:6379/0"
@@ -413,6 +433,43 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ONYX_APP_PUBLIC_URL must be https in production; a "
                 "single-use recovery token must not travel in a cleartext URL"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _production_billshield_runtime_is_real(self) -> Settings:
+        """An ENABLED BillShield in production must name its own connection.
+
+        Same shape and same argument as the three validators above: the failure
+        belongs at startup, where it is loud, rather than in a deployment
+        checklist, where it is silent.
+
+        WHY THIS ONE IS CONDITIONAL and the others are not. Nothing today covers
+        `privacy_database_url` or `freshness_database_url`, and those two
+        runtimes are always deployed. BillShield is not: it ships disabled, and
+        an unconditional validator would refuse to start production for a
+        feature no customer can reach. The condition is therefore the same
+        setting that gates customer reachability — if BillShield is off, an
+        absent DSN is the correct state, not an oversight.
+
+        WHY ABSENCE IS FATAL RATHER THAN A FALLBACK. `billshield_database_url`
+        has no default precisely so that a host which never set it fails closed.
+        Falling back to `database_url` would hand the component that parses
+        untrusted bill files the application's own identity — the whole of what
+        the separate role, the enumerated grants and the RLS confinement exist
+        to prevent — and would do it without a single error.
+
+        The message names the environment variable and nothing else. A
+        validation error travels into logs, so it must not carry a DSN.
+        """
+        if self.environment != "production" or not self.billshield_enabled:
+            return self
+        if not self.billshield_database_url:
+            raise ValueError(
+                "ONYX_BILLSHIELD_DATABASE_URL must be set when BillShield is "
+                "enabled in production; there is no fallback to the "
+                "application connection, because that fallback would silently "
+                "run bill processing as the API's own database identity"
             )
         return self
 

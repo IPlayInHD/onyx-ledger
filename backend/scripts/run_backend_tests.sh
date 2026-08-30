@@ -38,17 +38,30 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_freshness_test') THEN
     CREATE ROLE onyx_freshness_test LOGIN PASSWORD 'test' IN ROLE onyx_freshness_worker;
   END IF;
+  -- And the same again for BillShield (Slice 3A). The suite proves the
+  -- worker's confinement by BEING it, and the owner connection cannot stand in:
+  -- it is a cluster superuser here, and a superuser bypasses RLS
+  -- unconditionally, so every cross-tenant assertion would pass against a
+  -- database with the policies removed.
+  --
+  -- Deliberately NOT `IN ROLE onyx_app_rw`, for the same reason as the two
+  -- above: the restricted runtime gets its capability and nothing else.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onyx_billshield_test') THEN
+    CREATE ROLE onyx_billshield_test LOGIN PASSWORD 'test' IN ROLE onyx_billshield_worker;
+  END IF;
 END
 $$;
 GRANT onyx_app_rw TO onyx_test;
 GRANT onyx_privacy_worker TO onyx_privacy_test;
 GRANT onyx_freshness_worker TO onyx_freshness_test;
+GRANT onyx_billshield_worker TO onyx_billshield_test;
 SQL
 
 export ONYX_DATABASE_URL="postgresql+asyncpg://onyx_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
 # The privileged worker connects as its OWN login, modelling production.
 export ONYX_PRIVACY_DATABASE_URL="postgresql+asyncpg://onyx_privacy_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
 export ONYX_FRESHNESS_DATABASE_URL="postgresql+asyncpg://onyx_freshness_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
+export ONYX_BILLSHIELD_DATABASE_URL="postgresql+asyncpg://onyx_billshield_test:test@/onyx_test?host=${PGHOST}&port=${PGPORT}"
 export ONYX_JWT_SECRET="test-secret-at-least-32-bytes-long-000"
 
 # Arguments REPLACE the default target rather than adding to it. `tests/ $@`

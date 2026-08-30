@@ -32,10 +32,21 @@ SUITE_ROLE=onyx_secproof
 # suite at all — it would report "already failing" and prove nothing.
 PRIVACY_ROLE=onyx_secproof_privacy
 FRESHNESS_ROLE=onyx_secproof_freshness
+# And the RESTRICTED runtime, for a reason that is not symmetry. The BillShield
+# security suite lives under tests/security, so this gate runs it — and
+# `billshield_dsn()` falls back to a FIXED database name when its variable is
+# absent. Without this role and its export, those tests would connect to
+# `onyx_test` while every other assertion in the run certified
+# `onyx_sec_proof`: a guard pointed at a different database than the one under
+# proof, which is the exact defect `tests/conftest.py::_runtime_dsn` was
+# written to stop. It showed up here as a red baseline, not as a silent pass,
+# only because those tests need a login that can actually reach the fixtures.
+BILLSHIELD_ROLE=onyx_secproof_billshield
 
 export ONYX_DATABASE_URL="postgresql+asyncpg://${SUITE_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
 export ONYX_PRIVACY_DATABASE_URL="postgresql+asyncpg://${PRIVACY_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
 export ONYX_FRESHNESS_DATABASE_URL="postgresql+asyncpg://${FRESHNESS_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
+export ONYX_BILLSHIELD_DATABASE_URL="postgresql+asyncpg://${BILLSHIELD_ROLE}:test@/${DB}?host=${PGHOST}&port=${PGPORT}"
 export ONYX_JWT_SECRET="${ONYX_JWT_SECRET:-security-gate-proof-secret-32-bytes-x}"
 
 # ONE DESTRUCTIVE RUN AT A TIME.
@@ -95,11 +106,18 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${FRESHNESS_ROLE}') THEN
     CREATE ROLE ${FRESHNESS_ROLE} LOGIN PASSWORD 'test' IN ROLE onyx_freshness_worker;
   END IF;
+  -- The RESTRICTED runtime, and the same rule: its capability and nothing
+  -- else. It is the reverse direction of the two above — confined rather than
+  -- privileged — but the topology under test is the same one either way.
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${BILLSHIELD_ROLE}') THEN
+    CREATE ROLE ${BILLSHIELD_ROLE} LOGIN PASSWORD 'test' IN ROLE onyx_billshield_worker;
+  END IF;
 END
 \$\$;
 GRANT onyx_app_rw TO ${SUITE_ROLE};
 GRANT onyx_privacy_worker TO ${PRIVACY_ROLE};
 GRANT onyx_freshness_worker TO ${FRESHNESS_ROLE};
+GRANT onyx_billshield_worker TO ${BILLSHIELD_ROLE};
 SQL
 
 # The suite connects as ${SUITE_ROLE}, a member of onyx_app_rw — NOT as a superuser.

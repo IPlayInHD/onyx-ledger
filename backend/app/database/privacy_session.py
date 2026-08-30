@@ -1,4 +1,12 @@
-"""The privileged privacy-worker database connection (Entry 11B5E5).
+"""The separately-authenticated worker database connections (Entry 11B5E5).
+
+NOT ALL OF THEM ARE PRIVILEGED, and the file's original name predates that.
+`privacy` and `freshness` hold capabilities the request path must not be able to
+assume. `billshield` is the opposite case: it is a CONFINED identity that holds
+less than the application does, because the component that parses untrusted bill
+files should not be able to reach a tax record. Both directions need the same
+mechanism — a separate `session_user` with its own no-fallback DSN — which is
+why they share this registry.
 
 WHY A SECOND ENGINE. `app.database.session.engine` authenticates as the normal
 application runtime, and PD-16 is the proof of what happens when a privileged
@@ -16,8 +24,10 @@ separation exists to make impossible. Absent configuration refuses to run.
 from __future__ import annotations
 
 import contextlib
+import uuid
 from collections.abc import AsyncIterator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -55,13 +65,65 @@ class WorkerRuntimeUnavailable(DomainError):
         super().__init__(f"{runtime} worker database runtime is not configured")
 
 
+class BillShieldRuntimeUnavailable(WorkerRuntimeUnavailable):
+    """The restricted BillShield connection is not configured.
+
+    A SUBTYPE, not a rewrite of the base. The base class's `error_type` and
+    `title` still say "privacy" because the privacy and freshness runtimes
+    already emit them and a BillShield slice must not change what an existing
+    client sees for two unrelated runtimes. What it must also not do is emit
+    "Privacy Runtime Unavailable" for a bill-worker misconfiguration, which
+    would point an incident at the account-deletion pipeline.
+
+    The safety rule is inherited unchanged and is absolute: no DSN, host,
+    database name, username, role name, port or driver text may appear in the
+    type, the title, the detail or the log record. The runtime NAME is the whole
+    of what may be disclosed, and it is what the operator needs.
+    """
+
+    error_type = "https://onyx.ledger/errors/billshield-runtime-unavailable"
+    title = "BillShield Runtime Unavailable"
+
+    #: THE RUNTIME NAME IS A CONSTANT OF THE CLASS, and `__init__` takes no
+    #: argument at all. A parameter with a safe default would still be a
+    #: parameter: any caller — most plausibly one catching this and re-raising
+    #: "with a bit more context" — could put a DSN fragment, a host, or a
+    #: provider's exception text into a message that travels into logs and task
+    #: failure records. There is nothing to pass, so there is nothing to abuse.
+    RUNTIME = "billshield"
+
+    def __init__(self) -> None:
+        super().__init__(self.RUNTIME)
+
+
+#: Which closed error a runtime's missing configuration raises. A registry for
+#: the same reason `_engines` is one: a runtime added without an entry here gets
+#: the base class's behaviour, which is still fail-closed and still leaks
+#: nothing — the mapping upgrades the operator signal, it does not gate safety.
+#:
+#: Entries are constructed with NO arguments, which is what keeps the closed
+#: token closed at the one site that could reopen it.
+_UNAVAILABLE: dict[str, type[WorkerRuntimeUnavailable]] = {
+    "billshield": BillShieldRuntimeUnavailable,
+}
+
+
 def get_worker_engine(runtime: str) -> AsyncEngine:
     """Build (once) the engine a privileged runtime authenticates through."""
     settings = get_settings()
+    # ADDING A RUNTIME MEANS ADDING A KEY HERE, not only a setting: an
+    # unregistered name raises KeyError on this line, BEFORE the fail-closed
+    # check below, which is an unhandled error instead of the governed code.
     dsn = {"privacy": settings.privacy_database_url,
-           "freshness": settings.freshness_database_url}[runtime]
+           "freshness": settings.freshness_database_url,
+           "billshield": settings.billshield_database_url}[runtime]
     if not dsn:
-        raise WorkerRuntimeUnavailable(runtime)
+        # A runtime with its own closed error type constructs itself and takes
+        # no argument, so the name cannot be re-supplied here. Everything else
+        # falls back to the shared base, which still names its runtime and is
+        # unchanged for the privacy and freshness callers that rely on it.
+        closed = _UNAVAILABLE.get(runtime)
+        raise closed() if closed is not None else WorkerRuntimeUnavailable(runtime)
     if runtime not in _engines:
         _engines[runtime] = create_async_engine(
             dsn,
@@ -119,6 +181,66 @@ async def freshness_unit_of_work() -> AsyncIterator[AsyncSession]:
         raise
     finally:
         await session.close()
+
+
+@contextlib.asynccontextmanager
+async def billshield_claim_unit_of_work() -> AsyncIterator[AsyncSession]:
+    """ONLY for the privileged BillShield keyholes — claim, complete, fail.
+
+    NO TENANT CONTEXT, by omission and by design. Claiming crosses tenants:
+    the worker asks the queue for whatever is next, and it cannot know whose
+    row that will be until it has one. A worker that asserted a tenant here
+    would be claiming an authorization it does not have — the same argument
+    `privacy_unit_of_work` makes for the purge.
+
+    Shape copied from `privacy_unit_of_work` rather than invented: explicit
+    commit on success, rollback on any exception, and `close()` in `finally` so
+    the connection returns to the pool on every path.
+    """
+    get_worker_engine("billshield")
+    # THE CALL ABOVE COMES FIRST, and it is not defensive style. The factory
+    # registry is populated as a side effect of building the engine, so reading
+    # it directly is a KeyError on the first use in a fresh process — precisely
+    # the condition a worker boots in. It is also what keeps the engine inside
+    # the registry that disposal iterates.
+    session = _factories["billshield"]()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+
+
+@contextlib.asynccontextmanager
+async def billshield_unit_of_work(user_id: uuid.UUID) -> AsyncIterator[AsyncSession]:
+    """One tenant's BillShield work, as the restricted BillShield principal.
+
+    `user_id` is REQUIRED, unlike `unit_of_work`, which accepts `None` because
+    anonymous authentication genuinely needs it. BillShield has no such caller,
+    and an optional parameter would make "no tenant context" reachable by
+    forgetting rather than by deciding.
+
+    Both GUCs go in ONE statement — `session.py` records that two statements
+    meant two round trips on every transaction — and both are transaction-local,
+    because connections are pooled and a context that outlived its transaction
+    would be served to the next user of that connection.
+
+    The actor is `'system'`. `app.actor_type` carries a closed database-enforced
+    vocabulary of `user`/`admin`/`system`; a service-specific actor would be a
+    governed migration widening that set, not a free choice made here.
+    """
+    get_worker_engine("billshield")            # registry first — see above
+    async with _factories["billshield"]() as session:
+        async with session.begin():            # commit on exit, rollback on raise
+            await session.execute(
+                text("SELECT set_config('app.actor_type', :atype, true),"
+                     "       set_config('app.user_id', :uid, true)"),
+                {"atype": "system", "uid": str(user_id)},
+            )
+            yield session
 
 
 async def dispose_worker_engines() -> None:

@@ -44,12 +44,14 @@ INTENDED_TABLE_ACL: dict[str, dict[str, set[str]]] = {
         "onyx_app_rw": {"SELECT"},          # runtime read-only catalogue
     },
     "billshield.bill": {
-        # SELECT only at table level: the create is a COLUMN grant on `user_id`
-        # alone, which is why it appears in the column map instead.
+        # SELECT only at table level, and only for the API: its create is a
+        # COLUMN grant on `user_id` alone, which is why it appears in the column
+        # map instead. The WORKER holds nothing here at table level — every one
+        # of its verbs is column-scoped, which is the whole design.
         "onyx_app_rw": {"SELECT"},
     },
     "billshield.extraction_run": {
-        "onyx_app_rw": {"SELECT"},          # review screens read; the worker writes (Slice 3)
+        "onyx_app_rw": {"SELECT"},          # review screens read
     },
     "billshield.charge_candidate": {
         "onyx_app_rw": {"SELECT"},          # review screens read
@@ -58,6 +60,67 @@ INTENDED_TABLE_ACL: dict[str, dict[str, set[str]]] = {
         "onyx_app_rw": {"SELECT"},          # review screens read
     },
     "billshield.job_outbox": {},            # column-scoped only; see below
+}
+
+#: The four tables the BillShield worker may touch, and the verbs it holds on
+#: each — every one of them COLUMN-scoped, so none appears in the table map
+#: above. Kept beside it rather than derived from it, so a widening has to be
+#: written twice: once as an intention and once as a grant.
+WORKER_TABLE_VERBS = {
+    "billshield.bill": {"SELECT", "UPDATE"},
+    "billshield.extraction_run": {"SELECT", "INSERT", "UPDATE"},
+    "billshield.charge_candidate": {"INSERT"},
+    "billshield.promotion_candidate": {"INSERT"},
+}
+
+#: The worker's complete column map, table -> verb -> columns. Duplicated from
+#: the runtime-identity suite ON PURPOSE: that file proves the grants behave,
+#: this one proves the schema's whole ACL surface is exactly what was reviewed,
+#: and a single shared constant would let one edit satisfy both.
+WORKER_COLUMN_ACL: dict[str, dict[str, set[str]]] = {
+    "billshield.bill": {
+        "SELECT": {"id", "user_id", "status", "storage_key", "file_sha256",
+                   "byte_size", "artifact_format", "page_count", "deleted_at",
+                   "erased_at", "row_version"},
+        "UPDATE": {"status", "row_version"},
+    },
+    "billshield.extraction_run": {
+        "SELECT": {"id", "bill_id"},
+        "INSERT": {"bill_id", "input_sha256"},
+        "UPDATE": {
+            "status", "completed_at", "refusal_code", "failure_code",
+            "adapter_code", "model_version", "prompt_version",
+            "extraction_schema_version", "currency", "response_hash",
+            "issuer_name_value", "issuer_name_confidence", "issuer_name_evidence",
+            "service_category_value", "service_category_confidence",
+            "service_category_evidence",
+            "statement_date_value", "statement_date_confidence",
+            "statement_date_evidence",
+            "billing_period_start", "billing_period_end",
+            "billing_period_confidence", "billing_period_evidence",
+            "amount_due_value", "amount_due_confidence", "amount_due_evidence",
+            "previous_balance_value", "previous_balance_confidence",
+            "previous_balance_evidence",
+            "payments_applied_value", "payments_applied_confidence",
+            "payments_applied_evidence",
+            "subtotal_before_tax_value", "subtotal_before_tax_confidence",
+            "subtotal_before_tax_evidence",
+            "total_tax_value", "total_tax_confidence", "total_tax_evidence",
+        },
+    },
+    "billshield.charge_candidate": {
+        "INSERT": {"extraction_run_id", "position",
+                   "label_text", "label_confidence", "label_evidence",
+                   "amount", "amount_confidence", "amount_evidence",
+                   "kind", "kind_confidence",
+                   "cadence_value", "cadence_confidence", "cadence_evidence",
+                   "service_period_start", "service_period_end",
+                   "service_period_confidence", "service_period_evidence"},
+    },
+    "billshield.promotion_candidate": {
+        "INSERT": {"extraction_run_id", "position", "charge_position",
+                   "expiry_date", "expiry_confidence", "expiry_evidence"},
+    },
 }
 
 #: Column-level grants, table -> grantee -> verb -> columns. This is where the
@@ -80,6 +143,29 @@ INTENDED_COLUMN_ACL: dict[str, dict[str, dict[str, set[str]]]] = {
             "UPDATE": {"status", "file_sha256", "byte_size", "artifact_format",
                        "page_count", "deleted_at", "row_version"},
         },
+        "onyx_billshield_worker": {
+            # The worker's whole read set — eleven named columns, so the two it
+            # is denied (`created_at`, `updated_at`) are denied by the ACL and
+            # a column added later is denied by default.
+            "SELECT": WORKER_COLUMN_ACL["billshield.bill"]["SELECT"],
+            # The worker-owned lifecycle transitions and their optimistic
+            # concurrency stamp, and nothing else on the row. ABSENT and each
+            # belonging to somebody else: `deleted_at` is the customer's
+            # request, `erased_at` is the privacy worker's claim that physical
+            # erasure happened, the four artifact facts are finalized once at
+            # upload completion, and `updated_at` is the trigger's.
+            "UPDATE": WORKER_COLUMN_ACL["billshield.bill"]["UPDATE"],
+        },
+    },
+    "billshield.extraction_run": {
+        "onyx_billshield_worker": WORKER_COLUMN_ACL["billshield.extraction_run"],
+    },
+    "billshield.charge_candidate": {
+        "onyx_billshield_worker": WORKER_COLUMN_ACL["billshield.charge_candidate"],
+    },
+    "billshield.promotion_candidate": {
+        "onyx_billshield_worker":
+            WORKER_COLUMN_ACL["billshield.promotion_candidate"],
     },
     "billshield.job_outbox": {
         "onyx_app_rw": {
@@ -257,12 +343,20 @@ def test_no_runtime_holds_delete_truncate_or_references():
     assert not offenders, "\n  ".join(offenders)
 
 
-def test_the_worker_group_role_exists_and_holds_nothing():
-    """Slice 2 creates the role EMPTY so this is assertable before Slice 3.
+def test_the_worker_group_role_is_confined_to_its_enumerated_grants():
+    """Slice 2 created the role EMPTY; Slice 3A gave it exactly one allowlist.
 
-    Zero direct privileges anywhere in the cluster, no schema USAGE, and no
-    login. Slice 3 adds the login and the enumerated grants; until then the
-    honest claim is "it can do nothing", and this is the proof.
+    THIS TEST USED TO ASSERT AN EMPTY SET, and the change is deliberate rather
+    than a relaxation: every claim below is still an equality, so a grant added
+    later fails here instead of being absorbed by a subset check. What the
+    empty-set version bought was that the posture was assertable before anything
+    was granted; what this version buys is that the thing granted is exactly the
+    thing that was reviewed.
+
+    Still zero, and stated separately because each is its own failure mode: no
+    login, no superuser, no BYPASSRLS, no privilege on any table outside
+    BillShield, no sequence privilege, and nothing outside the schemas the
+    worker's own tables and its two name-resolution needs account for.
     """
     with owner_cursor() as cur:
         cur.execute(
@@ -287,17 +381,38 @@ def test_the_worker_group_role_exists_and_holds_nothing():
               AND pg_get_userbyid(a.grantee) = 'onyx_billshield_worker'
             """
         )
-        assert cur.fetchall() == [], "the worker group role holds table privileges"
+        held: dict[str, set[str]] = {}
+        for table, verb in cur.fetchall():
+            held.setdefault(table, set()).add(verb)
+        assert held == {}, (
+            f"the worker holds TABLE-level privileges {held}; every one of its "
+            "verbs is column-scoped, because a table-level verb authorizes "
+            "every column the table has and every column added later")
+
+        cur.execute(
+            "SELECT n.nspname FROM pg_namespace n"
+            " CROSS JOIN LATERAL aclexplode(n.nspacl) AS a"
+            " WHERE pg_get_userbyid(a.grantee) = 'onyx_billshield_worker'"
+            "   AND a.privilege_type = 'USAGE'"
+        )
+        usage = {r[0] for r in cur.fetchall()}
+        assert usage == {"billshield", "ref", "identity"}, (
+            f"worker schema USAGE is {sorted(usage)}; `ref` is name resolution "
+            "for ref.current_app_user() and `identity` for the deletion-cutoff "
+            "function. Anything else means the shared fourteen-schema grant was "
+            "edited")
 
         cur.execute(
             "SELECT count(*) FROM pg_namespace n"
             " CROSS JOIN LATERAL aclexplode(n.nspacl) AS a"
             " WHERE pg_get_userbyid(a.grantee) = 'onyx_billshield_worker'"
+            "   AND a.privilege_type = 'CREATE'"
         )
-        assert cur.fetchone()[0] == 0, "the worker group role holds schema USAGE"
+        assert cur.fetchone()[0] == 0, "the worker group role can create objects"
 
-        # Column ACLs: a column grant is invisible to a table-level query, and
-        # this role must hold none of either kind.
+        # Column ACLs: invisible to a table-level query, and the worker's ENTIRE
+        # capability lives here. Compared as one set so an extra column, a
+        # missing one, and an extra table all fail the same assertion.
         cur.execute(
             """
             SELECT n.nspname || '.' || c.relname, att.attname, a.privilege_type
@@ -309,7 +424,19 @@ def test_the_worker_group_role_exists_and_holds_nothing():
               AND pg_get_userbyid(a.grantee) = 'onyx_billshield_worker'
             """
         )
-        assert cur.fetchall() == [], "the worker group role holds column privileges"
+        actual_columns = {(t, c, v) for t, c, v in cur.fetchall()}
+        expected_columns = {
+            (table, column, verb)
+            for table, verbs in WORKER_COLUMN_ACL.items()
+            for verb, columns in verbs.items()
+            for column in columns
+        }
+        assert actual_columns == expected_columns, (
+            f"unexpected: {sorted(actual_columns - expected_columns)}; "
+            f"missing: {sorted(expected_columns - actual_columns)}")
+        assert {t for t, _, _ in actual_columns} == set(WORKER_TABLE_VERBS), (
+            "the worker's column grants reach a table outside the four it may "
+            "touch")
 
         # Sequences: none exist in this schema today (UUID keys), but a future
         # serial column must not quietly arrive pre-granted.
@@ -326,7 +453,10 @@ def test_the_worker_group_role_exists_and_holds_nothing():
         )
         assert cur.fetchall() == [], "the worker group role holds sequence privileges"
 
-        # Function EXECUTE, direct only — the keyholes are Slice 3's.
+        # Function EXECUTE, direct only. One entry, and it is the deletion
+        # cutoff: the claim unit of work sets no tenant context, so a DIRECT
+        # read of the lifecycle table would be hidden by its policy and would
+        # let every task through. The BillShield keyholes are still Slice 3C's.
         cur.execute(
             """
             SELECT n.nspname || '.' || p.proname, a.privilege_type
@@ -337,19 +467,30 @@ def test_the_worker_group_role_exists_and_holds_nothing():
             WHERE pg_get_userbyid(a.grantee) = 'onyx_billshield_worker'
             """
         )
-        assert cur.fetchall() == [], "the worker group role can execute a function"
+        assert cur.fetchall() == [
+            ("identity.account_deletion_state", "EXECUTE")
+        ], "the worker's direct EXECUTE set is not exactly the deletion cutoff"
 
-        # Role membership, both directions: it inherits nothing, and nothing
-        # inherits it — a grant of this role to onyx_app_rw would be PD-16.
+        # Role membership. It still inherits NOTHING — a capability role that
+        # inherited another would launder authority in one GRANT. What it may
+        # now carry is members: the login that assumes it. None of them may be
+        # a request-path or other-worker principal, which would be PD-16.
         cur.execute(
-            "SELECT pg_get_userbyid(m.roleid), pg_get_userbyid(m.member)"
-            " FROM pg_auth_members m"
-            " WHERE pg_get_userbyid(m.roleid) = 'onyx_billshield_worker'"
-            "    OR pg_get_userbyid(m.member) = 'onyx_billshield_worker'"
+            "SELECT pg_get_userbyid(m.roleid) FROM pg_auth_members m"
+            " WHERE pg_get_userbyid(m.member) = 'onyx_billshield_worker'"
         )
         assert cur.fetchall() == [], (
-            "the worker group role is entangled in a role membership; granting "
-            "it to the API principal would be PD-16")
+            "the worker group role inherits another role's privileges")
+        cur.execute(
+            "SELECT pg_get_userbyid(m.member) FROM pg_auth_members m"
+            " WHERE pg_get_userbyid(m.roleid) = 'onyx_billshield_worker'"
+        )
+        members = {r[0] for r in cur.fetchall()}
+        assert not (members & {"onyx_app_rw", "onyx_app_ro", "onyx_privacy_worker",
+                               "onyx_freshness_worker", "onyx_kb_admin",
+                               "onyx_audit_writer"}), (
+            f"the worker capability was granted to {sorted(members)}; granting "
+            "it to the API principal is PD-16 by name")
 
 
 def test_no_other_role_was_granted_anything_in_the_schema():
@@ -364,7 +505,7 @@ def test_no_other_role_was_granted_anything_in_the_schema():
         owner = _owner(cur)
     grantees = {g for grants in actual.values() for g in grants}
     grantees |= {g for grants in columns.values() for g in grants}
-    assert grantees - {owner} == {"onyx_app_rw"}, (
+    assert grantees - {owner} == {"onyx_app_rw", "onyx_billshield_worker"}, (
         f"unexpected grantees in the billshield schema: {sorted(grantees - {owner})}")
 
 
@@ -466,18 +607,42 @@ def test_the_api_cannot_write_extraction_results(tenants, table):
             cur.execute(f"UPDATE {table} SET created_at = now()")
 
 
-def test_the_worker_group_role_is_refused_by_real_traffic(tenants):
+def test_the_worker_group_role_is_refused_every_table_outside_its_allowlist(tenants):
     """Not just "holds no grant" — actually try, and be refused.
 
-    The role has no schema USAGE either, so even naming a table fails. That is
-    the strongest form of the claim and it is the state Slice 3 will change
-    deliberately, one enumerated grant at a time.
+    The complement is computed rather than listed: every BillShield table the
+    allowlist does not give the worker a SELECT on. So a later slice that adds a
+    read has to add it to `WORKER_TABLE_VERBS`, where a reviewer sees it, rather
+    than to a denial list where its absence is invisible.
     """
     a, _ = tenants
-    for table in TENANT_TABLES + GLOBAL_TABLES:
+    readable = {t for t, verbs in WORKER_TABLE_VERBS.items() if "SELECT" in verbs}
+    unreadable = [t for t in TENANT_TABLES + GLOBAL_TABLES if t not in readable]
+    assert unreadable, "the complement is empty; this test would prove nothing"
+    for table in unreadable:
         with as_role("onyx_billshield_worker", a.user_id) as cur:
             with pytest.raises(psycopg2.errors.InsufficientPrivilege):
                 cur.execute(f"SELECT count(*) FROM {table}")
+
+
+def test_the_worker_group_role_reads_exactly_the_columns_it_was_granted(tenants):
+    """The positive control, and the column boundary in one test.
+
+    Without the first half every refusal above would be equally consistent with
+    a role whose grants were dropped entirely. Without the second half the
+    grants could have been table-wide and every assertion here would still pass.
+    """
+    a, _ = tenants
+    for table, verbs in WORKER_COLUMN_ACL.items():
+        granted = verbs.get("SELECT")
+        if not granted:
+            continue
+        columns = ", ".join(sorted(granted))
+        with as_role("onyx_billshield_worker", a.user_id) as cur:
+            cur.execute(f"SELECT {columns} FROM {table}")   # allowed
+        with as_role("onyx_billshield_worker", a.user_id) as cur:
+            with pytest.raises(psycopg2.errors.InsufficientPrivilege):
+                cur.execute(f"SELECT * FROM {table}")       # refused
 
 
 def test_the_privilege_enumeration_is_non_vacuous(tenants):
@@ -495,9 +660,14 @@ def test_the_privilege_enumeration_is_non_vacuous(tenants):
         assert "DELETE" in actual["billshield.bill"]["onyx_app_rw"], (
             "the enumeration cannot see a grant made in this transaction — it "
             "would not see a real one either")
-        cur.execute("GRANT SELECT ON billshield.bill TO onyx_billshield_worker")
+        # A role that holds NOTHING in this schema at either scope, so the plant
+        # is unambiguously a new grantee. `onyx_billshield_worker` would be a
+        # weaker choice: it already holds column-scoped SELECT on this table, so
+        # a reader could not tell whether the enumeration saw the plant or the
+        # real grant.
+        cur.execute("GRANT SELECT ON billshield.bill TO onyx_app_ro")
         actual = _table_acl(cur)
-        assert "onyx_billshield_worker" in actual["billshield.bill"], (
+        assert "onyx_app_ro" in actual["billshield.bill"], (
             "the enumeration missed a new grantee")
     finally:
         conn.rollback()
