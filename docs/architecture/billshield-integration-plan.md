@@ -339,7 +339,7 @@ docs/
   privacy/billshield-data-lifecycle.md
 ```
 
-At the reviewed baseline, the likely next files would be `backend/db/sql/67_...` and an Alembic revision after `0073_legal_acceptance`. Do not hardcode those numbers in a prompt; discover them immediately before the migration is created.
+SQL file numbers and Alembic revision numbers are **never** written into this plan or into a prompt. Discover the current head immediately before each migration is created; a number recorded here is a number that goes stale the moment the next entry lands.
 
 ### 5.4 The BillShield database-runtime boundary
 
@@ -382,7 +382,8 @@ billshield_database_url: str | None = None
 Three properties are mandatory and each is load-bearing:
 
 - **`None` default, never `database_url`.** The existing two settings carry this exact contract and say why in their own comments (`config.py:60–70`). A fallback is worse than a missing setting because it fails silently and in the permissive direction.
-- **No production validator that accepts absence.** If BillShield is enabled in production, the setting must be present. Prefer extending the existing `_production_*` model validators rather than adding a runtime check, so the failure is at startup and loud — the same argument `_production_storage_is_real` makes at `config.py:311`.
+- **A production validator that refuses absence *when BillShield is enabled*.** Prefer extending the existing `_production_*` model validators rather than adding a runtime check, so the failure is at startup and loud — the same argument `_production_storage_is_real` makes at `config.py:311`. The condition is not optional politeness: review measured that **no production validator covers `privacy_database_url` or `freshness_database_url` today**, and BillShield ships disabled by default (§21.1(14)), so an unconditional validator would refuse to start production for a feature nobody can reach. The validator is therefore gated on `billshield_enabled`, which is the same setting that gates customer reachability.
+- **`billshield_enabled`, defaulting to `false`.** One setting decides three things: whether the production DSN validator applies, whether BillShield refuses customer work before any database write, object operation or enqueue, and whether a zero worker count is legitimate (§5.4.10, §21.1(14)). It is a settings-layer decision, not a deployment convention.
 - **The DSN never reaches an error message.** `WorkerRuntimeUnavailable.__init__` carries the runtime *name*, never the DSN, because a connection string holds a host, a database and a role name and the message travels into logs and task failure records (`privacy_session.py:51–55`). BillShield inherits that discipline — but not the class's current problem-document metadata, which is wrong for it. See §5.4.3.
 
 #### 5.4.3 The engine and session factory, fail-closed
@@ -405,6 +406,7 @@ Requirements:
 - **Absent configuration raises `WorkerRuntimeUnavailable`, not a connection attempt.** The 503 status and the fail-closed behaviour are correct and are reused. **The class's problem-document metadata is not**, and must not be described as though it were.
 - **Add the key to the DSN mapping, not only the setting.** Per §4.5(4) an unregistered runtime name raises `KeyError` *before* the `if not dsn` check — an unhandled error instead of the governed closed code. A test should assert that every runtime name the code can pass resolves to a mapping entry.
 - **Small pool, for the same reason as the others.** `pool_size=2, max_overflow=2` is the existing shape and the comment explains it: this is one background worker draining a queue, not a request tier. Sizing it like the API would hold restricted connections open for no reason — and would inflate the connection ceiling (§5.4.10).
+- **Those two numbers are literals in the engine factory, not settings.** They are written into `get_worker_engine` itself, so the restricted pool's capacity is **4** in every environment and every capacity profile, is not reachable from `ONYX_DB_POOL_SIZE`/`ONYX_DB_MAX_OVERFLOW`, and is not reachable from Terraform. The generic `app.database.session` engine, by contrast, takes its size from those environment variables and therefore from the capacity profile. **The two pools are different sizes and must be modelled as separate terms** (§5.4.10). A ceiling that multiplies one pool's capacity by a count of engine objects is not heterogeneous accounting and will misstate the restricted engine.
 - **Never construct an `AsyncEngine` outside `get_worker_engine`.** This is the disposal contract (§5.4.9), not a style preference.
 
 **The problem-document metadata must change.** As written today the class is privacy-specific:
@@ -420,10 +422,10 @@ class WorkerRuntimeUnavailable(DomainError):
 
 The class name was generalized when the registry was introduced; the `error_type`, the `title` and the default argument were not. A BillShield misconfiguration currently surfaces as **"Privacy Runtime Unavailable"** with a `privacy-runtime-unavailable` problem type — a wrong and actively misleading operator signal, pointing an incident at the account-deletion pipeline when the fault is the bill worker. Do not describe that metadata as appropriate for BillShield.
 
-Either of two shapes is acceptable; pick one and record it:
+Two shapes were considered. **The decision is shape 2** (§21.1(13)):
 
-1. **Neutral base.** `error_type = ".../worker-runtime-unavailable"`, `title = "Worker Runtime Unavailable"`, and remove the `runtime="privacy"` default so the caller must name the runtime. Keep `PrivacyRuntimeUnavailable` as the existing alias, and — if any consumer matches on the old URI — retain a documented compatibility mapping rather than silently changing what an existing client sees.
-2. **Per-runtime subtype.** A `BillShieldRuntimeUnavailable` subclass with its own `error_type`/`title`, leaving the privacy metadata untouched.
+1. **Neutral base — considered and not chosen.** `error_type = ".../worker-runtime-unavailable"`, `title = "Worker Runtime Unavailable"`, and removal of the `runtime="privacy"` default. It rewrites the problem type and title that the privacy and freshness runtimes already emit, so a BillShield slice would be changing what an existing client sees for two unrelated runtimes. Recorded as a rejected alternative, not as an open option.
+2. **Per-runtime subtype — CHOSEN.** A `BillShieldRuntimeUnavailable` subclass with its own `error_type`/`title`, leaving the privacy metadata untouched. Strictly additive: no existing problem document changes, and the existing missing-DSN fail-closed guard keeps its meaning.
 
 Under either shape the safety rule is unchanged and absolute: **no DSN, host, database name, username, role name, port, or provider exception text may appear** in the type, title, detail, log record, or task failure record. The runtime *name* — a short closed token such as `billshield` — is the whole of what may be disclosed. A generic message is not a diagnostic loss: the operator learns which runtime is unconfigured, which is the actionable fact, and learns nothing that helps an attacker locate the database.
 
@@ -461,6 +463,7 @@ async def billshield_claim_unit_of_work() -> AsyncIterator[AsyncSession]:
 - Used only to call `billshield.claim_*` / `complete_*` / `fail_*`.
 - Those functions are `SECURITY DEFINER`, pin `search_path` including `pg_catalog`, have `EXECUTE` revoked from `PUBLIC`, accept no table name or SQL fragment, and return **identifiers and a lease token only** — never bill content. `test_freshness_outbox_boundary.py:560` already tests the argument-shape property for the existing four functions and is the model to copy.
 - `onyx_billshield_worker` holds `EXECUTE` on exactly these functions. It holds **no** privilege on `billshield.job_outbox` itself — the keyholes are the only outbox interface. What table privileges it *does* hold, and on which tables, is enumerated in §5.4.6; it is not "none".
+- **The keyholes are NOT owned by the table owner.** A `SECURITY DEFINER` function owned by the owner of a `FORCE ROW LEVEL SECURITY` table is itself subject to that table's policies, so a claim made with no tenant GUC matches no row — measured on PostgreSQL 16, and it returns **zero rows with no error**, which is the failure mode a relay cannot see. The claim keyholes are therefore owned by a dedicated `NOLOGIN` role with no members, admitted by a policy targeted to that role. §5.4.8 records the measurement and §9.1 the design.
 - **Shape copied from `privacy_unit_of_work`/`freshness_unit_of_work` (`privacy_session.py:82–121`), not invented.** `get_worker_engine(...)` first, then the factory, then explicit `commit` on success, `rollback` on any exception, and `close()` in `finally` so the connection returns to the pool on every path.
 
 **The tenant-processing unit of work — one tenant, GUCs set transaction-locally:**
@@ -492,7 +495,7 @@ async def billshield_unit_of_work(user_id: uuid.UUID) -> AsyncIterator[AsyncSess
 - **`actor_type` is `'system'`.** Per §4.5(1) the database enforces `CHECK (actor_type IN ('user','admin','system'))`. A BillShield-specific actor type requires widening that closed set in its own migration with a schema-drift entry; it is not a free choice at the session layer.
 - **`user_id` is required, not optional.** `unit_of_work` accepts `None` because anonymous authentication genuinely needs it. BillShield has no such caller, and an optional parameter would make the unprotected case reachable by forgetting rather than by deciding.
 
-RLS then does the confinement: policies on BillShield tables resolve through `ref.current_app_user()`, exactly as `backend/db/sql/43_pd1_tenant_rls.sql` does for the sixteen PD-1 tables. `ref.current_app_user()` is a plain `STABLE` SQL function, **not** `SECURITY DEFINER` (`db/sql/16_rls_grants.sql:37–40`), so what the worker needs is `USAGE` on schema `ref` for name resolution — a grant `00_extensions_roles.sql:113` currently gives to `onyx_app_rw` and `onyx_app_ro` only. Add `onyx_billshield_worker`, and nothing else in `ref`.
+RLS then does the confinement: policies on BillShield tables resolve through `ref.current_app_user()`, exactly as `backend/db/sql/43_pd1_tenant_rls.sql` does for the sixteen PD-1 tables. `ref.current_app_user()` is a plain `STABLE` SQL function, **not** `SECURITY DEFINER` (`db/sql/16_rls_grants.sql:37–40`), so what the worker needs is `USAGE` on schema `ref` for name resolution — a grant `00_extensions_roles.sql:113` currently gives to `onyx_app_rw` and `onyx_app_ro` only. Grant it to `onyx_billshield_worker` in a **separate statement naming only `ref`**, and nothing else in `ref`. That existing line is a single statement covering fourteen schemas: adding the worker to it would hand the extraction worker name resolution across every tax schema, which is the opposite of §5.4.6 (decision 21.1(15)).
 
 **A worker module must not reach for the API unit of work — and the reason is not the one an earlier draft gave.** That draft said `app.database.session.unit_of_work` "opens the `onyx_app_rw` engine", which is **false inside a correctly configured `worker-billshield`**. `services.tf:248` injects `ONYX_DATABASE_URL` from *each worker entry's own* `db_secret`, so with `db_secret = "billshield"` (required — §5.4.10) that variable carries the restricted BillShield credential and `app.database.session.engine` in that container authenticates as `onyx_billshield`, not as `onyx_app_rw`.
 
@@ -541,8 +544,12 @@ The dashed lines are the honest picture, and the two are not the same strength. 
 |---|---|---|
 | `onyx_app_rw` (API, shared) | `SELECT`/`INSERT`/`UPDATE` on the BillShield customer tables the API actually serves, confined by RLS — with `UPDATE` on `billshield.bill` **column-scoped** to its mutable columns, never tenant ownership, the storage key, or finalized artifact facts (§7.1); **column-scoped enqueue `INSERT`** on `billshield.job_outbox` (intent columns only; server defaults own claim and terminal state — §9.1) in the same transaction as the bill write; `DELETE` only where a customer-facing delete exists and is not a tombstone; `EXECUTE identity.account_deletion_state(uuid)` (already granted, `41_account_lifecycle.sql:594`) | Any BillShield claim/complete/fail authority — including by supplying claim or terminal columns on insert; any catalogue **publish** or write authority; membership of `onyx_billshield_worker` |
 | `onyx_billshield_worker` (background) | Exactly the `SELECT`/`INSERT`/`UPDATE` verbs each operational table's use case proves it needs — enumerated per table, never a blanket grant; `SELECT` only on approved global BillShield catalogue tables; `EXECUTE` on exactly the BillShield claim/complete/fail keyholes; `EXECUTE` on `identity.account_deletion_state(uuid)`; `USAGE` on schemas `billshield`, `ref`, `identity` — which is what makes `ref.current_app_user()` **callable**, since it is a plain `STABLE` function whose default `PUBLIC` execute right the repository never revokes (`16_rls_grants.sql:37–40`), so no explicit `EXECUTE` grant is needed or should be written for it | Any privilege on `billshield.job_outbox` — the keyholes are the only outbox interface; ordinary `DELETE` on any table unless a specific use case proves it, and then only on that table; `TRUNCATE` or `REFERENCES` anywhere; **any** direct privilege on `identity.*` tables; **any** privilege on any Tax Assurance table or schema; catalogue write or publish; object-version deletion |
-| `onyx_privacy_worker` | Governed source-object erasure, including every S3 object **version and delete marker**, and the account-deletion phase that reaches BillShield artifacts (§7.4) | Nothing new is granted to it by BillShield beyond that erasure path |
+| `onyx_billshield_outbox_keyhole` (definer owner, §9.1) | Own the claim/complete/fail functions and nothing else; the minimum job-outbox and outbox-audit verbs those functions actually execute; `USAGE` on schema `billshield`; whatever `EXECUTE` a definer body genuinely calls, named explicitly — including `identity.account_deletion_state(uuid)` and its schema `USAGE` if a keyhole body calls it | Log in; hold `SUPERUSER` or `BYPASSRLS`; own or reach any erasure function; hold any privilege on `billshield.bill` beyond what a claim genuinely reads; carry any member after bootstrap; receive any implicit or default privilege |
+| `onyx_billshield_erasure_keyhole` (definer owner, §7.4) | Own the BillShield list/finalize/count erasure functions and nothing else; the minimum BillShield table verbs those functions execute; `USAGE` on schema `billshield` | Log in; hold `SUPERUSER` or `BYPASSRLS`; own or reach any outbox keyhole; hold any queue-claim verb; carry any member after bootstrap |
+| `onyx_privacy_worker` | `EXECUTE` on the narrow BillShield erasure keyholes; governed source-object erasure through its **existing** IAM identity, including every S3 object **version and delete marker**, and the account-deletion phase that reaches BillShield artifacts (§7.4) | **Any direct privilege on any `billshield` table.** Database erasure is finalized through the keyholes; a direct column-scoped grant is not pre-authorized and reaching for one is a stop condition (§7.4) |
 | `onyx_migrator` | All DDL; owns the `billshield` tables | Serve any runtime traffic; it is `NOLOGIN` (`00_extensions_roles.sql:96`) |
+
+**Two definer-owner roles, not one.** Aggregating queue-claim and physical-erasure authority into a single role would mean a defect in an outbox function inherits erasure authority, and a defect in an erasure function inherits queue-claim authority. Splitting them also keeps each role's direct-ACL allowlist independently reviewable: a reviewer reading the erasure role's ACL never has to decide which of its grants belong to the queue. Both roles are `NOLOGIN`, non-`SUPERUSER`, hold no `BYPASSRLS`, are absent from every runtime role's membership, cannot be reached by `SET ROLE` from `onyx_billshield`, `onyx_app_rw` or `onyx_privacy_worker`, and end bootstrap with **zero members**. If transferring function ownership requires temporary membership, it is granted for that operation only, revoked before the migration completes, and followed by a catalogue assertion that the final member set is empty; if ownership cannot be transferred without persistent membership, that is a stop condition, not permission to keep it.
 
 Three notes on why this shape and not a looser one:
 
@@ -556,6 +563,12 @@ Three notes on why this shape and not a looser one:
 2. **Effective-privilege proof for the governed identities.** Become each governed runtime/group identity and attempt real operations — allowed exactly where the allowlist says allowed, refused by PostgreSQL everywhere else.
 3. Compare both against an explicit operation-level allowlist held in the test — table, verb, and a one-line reason; and
 4. assert separately and unconditionally that the count of Tax Assurance privileges is **zero**, catalogue-derived across every non-`billshield` schema rather than a hardcoded schema list (§4.1).
+
+**State the worker's closure precisely, in three claims rather than one slogan.** "Zero privileges outside `billshield`" is too loose to test and too strong to be true — the worker legitimately holds a schema grant on `ref` and `identity` and an `EXECUTE` on a definer function in `identity`. The checkable end state is:
+
+- **zero table and sequence privileges outside the approved BillShield allowlist**, catalogue-derived across every non-system schema, with a stated reason per allowlist entry;
+- **schema `USAGE` equal to exactly the approved set** — `billshield`, `ref`, `identity` for the worker — as set equality, not containment; and
+- **the executable `SECURITY DEFINER` function set equal to exactly the approved keyholes plus `identity.account_deletion_state(uuid)`**, as set equality, evaluated against whatever keyholes exist at that slice.
 
 An allowlist entry with no reason beside it is the failure mode `test_privilege_invariants.py:106` warns about — *"An allow-list nobody prunes becomes a deny-list with extra steps"* — so the reason column is part of the test, not documentation about it.
 
@@ -597,9 +610,37 @@ The earlier draft said FORCE is what subjects the BillShield worker to RLS. That
 
 - **`ENABLE ROW LEVEL SECURITY`** makes policies apply to ordinary roles. This is what confines `onyx_billshield` and `onyx_app_rw` to one tenant's rows. It is the load-bearing control for BillShield.
 - **`FORCE ROW LEVEL SECURITY`** additionally applies policies to the **table owner**, which is otherwise exempt. The owner here is `onyx_migrator` (`00_extensions_roles.sql:96` — *"owns DDL; used only by migrations"*). FORCE is still required, and §7.1 still mandates it, but what it protects against is an owner-privileged session reading every tenant — not the ordinary worker.
+- **FORCE also filters a `SECURITY DEFINER` function owned by that owner**, because inside such a function the current role *is* the owner. This is the consequence that matters for the outbox, and §9.1 turns on it.
 - **`onyx_billshield` is not a table owner, is not `SUPERUSER`, and must not hold `BYPASSRLS`.** Those three facts are what make ENABLE sufficient for it, and each is independently assertable from `pg_roles` — the shape `test_freshness_outbox_boundary.py:642` already uses for `onyx_freshness_worker`.
 
-So the acceptance language is: **ENABLE plus a policy with both `USING` and `WITH CHECK` confines the worker; FORCE closes the owner path; and neither is trusted from DDL.** The proof is real cross-tenant traffic — as `onyx_billshield` with tenant A's `app.user_id` set, attempt to read, insert, update, and reassign ownership of tenant B's rows, and be refused every time; then attempt the same with no `app.user_id` set and see nothing at all. A `WITH CHECK`-less policy passes every read test while leaving ownership forgery open, which is why `test_pd1_privilege_invariants.py:216` tests for it separately.
+So the acceptance language is: **ENABLE plus a policy with both `USING` and `WITH CHECK` confines the worker; FORCE closes the owner path, including through a definer function the owner owns; and none of it is trusted from DDL.** The proof is real cross-tenant traffic — as `onyx_billshield` with tenant A's `app.user_id` set, attempt to read, insert, update, and reassign ownership of tenant B's rows, and be refused every time; then attempt the same with no `app.user_id` set and see nothing at all. A `WITH CHECK`-less policy passes every read test while leaving ownership forgery open, which is why `test_pd1_privilege_invariants.py:216` tests for it separately.
+
+**Measured, and the measurement is the reason the outbox design is what it is.** A disposable database reproduced the committed shape — a FORCE-RLS outbox owned by a non-superuser role, a direct-user policy with no `NULL` branch, a worker group with schema `USAGE` and no table privilege, and a login that is neither superuser nor `BYPASSRLS`:
+
+- the **table owner itself** was refused an `INSERT` with no tenant GUC set — FORCE bites the owner exactly as documented;
+- a definer claim function **owned by that owner**, called by the worker login with no tenant GUC, claimed **zero rows and raised nothing**; the same function with a tenant GUC set claimed exactly that tenant's row, i.e. it degenerates into a per-tenant claim rather than a relay;
+- a variant that tried to *discover* the first pending row's owner before setting the context returned `NULL`, because the discovery read is itself filtered — there is no ordering in which the function learns the tenant before reading a row.
+
+**A superuser owner connection cannot detect any of this.** In the local harness `onyx_migrator` is a cluster superuser, and a superuser bypasses RLS unconditionally, so a keyhole test that connects as the owner passes whether the design works or not.
+
+##### The caller matrix — which principal proves which claim
+
+"Every keyhole assertion is made by becoming the worker login" is a slogan, and it is **wrong**: it would make the API probes untestable, the privacy-worker erasure path untestable, and the definer-owner containment claims self-contradictory, since those roles are `NOLOGIN` and exist precisely so that nothing can become them. Each claim names its own caller:
+
+| Claim under test | Caller | Why that caller and no other |
+|---|---|---|
+| Outbox claim / complete / fail **runtime behaviour** | the non-superuser **BillShield worker login** | It is the only principal that holds `EXECUTE` on those keyholes and the only one whose success proves the relay works in production |
+| No-tenant-context outbox read, and forged foreign-tenant insert | the non-superuser **API login** with no `app.user_id` set | The exposure being tested is the request path's, and only the API holds the grants that make the probe meaningful |
+| Direct outbox `SELECT`/`INSERT`/`UPDATE`/`DELETE` refusal | the non-superuser **BillShield worker login** | The claim is that this principal has no direct interface |
+| API keyhole-`EXECUTE` refusal | the non-superuser **API login** | The refusal belongs to that principal |
+| Erasure list / finalize / count **runtime behaviour** | the repository's non-superuser **privacy-worker test login** | The privacy worker is the only holder of `EXECUTE` on the erasure keyholes; the BillShield worker must be refused them |
+| `SET ROLE` to either definer-owner role is refused | each non-superuser runtime login in turn — BillShield worker, API, privacy worker | A refusal is only evidence when the principal that might have tried it is the one refused |
+| Function ownership; role attributes (`NOLOGIN`, not `SUPERUSER`, no `BYPASSRLS`); member-set equality; direct-ACL equality; policy-inventory equality; `SECURITY DEFINER` executable-set equality | **catalogue introspection**, which may use a privileged connection | These are facts about `pg_proc`, `pg_roles`, `pg_auth_members`, `pg_class`/`pg_attribute` and `pg_policy`. Reading them needs visibility, not authority |
+
+Two rules bound that last row, and they are the whole point of the matrix:
+
+- **A definer-owner role is never a behavioural caller.** It is `NOLOGIN` with zero members by construction; a test that "becomes" it would be asserting the opposite of what the role is for.
+- **A privileged or owner connection may set up state and may introspect the catalogue. It may never stand in for successful runtime behaviour.** Every *success* claim — a claim that drained rows, an erasure that finalized — is made by the non-superuser principal that will make it in production. Only *refusals* and *catalogue facts* have other legitimate callers, and each is named above.
 
 #### 5.4.9 Shared worker-engine disposal coverage
 
@@ -627,7 +668,7 @@ Adding a worker is not free, and the repository already refuses to let it be add
 5. `infra/modules/database/bootstrap_runtime_logins.sql` — `CREATE ROLE onyx_billshield LOGIN ... IN ROLE onyx_billshield_worker`, following the privacy/freshness pattern at lines 16–17. The group role must **not** be granted to `onyx_app_rw`; that grant is PD-16.
 6. `infra/modules/capacity/main.tf` — `worker_billshield_{cpu,memory,count,concurrency}` in **both** profiles. The `high_availability` profile is preserved deliberately and `test_capacity_profiles.py` asserts it still exists; adding the keys to `lean` only would break it.
 7. `infra/modules/capacity/outputs.tf` and `infra/envs/{staging,production}/main.tf` — plumb the new values through.
-8. S3: read restricted to the BillShield object prefix; **no** `DeleteObjectVersion` or `ListBucketVersions` (§7.4).
+8. S3: **none at the deployment sub-slice.** The BillShield task role carries an explicit `Deny s3:*` on `*` and no S3 KMS-key permission, following the `worker-freshness`, `beat` and `migration` precedent in `iam.tf` — *"Touches no object storage at all, so it is granted none."* A role whose process contains no code that opens an object has no object-data permission. The narrowly scoped `s3:GetObject` on the BillShield object-key prefix, plus the one S3-key decrypt operation it needs, arrives in the sub-slice that introduces the worker code which actually reads object bytes, replacing the deny in a reviewed diff. Version listing and version deletion are never granted to it (§7.4).
 
 **The connection ceiling must be extended, not just re-read.** `infra/modules/capacity/main.tf:182–195` computes the arithmetic maximum:
 
@@ -643,33 +684,58 @@ connection_ceiling = api_conn + app_conn + fresh_conn + privacy_conn
 
 guarded by a `terraform_data` precondition that refuses to plan when `connection_ceiling > floor(db_max_connections * db_connection_headroom)`.
 
-A `billshield_conn` term must be added to that sum. **Count the reachable connection paths, not the engine objects that could exist.**
+A `billshield_conn` term must be added to that sum. **Count the reachable connection paths, at each pool's own size, and never substitute one pool's size multiplied by a count of engine objects.**
 
-The earlier draft asserted two pools per BillShield worker process — the ordinary `worker_pool_env` engine plus the restricted BillShield engine — and treated that as settled. It is not settled; it is a question about what the worker code can actually reach:
+**The two pools are not the same size, and an earlier draft's homogeneous arithmetic is rejected.** That draft valued the restricted BillShield engine at `worker_conn` — the generic, profile-driven pool size — and multiplied it by a number of engine objects. Review measured the actual runtime instead:
 
-- The `worker-billshield` container receives `ONYX_DATABASE_URL` like every ECS task — carrying the **BillShield** credential, per the `db_secret = "billshield"` requirement above — so an `app.database.session.engine` **exists** in the process the moment anything imports that module. Existing ≠ connecting: a pool opens no backend until something requests a session from it. Note that both engines then authenticate as the same principal; they remain **two distinct pools**, and it is pools, not principals, that the ceiling counts.
-- If the import-boundary test of §5.4.4 holds — BillShield worker modules cannot use `app.database.session.unit_of_work` — then no BillShield code path requests a session from that engine, and its pool stays at zero connections in that process.
-- But **reachable is not the same as used by BillShield code.** If any shared helper the task calls opens an ordinary unit of work, or if the container also consumes another queue, that pool is live and must be counted.
+- **Restricted worker engine: `pool_size = 2`, `max_overflow = 2`, capacity 4.** Those are literals inside `get_worker_engine`, not settings (§5.4.3). The restricted pool is 4 in every profile and is not reachable from `ONYX_DB_POOL_SIZE`/`ONYX_DB_MAX_OVERFLOW` or from Terraform.
+- **Generic engine: profile-driven.** `app.database.session` takes `db_pool_size`/`db_max_overflow`, which `services.tf`'s `worker_pool_env` sets from the profile's `worker_pool_size`/`worker_pool_overflow`.
 
-So the rule is: **enumerate the connection paths the worker process can actually reach, count every one of them, and fail safe when the answer is unclear.** Concretely —
+So the term is two addends, not one product:
 
-1. The import-boundary test is what makes "the API pool is unused in this process" a *structural* claim rather than an assumption. Without it, count both pools.
-2. Any pool that remains reachable — including one held open by a shared helper — is counted at its full `(pool_size + max_overflow)`.
-3. Measure before finalizing: observe `pg_stat_activity` grouped by `usename` and `application_name` under a representative BillShield load, and reconcile the measured maximum against the arithmetic term. The repository already sets this precedent — `services.tf` records the API measured at 23 backends across two uvicorn workers under 4 000 requests at 534 rps.
-4. Where measurement and arithmetic disagree, **the larger number goes in the ceiling.** The guard exists to be conservative; a ceiling tuned down to a measured average is a ceiling that fails during the burst it was meant to bound.
+```
+billshield_conn = generic_term + restricted_term
 
-The guard is not advisory — it refuses to plan. On the lean profile (`db.t4g.small`, 225 backends, 0.85 headroom ⇒ 191 room) a new worker may not fit, and that is the mechanism working: it forces the sizing decision at plan time rather than surfacing as connection refusals under load. **The BillShield service cannot be enabled until `terraform plan` succeeds with the BillShield term included** — that is a hard gate on Slice 3, not a recommendation. **This is the deliberate blast-radius cost of the boundary, not an accidental microservice.** Update `docs/operations/cost-model.md` in the same slice.
+generic_term    = (worker_pool_size + worker_pool_overflow)
+                  * (worker_billshield_concurrency + 1) * worker_billshield_count
+                  -- counted ONLY where a reachable path can request a session
+
+restricted_term = 4 * M * worker_billshield_count
+                  -- 4 is the engine factory's own literal, not a profile value
+                  -- M is the conservative process multiplier, below
+```
+
+Rules, in order:
+
+1. **The import-boundary guard is what makes restricted-only reachability structural.** It is what turns "no BillShield code path requests a session from the generic engine" from an assumption into a checkable property; without it, count the generic term too. The generic engine *exists* in the process the moment anything imports its module — existing is not connecting, and a pool opens no backend until something checks one out — but "reachable" is the test, not "used by BillShield code". If any shared helper the task calls opens an ordinary unit of work, or the container consumes another queue, the generic term is counted.
+2. **Each reachable pool is counted at its own full capacity**, never at another pool's.
+3. **Use the conservative process multiplier until measurement says otherwise.** The existing terms count the generic pool at `(concurrency + 1)`, covering the Celery parent alongside its children. The restricted engine is built lazily inside `get_worker_engine`, which only a task body reaches, which argues for `concurrency` — but that has not been measured on a running worker, so `M = concurrency + 1` is what the ceiling carries until representative runtime measurement proves a lower value defensible.
+4. **`pg_stat_activity` measurement is still required before activation.** Observe backends grouped by `usename` and `application_name` under a representative BillShield load and reconcile the measured maximum against the arithmetic term. The repository already sets this precedent — `services.tf` records the API measured at 23 backends across two uvicorn workers under 4 000 requests at 534 rps.
+5. **Where arithmetic and measurement disagree, the larger defensible number wins.** A ceiling tuned down to a measured average is a ceiling that fails during the burst it was meant to bound.
+
+**Configurations actually evaluated.** Review computed the term against the committed profile constants for `count ∈ {0,1,2}` × `concurrency ∈ {1,2,3,4}` × `{restricted-only, both pools}` × `{M = concurrency+1, M = concurrency}`. Within that set, and no wider:
+
+- **lean, restricted-only, `count = 1`, `concurrency` 1–2 fits** under the conservative model;
+- **both pools reachable does not fit lean** in any evaluated configuration;
+- **`high_availability` has more room** across the evaluated set — but **no HA purchase is approved** (§21.1(14)), so that is context, not a plan;
+- **`count = 0` contributes exactly zero** and both profiles plan unchanged, which is the disabled default.
+
+**Do not read this as "lean cannot run BillShield."** It can, inside that envelope. What the envelope means is that the import-boundary guard is load-bearing for planability, and that a later concurrency or count increase is a Terraform-refusing change requiring its own measured and reviewed entry.
+
+**One open audit, assigned to the deployment sub-slice.** Review noticed a possible inconsistency between the conceptual capacity terms and the actual per-service engine paths: the existing `app_conn`, `fresh_conn` and `privacy_conn` terms each count a single pool at the generic size, while `worker-freshness` and `worker-privacy` also build a restricted engine. Whether that is an omission, a double-count elsewhere, or correct as written was **not** resolved by this review and must not be asserted either way. The deployment sub-slice must therefore **enumerate every reachable pool separately for `worker-app`, `worker-freshness`, `worker-privacy` and `worker-billshield`**, determine which of them can actually check out connections, and correct the capacity guard in that same sub-slice if the audit proves an omission or a double-count. **No existing term may be silently removed or reduced to make BillShield fit.**
+
+The guard is not advisory — it refuses to plan, and that is the mechanism working: it forces the sizing decision at plan time rather than surfacing as connection refusals under load. **BillShield cannot be enabled until `terraform plan` succeeds with every reachable BillShield path counted at its own pool's capacity.** **This is the deliberate blast-radius cost of the boundary, not an accidental microservice.** Update `docs/operations/cost-model.md` in the same sub-slice.
 
 #### 5.4.11 Tests the boundary owes
 
-Privilege claims are proved by **becoming the role and being refused** — never by reading DDL, and never by observing a zero-row result, which is what a *policy* does rather than what a missing *privilege* does (`test_pd1_privilege_invariants.py:1–13`).
+A privilege **refusal** is proved by connecting **as the principal that would be refused** and being refused — never by reading DDL, and never by observing a zero-row result, which is what a *policy* does rather than what a missing *privilege* does (`test_pd1_privilege_invariants.py:1–13`). A privilege **success** is proved the same way: as the principal that will make that call in production. Catalogue **facts** — ownership, role attributes, memberships, ACLs, policies, `prosecdef` sets — are read by introspection and may use a privileged connection. Which principal proves which claim is set out in the caller matrix of §5.4.8, and every row below inherits it.
 
 | # | Test | Asserts | Model to copy |
 |---|---|---|---|
 | 1 | Worker's actual privileges, enumerated per object and verb from `pg_catalog`, equal the operation-level allowlist of §5.4.6 | **Not** an empty set. Dynamic rejection of anything outside the allowlist, with a stated reason per entry | `test_privilege_invariants.py:56` (enumeration shape only) |
-| 2 | Worker holds **zero** privileges on every table outside schema `billshield` | Denial of Tax Assurance — catalogue-derived across all non-system schemas, **no hardcoded schema list** (§4.1) | `test_freshness_outbox_boundary.py:587`, made dynamic |
+| 2 | Worker holds **zero table and sequence privileges outside the approved BillShield allowlist**, catalogue-derived across every non-system schema; and its schema-`USAGE` set equals **exactly** the approved schemas | Denial of Tax Assurance, stated as the precise three-part claim of §5.4.6 rather than the looser "zero outside `billshield`" — the worker legitimately holds schema grants on `ref` and `identity` | `test_freshness_outbox_boundary.py:587`, made dynamic |
 | 3 | Worker holds **no** privilege at all on `billshield.job_outbox` | The keyholes are the only outbox interface | §5.4.6 |
-| 4 | Over `pg_proc` filtered on `p.prosecdef`, the worker's executable set equals **exactly** {BillShield claim, complete, fail} ∪ {`identity.account_deletion_state(uuid)`} — set equality, not subset | No unexpected **privileged** function is reachable. `ref.current_app_user()` is **not** in this set and must not be added: it is not `SECURITY DEFINER`, so a `prosecdef` query correctly never returns it | `test_freshness_outbox_boundary.py:616` |
+| 4 | Over `pg_proc` filtered on `p.prosecdef`, **each principal's** executable set equals **exactly** its approved set — set equality, not subset — evaluated per principal and never as one pooled query: the **BillShield worker** at its approved baseline plus the three outbox keyholes once they exist; the **privacy worker** at its own discovered baseline plus the BillShield erasure keyholes once they exist; the **API** holding no BillShield keyhole `EXECUTE` at all; and each **definer-owner role** owning exactly its own functions and no other | No unexpected **privileged** function is reachable by any principal. The worker's approved set is empty of keyholes before they are created and grows only when a sub-slice adds one. **Discover the privacy worker's baseline set at the implementation SHA and assert baseline-plus-approved-additions equality** — never hardcode its current function list here, which would go stale on the next unrelated privacy entry. `ref.current_app_user()` is **not** in any of these sets and must not be added: it is not `SECURITY DEFINER`, so a `prosecdef` query correctly never returns it. Catalogue introspection, so a privileged connection may read it | `test_freshness_outbox_boundary.py:616` |
 | 4b | `ref.current_app_user()` is callable by the worker and resolves correctly: inside a transaction that set `app.user_id`, it returns that id; after the transaction, it returns `NULL` | Behavioural, and a different question from row 4. **Do not** assert it via a privileged-function allowlist, and **do not** widen row 4's query to every executable function — that would enumerate every `PUBLIC`-executable function in the database against a privileged allowlist and fail for reasons unrelated to BillShield | `test_pd1_privilege_invariants.py:270` |
 | 5 | Worker holds no `DELETE`, `TRUNCATE` or `REFERENCES` on any BillShield table absent a proved use case | Withheld by default | `test_pd1_privilege_invariants.py:82` |
 | 6 | `onyx_billshield_worker` cannot log in; `onyx_billshield` is not `SUPERUSER` and does not hold `BYPASSRLS` | These, not FORCE, are why ENABLE confines it (§5.4.8) | `test_freshness_outbox_boundary.py:642` |
@@ -683,8 +749,20 @@ Privilege claims are proved by **becoming the role and being refused** — never
 | 14 | Disposal covers every registry engine, asserted as a property over `_engines` | Not an enumeration | `runtime.py` docstring |
 | 15 | No `workers/tasks/billshield*` or `app/services/billshield/**` module imports `app.database.session.unit_of_work`; BillShield API routes may | Background vs. request split (§5.4.4) | `test_external_surface_closure.py:117` source-scan shape |
 | 16 | No tax engine, IOE, finance, reco or tax-document module imports or queries `billshield` | **Import and service-layer test, not a grant** — see §13.4 | new |
+| 17 | A counterfactual definer function **owned by the table owner** claims **zero** rows from the same seeded, reset outbox that the real keyhole drains completely | The keyhole works because of its owner, not by accident. Without this the keyhole test cannot distinguish a working design from a lucky one (§5.4.8) | new |
+| 18 | The real keyhole claims a **positive** seeded count, asserted as a number and never as `>= 0` | Design A's failure mode is `0` with no error, so a non-strict assertion passes over a dead relay | new |
+| 19 | As the API principal with **no** `app.user_id`: reading the outbox returns zero rows, and an insert naming another tenant is refused by RLS | The probe that separates the chosen design from the rejected NULL-context branch (§9.1). `app/database/session.py` leaves the GUC unset for an anonymous request, so this is a live state, not a hypothetical | new |
+| 20 | The API holds no `EXECUTE` on any keyhole; `SET ROLE` to either definer-owner role is refused for `onyx_billshield`, `onyx_app_rw` and `onyx_privacy_worker` | The definer-owner roles cannot be assumed, only invoked | `test_worker_capability_boundary.py` |
+| 21 | Each definer-owner role: member set equals **exactly** the empty set after bootstrap; `NOLOGIN`; not `SUPERUSER`; no `BYPASSRLS`; owns exactly its own functions and no other | Set equality, so a membership or an extra owned function added later fails (§5.4.6) | `test_freshness_outbox_boundary.py:642` |
+| 22 | Policy inventory equality: each keyhole-touched table carries exactly its committed tenant policy plus the one role-targeted keyhole policy, and the committed tenant policy's expression and role targeting are unchanged | The tenant policy is not edited to make the keyhole work (§9.1) | new |
+| 23 | Direct-ACL allowlist equality for each definer-owner role — table, verb, and a one-line reason per entry | These roles hold real table verbs; they enter the §5.4.6 enumeration and must be reviewed like any other grantee | `test_privilege_invariants.py:56` |
+| 24 | Planted counterfactuals fail the guards: an unexpected role membership, an unexpected grant, an unexpected policy | Each containment assertion is proved non-vacuous rather than trusted | §5.4.6 |
 
 Row 16 is deliberately a different *kind* of evidence from rows 1–5, and the plan does not pretend otherwise. Rows 1–5 are PostgreSQL refusing a principal. Row 16 is a static and service-layer check, because the principal executing tax code is `onyx_app_rw`, which must be able to reach BillShield tables to serve BillShield routes. §13.4 states that asymmetry plainly.
+
+**Rows are owed by the sub-slice that creates their subject, not all at once.** Rows 1–3, 4b, 5–10 and 12–15 belong to the restricted-identity sub-slice, with row 4's approved set empty of keyholes at that point. Rows 4 and 17–24 belong to the sub-slices that create keyholes — the outbox set to the relay sub-slice, the erasure set to the erasure sub-slice, each proving its own role's containment. Row 11 belongs to the sub-slice that first runs a queued task. Row 16 stands from the database foundation onward. §17 assigns them; a row is never deferred past the sub-slice that creates the thing it tests.
+
+**Each row names its own caller; there is no single "become the worker" rule.** The caller matrix in §5.4.8 is the authority. In summary for the rows above: rows 8, 11, 17 and 18 and the direct-refusal half of row 3 run as the **BillShield worker login**; row 19 and the `EXECUTE`-refusal half of row 20 run as the **API login**; the erasure-runtime rows run as the repository's **privacy-worker test login**; row 20's `SET ROLE` refusals run as each runtime login in turn; and rows 4, 21, 22, 23 and the enumeration halves of rows 1, 2 and 5 are **catalogue introspection**, which may use a privileged connection. A privileged or owner connection may set up state and read the catalogue; it may never stand in for a successful runtime behaviour, because a cluster superuser bypasses RLS unconditionally and would pass whether the design works or not (§5.4.8).
 
 ---
 
@@ -867,9 +945,11 @@ Every component is server-generated. Do not include filename, provider, account 
 
 Shape is not ownership: a key that merely *looks like* `{uuid}/billshield/v1/{uuid}` proves nothing about whose row carries it. The bill row must enforce the binding itself — a database constraint equivalent to `storage_key = user_id::text || '/billshield/v1/' || id::text` — and `id`, `user_id`, and `storage_key` are immutable (§7.1). Once finalized, the file digest, byte size, media format, and page count cannot silently change, and `extraction_run.input_sha256` is bound to the same finalized bill artifact through a composite constraint (for example a unique `(id, file digest)` pair on the bill referenced compositely by the run) or an equally strong database-enforced mechanism. Two tests are owed: one plants a syntactically valid key carrying **another tenant's** UUID and proves the database rejects it; one attempts to repoint a finalized bill or extraction run to a different artifact and proves the database refuses it.
 
-Extend `ObjectStorage` with a minimal `stat()`/metadata operation because upload completion is a real caller that must distinguish a missing object from an empty object and verify length/content type. Implement it in both local and S3 adapters and test their behavioral parity.
+Extend `ObjectStorage` with a minimal `stat()`/metadata operation because upload completion is a real caller that must distinguish a missing object from an empty object and verify length/content type. Implement it in both local and S3 adapters and test their behavioral parity. **This is a shared-platform port change, not a BillShield-local one:** the port records a deliberate prior decision against a metadata operation — *"an operation nobody calls is surface that still has to be implemented correctly by every adapter, and gets it wrong unobserved"* — and names this exact remedy, *"the port grows an `exists` and both adapters implement it together."* The existing adapter-parity and fail-closed object-storage guards are part of the fence. On the AWS side the API needs **no new permission** for it: the `api` task role already holds `s3:GetObject` on the documents bucket, which authorizes a metadata request — unless implementation evidence proves otherwise.
 
 Individual deletion and retention expiry must be executed by the privacy worker. The API marks work pending and immediately stops serving the artifact; it does not receive `DeleteObjectVersion` or `ListBucketVersions` authority. Neither does the BillShield worker (§5.4.6).
+
+**Database erasure is finalized through keyholes, not through a direct grant.** `onyx_privacy_worker` receives `EXECUTE` on narrow BillShield list/finalize/count `SECURITY DEFINER` functions and **no direct privilege on any `billshield` table**. Those functions are owned by `onyx_billshield_erasure_keyhole` — a second, separate definer-owner role, distinct from the outbox one so that a defect in an erasure function cannot inherit queue-claim authority and a defect in a claim function cannot inherit physical-erasure authority (§5.4.6). Role-targeted policies admit only that owner, on only the tables those functions touch. Physical object-version deletion stays with the privacy worker's existing IAM identity, unchanged. An earlier draft's suggestion of a direct column-scoped grant to the privacy worker on `billshield.bill` is **rejected**: if implementation evidence later shows a direct grant is unavoidable, that is a stop condition requiring plan review, not something pre-authorized here.
 
 For account deletion, extend the existing `DOCUMENTS` privacy phase to count and hard-erase BillShield source artifacts before terminal account removal. Preserve the existing tax-document ordering and prove both domains converge independently.
 
@@ -983,8 +1063,37 @@ This removes the database/queue dual-write race and ensures workers never need b
 Three properties the outbox table must enforce in the database, not in service code:
 
 - **The cross-tenant edge is closed structurally.** A policy that checks only `job_outbox.user_id` accepts a mixed edge — `user_id` naming tenant A beside `bill_id` naming tenant B's bill. The ordinary `bill_id` foreign key plus direct-user RLS is **not** sufficient to prevent this. Require `UNIQUE (id, user_id)` on `billshield.bill` and a composite foreign key `(bill_id, user_id)` from the outbox to `bill (id, user_id)`, so the pair must name a single real row. The non-vacuity test is mandatory: create bills for tenants A and B; acting as tenant A, attempt the mixed insert (`user_id` = A, `bill_id` = B's bill) and prove **PostgreSQL** refuses it; then prove the equivalent A/A insert succeeds.
-- **Enqueue authority is not claim authority.** A table-level `INSERT` grant would let the API explicitly insert `claim_state = 'claimed'`, name an arbitrary `claimed_by`, mint a claim token, land directly in a terminal state, or set attempts and error fields — contradicting the claim that the API can enqueue but cannot claim, complete, or fail work. The API's grant is therefore **column-scoped**: `INSERT` on exactly the minimum safe intent columns (`user_id`, `bill_id`, `task_code`, `dedupe_key`), with server defaults owning every operational column (`claim_state` pending, zero attempts, claim and terminal fields absent). Column-level `INSERT` does not cover `RETURNING`, and ORM inserts commonly ask for server-generated ids back — so the enqueue write either runs as an insert **without** `RETURNING` (the dedupe key, not the row id, is the idempotency handle) or carries an explicitly granted narrow `SELECT` on exactly the returned columns; the implementation must state which it uses. The API holds no `UPDATE` or `DELETE` on the outbox; the worker role holds no direct outbox-table privilege at all; the Slice 3 keyholes remain the only claim/complete/fail interface. Tests prove each half: the API can create a valid pending `EXTRACT_BILL` intent; supplying or mutating any claim/terminal field is refused; an initially claimed/completed/failed row is refused; API `UPDATE`/`DELETE` are refused.
-- **Codes are closed and identifiers are opaque.** The initial `task_code` vocabulary is exactly `EXTRACT_BILL`, enforced by a SQL constraint equal to its committed authority. A character-class regex is bounded text, not a closed vocabulary: tests must prove an **unknown uppercase token** is refused, not merely that prose containing spaces is refused. Refusal codes persisted anywhere mirror the committed `RefusalCode` set exactly; parser rejection codes, wherever persisted, mirror the committed `ExtractionParseCode` set exactly; every other failure or terminal code is backed by a committed closed Python authority and an equal SQL constraint, or the column is deferred to the slice that creates the authority. Worker identity fields (such as `claimed_by`) are bounded opaque identifiers with a database shape constraint, not content-capable prose. Slice 3 may add operational columns or constraints whose closed domain authorities do not exist at foundation time — the foundation does not carry speculative open fields merely so a later slice can avoid altering the table.
+- **Enqueue authority is not claim authority.** A table-level `INSERT` grant would let the API explicitly insert `claim_state = 'claimed'`, name an arbitrary `claimed_by`, mint a claim token, land directly in a terminal state, or set attempts and error fields — contradicting the claim that the API can enqueue but cannot claim, complete, or fail work. The API's grant is therefore **column-scoped**: `INSERT` on exactly the minimum safe intent columns (`user_id`, `bill_id`, `task_code`, `dedupe_key`), with server defaults owning every operational column (`claim_state` pending, zero attempts, claim and terminal fields absent). Column-level `INSERT` does not cover `RETURNING`, and ORM inserts commonly ask for server-generated ids back — so the enqueue write either runs as an insert **without** `RETURNING` (the dedupe key, not the row id, is the idempotency handle) or carries an explicitly granted narrow `SELECT` on exactly the returned columns; the implementation must state which it uses. The API holds no `UPDATE` or `DELETE` on the outbox; the worker role holds no direct outbox-table privilege at all; the keyholes added by Slice 3C remain the only claim/complete/fail interface. Tests prove each half: the API can create a valid pending `EXTRACT_BILL` intent; supplying or mutating any claim/terminal field is refused; an initially claimed/completed/failed row is refused; API `UPDATE`/`DELETE` are refused.
+- **Codes are closed and identifiers are opaque.** The initial `task_code` vocabulary is exactly `EXTRACT_BILL`, enforced by a SQL constraint equal to its committed authority. A character-class regex is bounded text, not a closed vocabulary: tests must prove an **unknown uppercase token** is refused, not merely that prose containing spaces is refused. Refusal codes persisted anywhere mirror the committed `RefusalCode` set exactly; parser rejection codes, wherever persisted, mirror the committed `ExtractionParseCode` set exactly; every other failure or terminal code is backed by a committed closed Python authority and an equal SQL constraint, or the column is deferred to the slice that creates the authority. Worker identity fields (such as `claimed_by`) are bounded opaque identifiers with a database shape constraint, not content-capable prose. The relay sub-slice may add operational columns or constraints whose closed domain authorities do not exist at foundation time — the foundation does not carry speculative open fields merely so a later sub-slice can avoid altering the table.
+
+#### The keyhole owner, and why the obvious design does not work
+
+Under `FORCE ROW LEVEL SECURITY`, a `SECURITY DEFINER` claim function **owned by the table owner** is filtered by the table's own policies, because inside such a function the current role is that owner. Measured on PostgreSQL 16 against the committed shape (§5.4.8): with no tenant GUC the function claims **zero rows and raises nothing**, so a relay built that way drains nothing while logging success, and a test that seeds one row and sets a tenant GUC passes over it. Two candidate rescues were tested and rejected:
+
+- **Setting the tenant context per row does not work.** The function must *discover* the first pending row before it can know whose context to set, and that discovery read is itself filtered — measured, it returns `NULL`. A version that "works" only when the caller already supplied the tenant is not a claim; it is a per-tenant query.
+- **A `NULL`-context branch on the tenant policy is forbidden.** Adding `current_app_user() IS NULL OR …` does make the keyhole work, and it simultaneously opens the table to **every** principal holding any grant on it whenever `app.user_id` is unset. Measured: the API principal, holding only its real narrow grants and no tenant context, read every tenant's rows and inserted a row naming an arbitrary foreign tenant. That state is not hypothetical — `app/database/session.py` deliberately leaves `app.user_id` unset when there is no user, because deny-by-default depends on its absence. Recorded here as a rejected alternative so nobody reaches for it again.
+
+**The design is one additional permissive policy targeted through PostgreSQL's own role targeting** — `FOR ALL TO onyx_billshield_outbox_keyhole` — with the claim/complete/fail functions owned by that role. Measured under the same conditions, the worker login with no tenant GUC claimed rows across three distinct tenants, while the API with no tenant GUC still saw zero rows and was still refused a forged insert.
+
+Consequences, all of them checkable:
+
+- **`p_self_job_outbox` is unchanged** — not edited, not dropped, not re-expressed. The keyhole policy is added beside it.
+- **The worker holds `EXECUTE` on the keyholes and no direct `job_outbox` privilege**, exactly as before.
+- **The API holds no keyhole `EXECUTE`**, and its column-scoped enqueue grant is unchanged.
+- **The keyhole owner's capability set is explicit and closed:** exact schema `USAGE`; exact table and sequence privileges; the exact functions it owns; and any exact `EXECUTE` dependency a definer body genuinely calls — including `identity.account_deletion_state(uuid)` and its schema `USAGE` if a keyhole body calls it. No implicit or default privilege, ever.
+- **It is a separate role from the erasure owner** (§5.4.6, §7.4), so neither inherits the other's authority.
+
+The permanent tests this owes are §5.4.11 rows 17–24, together with rows 3, 4, 10 and 11: owner-owned counterfactual claiming zero, the real keyhole claiming a positive seeded set, no-GUC API read and forged-insert denial, direct worker outbox denial, API keyhole-execution denial, `SET ROLE` refusal, final role-member set equality, policy-inventory equality, direct-ACL allowlist equality, per-principal definer executable-set equality, function-owner identity, no `SUPERUSER`/`BYPASSRLS`, planted unexpected membership/grant/policy, and both directions of the deletion cutoff. **Each of those runs as the principal the caller matrix of §5.4.8 names** — the worker login for claim behaviour and direct-access refusal, the API login for the no-tenant-context probes and its own `EXECUTE` refusal, and catalogue introspection for the ownership, attribute, membership, ACL, policy and executable-set facts. The definer-owner role is never a behavioural caller.
+
+#### Operational columns, audit, and immutability the relay sub-slice adds
+
+- a dedicated BillShield outbox **transition/audit table**, so stale-lease recovery is auditable and a legitimate re-claim is distinguishable from a double claim;
+- the committed **runtime failure-code authority** and an equal SQL constraint — the third vocabulary, which deliberately does not exist at foundation time;
+- an **immutability trigger** protecting `user_id`, `bill_id`, `task_code` and `dedupe_key`, because the keyhole policy's `WITH CHECK` is unconditional and intent identity must not be rewritable through it;
+- audited stale-lease recovery; bounded attempts; oldest-first claims with a deterministic tiebreak; claim-token ownership required for complete and fail;
+- clean-process Celery registration, engine-disposal proofs, and repeated task execution in one process.
+
+`onyx_billshield_outbox_keyhole` receives only the verbs those operations execute, and nothing an erasure function would need — that is the other role's business (§7.4). **The API can enqueue but can never claim, complete, fail, recover, or rewrite intent identity.**
 
 ### 9.2 Worker topology
 
@@ -998,9 +1107,11 @@ Before real bills are accepted, add:
 - setting `billshield_database_url` and registry entry `"billshield"` (§5.4.2, §5.4.3);
 - the operation-level grants of §5.4.6, plus `USAGE` on schemas `billshield`/`ref`/`identity` and `EXECUTE` on `identity.account_deletion_state(uuid)` (§5.4.7);
 - database secret accessible only to that ECS role;
-- S3 read permission restricted to the BillShield object prefix, with no version-delete or version-list authority;
+- **no S3 permission at declaration time** — an explicit `Deny s3:*`, with the narrowly scoped prefix read arriving only with the code that reads object bytes, and version-delete/version-list never (§5.4.10(8), §7.4);
 - the approved extraction-provider secret accessible only to that worker; and
 - no access to `finance`, `analysis`, `reco`, `docs`, `ioe`, tax KB, or tax source objects — proved by §5.4.11, not asserted.
+
+**These are not one entry.** §17 splits them across six separately governed sub-slices — restricted identity and grants; dormant deployment, secret and capacity; keyhole boundary, outbox audit, relay and registration; upload, storage verification, validation, Ontario enrolment and the scanner port; physical erasure and account deletion; and the approved scanner adapter — each certifying on its own exact tree and stopping for human review. The ordering constraint that matters here is that the **infrastructure consumer is declared before the task producer exists**: a routed queue with no registered consumer is precisely the §4.2 defect this integration already had to fix once, whereas a declared consumer with no producer is inert.
 
 Start with one worker service and low concurrency. Split `billshield_extract`, `billshield_alert`, or `billshield_catalog` queues only when measured queue age or incompatible permissions require it.
 
@@ -1053,6 +1164,8 @@ Before extraction:
 8. Persist only normalized candidates, evidence locations, versions, usage counters, and a response hash—not raw provider output.
 
 Do not accept real-user uploads until malware scanning and external-provider legal review are complete.
+
+**Steps 2–4 need dependencies this repository does not have.** Review found no magic-byte library, no PDF-inspection library, and no anti-malware client in the dependency set, and no scanning module, port or adapter anywhere in the tree. Adding them engages the release gate's dependency-lock, clean-install and supply-chain stages, and step 4 additionally waits on §9.6 and on a scanner vendor nobody has selected. So the pipeline is split: **steps 1–3 and 5 land with the validation boundary, behind a scanner *port* whose default adapter refuses everything**, and **step 4's approved adapter is its own governed entry** (§17). A fail-closed port is the correct posture while the feature is disabled, and it keeps the tenant and storage boundaries from waiting on a vendor contract. No parser may see an unscanned artifact under either arrangement.
 
 A media type BillShield cannot read must be recorded as a closed failure, never as a successful extraction with no fields. `workers/tasks/documents.py:13–19` states why for tax slips and the argument transfers unchanged: empty text runs through the parsers happily and yields nothing, which reads to a customer as "we read your bill and it was blank."
 
@@ -1211,9 +1324,11 @@ The platform overview at `/app` can show one card per service behind the BillShi
 - **The API principal is shared between the two services** and is `onyx_app_rw`. The BillShield **worker**, privacy worker, freshness relay, and migrator are distinct PostgreSQL identities — see §5.4.1 for what that does and does not buy.
 - `onyx_app_rw` must never inherit privacy-worker, freshness-worker, or BillShield claim authority. That inheritance is PD-16 by name. Sharing the API principal is not PD-16: PD-16 is the *worker's privileged capability* being assumable from a request path, and the capability model of §5.4.6 withholds exactly that from `onyx_app_rw`.
 - BillShield claim functions are `SECURITY DEFINER`, pin `search_path` including `pg_catalog`, revoke `PUBLIC`, accept no table name or SQL fragment, and return identifiers only.
+- **Definer functions are owned by dedicated `NOLOGIN` roles, never by the table owner**, because FORCE RLS filters an owner-owned definer and the failure is silent (§5.4.8, §9.1). There are **two** such roles — one for the outbox keyholes, one for the erasure keyholes — so neither inherits the other's authority. Both are non-`SUPERUSER`, hold no `BYPASSRLS`, cannot be reached by `SET ROLE` from any runtime role, and end bootstrap with zero members.
 - The API can enqueue BillShield work but can never claim, complete, or fail it — enforced **in the database** by the column-scoped enqueue grant with server-owned operational state (§9.1), not by the absence of a keyhole call in service code. A whole-row outbox `INSERT` grant would contradict this and is forbidden.
-- **The BillShield worker role holds enumerated verbs on enumerated tables** — never blanket CRUD, never `DELETE`/`TRUNCATE` without a proved use case, and never an "empty allowlist", which would contradict the work it exists to do. §5.4.6 is the matrix; §5.4.11 rows 1–5 are the tests.
+- **The BillShield worker role holds enumerated verbs on enumerated tables** — never blanket CRUD, never `DELETE`/`TRUNCATE` without a proved use case, and never an "empty allowlist", which would contradict the work it exists to do. §5.4.6 is the matrix; §5.4.11 rows 1–5 are the tests. Its closure is stated as three precise claims — table/sequence allowlist, schema-`USAGE` set equality, definer executable-set equality — not as "zero privileges outside `billshield`".
 - The worker reaches the deletion cutoff through `identity.account_deletion_state(uuid)` with schema `USAGE` only, and holds no privilege on any identity table (§5.4.7).
+- **`onyx_privacy_worker` receives `EXECUTE` on the BillShield erasure keyholes and no direct privilege on any `billshield` table** (§7.4). Physical object-version deletion stays with its existing IAM identity.
 - Catalogue admin privileges do not grant customer-table reads.
 
 ### 13.2 Files and object storage
@@ -1244,14 +1359,14 @@ BillShield data is not tax data merely because a bill might contain a deductible
 
 | Direction | Enforced by | Strength |
 |---|---|---|
-| BillShield **worker** → Tax Assurance tables | **PostgreSQL grants.** `onyx_billshield` holds zero privilege outside schema `billshield` | Hard. The database refuses it. Proved by becoming the role (§5.4.11 rows 1–2) |
+| BillShield **worker** → Tax Assurance tables | **PostgreSQL grants.** `onyx_billshield` holds zero table or sequence privilege outside its approved BillShield allowlist | Hard. The database refuses it. Proved by connecting **as `onyx_billshield`** and being refused, alongside catalogue enumeration (§5.4.11 rows 1–2) |
 | Tax code (engine, IOE, finance, reco, tax documents) → BillShield tables | **Import-boundary and service-layer tests only** | Softer. The database permits it |
 
 **Why the second direction cannot be a grant.** Tax code and BillShield API code execute in the same FastAPI process as the same principal, `onyx_app_rw`, and that principal must be able to read and write BillShield tables in order to serve BillShield routes at all (§5.4.6). A grant cannot distinguish "this statement came from the tax engine" from "this statement came from a BillShield route" — they are the same session, the same login, the same connection pool. Revoking BillShield access from `onyx_app_rw` would break the product; leaving it granted is what makes the reverse boundary a code-level control.
 
 Therefore, precisely:
 
-- PostgreSQL enforces that the BillShield **worker** cannot access Tax Assurance tables. This is a real, testable, becoming-the-role guarantee.
+- PostgreSQL enforces that the BillShield **worker** cannot access Tax Assurance tables. This is a real, testable guarantee: connect as `onyx_billshield` and be refused.
 - **Import-boundary and service-layer tests** enforce that tax engine, IOE, finance, reco and tax-document code do not import or query BillShield. This is a real control, and it is a *static* one: it catches the code that exists, not a statement constructed at runtime.
 - `onyx_app_rw` is necessarily a shared platform API principal, and its reach across both domains is a deliberate accepted property of the modular monolith, not an oversight.
 - A **symmetric** PostgreSQL boundary would require a separate BillShield API identity and session architecture — per-route engine selection, two pools, two GUC paths. **That is not part of this MVP.** If the asymmetry ever becomes unacceptable, that architecture is the price, and it should be costed as its own entry rather than assumed.
@@ -1339,7 +1454,7 @@ A driver or connection error is a special case with its own rule: log the except
 Before production activation, add to `docs/operations/cost-model.md`:
 
 - `worker-billshield` Fargate floor;
-- added database connection ceiling, showing both the worker pool term and the restricted BillShield engine term, per the reachable-path rule (§5.4.10);
+- added database connection ceiling, showing the generic worker-pool term and the restricted BillShield engine term **as separate addends at their own capacities** — the restricted engine is 4 by the engine factory's own literals, not a profile value — per the reachable-path rule (§5.4.10);
 - extraction/OCR cost per page and per confirmed bill;
 - S3/KMS requests and retained bytes;
 - CloudWatch log/metric volume;
@@ -1380,9 +1495,10 @@ Create runbooks for:
 
 ### 16.2 Database and RLS tests
 
-- Cross-tenant read, insert, update, delete, and ownership-reassignment attempts fail for every BillShield tenant table, run as **every granted runtime principal that exists at that slice** — `onyx_app_rw` from the database foundation onward, and additionally `onyx_billshield` once Slice 3 creates the login. Worker behavioral tests never run as a login that has not been created yet; until then the empty `onyx_billshield_worker` group role is proven to hold nothing, by direct-ACL enumeration and by refused real traffic.
+- Cross-tenant read, insert, update, delete, and ownership-reassignment attempts fail for every BillShield tenant table, run as **every granted runtime principal that exists at that sub-slice** — `onyx_app_rw` from the database foundation onward, and additionally `onyx_billshield` once the restricted-identity sub-slice creates the login. Worker behavioral tests never run as a login that has not been created yet; until then the empty `onyx_billshield_worker` group role is proven to hold nothing, by direct-ACL enumeration and by refused real traffic.
 - Sessions with no `app.user_id` see no customer rows.
-- `ENABLE` plus a policy is what confines the ordinary roles; `FORCE` is separately asserted and is what stops the **table owner** bypassing them; `onyx_billshield` is separately proved to be neither owner, superuser, nor `BYPASSRLS` (§5.4.8).
+- `ENABLE` plus a policy is what confines the ordinary roles; `FORCE` is separately asserted and is what stops the **table owner** bypassing them — including through a `SECURITY DEFINER` function that owner owns; `onyx_billshield` is separately proved to be neither owner, superuser, nor `BYPASSRLS` (§5.4.8).
+- **Keyhole containment is proved principal by principal, per the caller matrix of §5.4.8** — never by a single "become the worker" rule, and never with a privileged or owner connection standing in for a successful runtime behaviour, because a cluster superuser bypasses RLS unconditionally and would pass regardless of the design. The permanent set is §5.4.11 rows 17–24: an owner-owned counterfactual claiming zero on the same reset state the real keyhole drains, and the real keyhole claiming a positive seeded count, both **as the BillShield worker login**; the no-tenant-context outbox read returning zero rows and the forged foreign-tenant insert being refused, **as the API login**; direct outbox denial **as the worker login** and keyhole-`EXECUTE` denial **as the API login**; erasure list/finalize/count behaviour **as the privacy-worker test login**; `SET ROLE` to either definer-owner role refused **for each runtime login in turn**; and, by **catalogue introspection**, definer-owner member sets equal to empty, policy-inventory equality with the committed tenant policy unchanged, direct-ACL allowlist equality per definer-owner role, per-principal definer executable-set equality, function-owner identity, and no `SUPERUSER`/`BYPASSRLS` — with planted unexpected membership, grant and policy each failing their guard.
 - Child policies include both `USING` and `WITH CHECK`.
 - The outbox mixed-edge non-vacuity test of §9.1 passes: as tenant A, an insert naming `user_id` = A with `bill_id` = tenant B's bill is refused by the composite ownership constraint, and the equivalent A/A insert succeeds.
 - The enqueue-authority tests of §9.1 pass: a valid pending intent inserts through the column-scoped grant; supplying any claim or terminal field is refused; an initially claimed/completed/failed row is refused; API `UPDATE`/`DELETE` on the outbox are refused; the worker role holds no direct outbox-table privilege.
@@ -1441,7 +1557,7 @@ Create runbooks for:
 
 ### 16.7 Certification
 
-For every implementation slice:
+For every implementation slice **and every sub-slice** — a sub-slice is a governed entry in its own right, not a stage inside a larger one:
 
 1. Targeted unit/integration/security/privacy tests.
 2. Ruff.
@@ -1454,7 +1570,7 @@ For every implementation slice:
 9. Full release gate on the exact final tree.
 10. Exact-SHA CI success.
 
-Do not start the next slice while the current tree is uncertified.
+Each certifies on its **own exact tree** and **stops for human review before commit**. Do not start the next slice or sub-slice while the current tree is uncertified. Migration numbers, SQL file numbers, registry counts and test counts are discovered at each implementation SHA — this plan records obligations, never those numbers.
 
 ---
 
@@ -1600,7 +1716,7 @@ Work:
 - SQLAlchemy models and privacy classification: lifecycle entries for the five tenant-derived tables; coherent `NON_RLS` entries for both global tables.
 - Account-delete-registry and cascade-universe growth for the five tenant-derived tables. The implementation discovers the registries' measured counts at its starting SHA and updates them there; this plan records the obligation, not the numbers.
 - Exact **API** grants only, revoke-then-grant: `bill` read/insert plus column-scoped update; extraction children and catalogue tables read-only; `job_outbox` column-scoped enqueue insert (§5.4.6, §9.1). No default privileges for the schema; no read-only-role grant; no catalogue-admin grant — no administrative writer exists until the catalogue slice.
-- The `onyx_billshield_worker` group role, created `NOLOGIN` with **zero privileges**, so its posture is assertable from the first migration. Every worker grant, the login, and the keyholes remain Slice 3.
+- The `onyx_billshield_worker` group role, created `NOLOGIN` with **zero privileges**, so its posture is assertable from the first migration. Every worker grant and the login belong to Slice 3A; the outbox keyholes and their definer-owner role to Slice 3C; the erasure keyholes and theirs to Slice 3E.
 - RLS and child policies resolving through `ref.current_app_user()`: `ENABLE` and `FORCE` on every tenant-derived table; `FOR ALL` policies with matching `USING` and `WITH CHECK`; parent-derived chains resolved explicitly; no denormalized child ownership column.
 - Schema-drift policy regenerated and reviewed.
 - Deletion/retention design document (`docs/privacy/billshield-data-lifecycle.md`), using retention policy names only, recording the §7.3 timestamp semantics and the decision that extraction candidates are immutable extracted facts whose user corrections become structurally distinct confirmed-observation records in a later slice.
@@ -1609,56 +1725,240 @@ Work:
 Acceptance:
 
 - Schema drift clean, with the regenerated policy entries reviewed.
-- Cross-tenant matrix passes for every tenant-derived table as `onyx_app_rw`; catalogue-level policy shape (`FOR ALL`, both `USING` and `WITH CHECK`) proven for every tenant-derived table; `onyx_billshield_worker` exists, cannot log in, and holds zero privileges — proven by direct-ACL enumeration and by refused real traffic. The as-`onyx_billshield` matrix is Slice 3 acceptance.
+- Cross-tenant matrix passes for every tenant-derived table as `onyx_app_rw`; catalogue-level policy shape (`FOR ALL`, both `USING` and `WITH CHECK`) proven for every tenant-derived table; `onyx_billshield_worker` exists, cannot log in, and holds zero privileges — proven by direct-ACL enumeration and by refused real traffic. The as-`onyx_billshield` matrix is Slice 3A acceptance.
 - The outbox mixed-edge, enqueue-authority, storage-key-ownership, immutability, and closed-vocabulary tests of §9.1/§16.2 pass, each demonstrated to fail first against the missing control.
 - The five tenant-derived tables appear in privacy inventory and cascade analysis — shown to fail before their entries exist, then pass — and both global tables carry coherent `NON_RLS` entries.
 - Contract parity: every committed extraction-contract enum round-trips the schema's closed constraints, and a persisted golden extraction recomputes its response hash exactly.
 - The Slice 0A guard covers the new schema **without being edited**. If it needs editing, Slice 0A was not general.
 - No source-file upload yet — and no worker login, worker table grant, runtime DSN/engine/unit of work, claim/complete/fail keyhole, Celery task/queue/registration, API route, upload or object-storage adapter, Terraform/ECS/IAM/secret/capacity change, malware scanning, production extraction provider, or customer enablement.
 
-### Slice 3 — BillShield runtime identity, secure upload, outbox, and erasure
+### Slice 3 — BillShield runtime, in six governed sub-slices
 
-**Goal:** Store a bill safely, process it as a restricted principal, and remove it truthfully.
+Slice 3 was drafted as one entry and **is not one entry.** It spans a new PostgreSQL identity, cross-tenant `SECURITY DEFINER` SQL over FORCE-RLS tables, a shared object-storage port, new parsing and anti-malware dependencies, four Terraform modules, and a change to the certified account-deletion phase. One certification covering all of that answers "is this exact tree known good" for the tenant boundary and for the erasure path with a single verdict, and a revert of either would take the other — on the one path in the product that destroys customer data.
+
+Each sub-slice is a governed entry: it certifies on its own exact tree, stops for human review before commit, states its prerequisites and exclusions, says whether a migration is allowed, and stays dormant or disabled unless its activation gates pass. **Discover SQL file numbers, Alembic revision numbers, registry counts and test counts at each implementation SHA; none is recorded here.**
+
+| Order | Sub-slice | Nature | Migration | Deployability |
+|---|---|---|---|---|
+| 1 | **3A** Restricted database identity, engines, units of work, login, grants | Security and configuration | Grants and schema `USAGE` only | Dormant |
+| 2 | **3B** Dormant deployment declaration, secret, capacity, cost model | Infrastructure | None | Disabled at `count = 0` |
+| 3 | **3C** Outbox keyhole boundary, outbox audit, relay, registration | Persistence and async | Role, added policy, table, column, trigger, functions | Dormant |
+| 4 | **3D** Upload, storage verification, validation, Ontario enrolment, scanner port | API, platform port, file security | Enrolment attestation only | Disabled |
+| 5 | **3E** Physical erasure and account-deletion integration | Privacy | Keyhole role, added policies, functions, `EXECUTE` grants | Dormant |
+| 6 | **3F** Approved malware-scanning adapter | External dependency | None | Blocked on §9.6 |
+
+**Why this order.** 3A first because the sub-slices whose proofs run **as** `onyx_billshield` — 3C's claim behaviour and every direct-access refusal — cannot be written until that login exists, and because 3A's import-boundary guard is what licenses counting the generic pool at zero, the difference between planning and not planning on the lean profile (§5.4.10). That is not a claim about *every* later sub-slice: 3B is infrastructure-only and becomes no database principal at all, and 3E's runtime behaviour runs as the **privacy-worker** test login rather than as `onyx_billshield`. 3B second so the infrastructure **consumer** is declared before the task **producer** exists; the reverse re-creates §4.2's routed-but-undrained queue for a whole entry. 3C before 3D because a drain should exist before a source. **3E before 3F, and 3F depends on 3E**, because an approved scanner is what makes real uploads technically permissible, and that must not become true before physical erasure and account-deletion integration are certified.
+
+---
+
+#### Slice 3A — Restricted database identity, engines, units of work, login, and grants
+
+**Goal:** a BillShield principal that authenticates, is confined by RLS, holds exactly the enumerated privileges, and refuses to run when unconfigured.
+
+**Prerequisites:** the database foundation at HEAD.
 
 Work:
 
-- `billshield_database_url`, registry entry, fail-closed engine and both units of work — each calling `get_worker_engine("billshield")` before `_factories` (§5.4.2–§5.4.4).
-- Neutral or BillShield-specific runtime-unavailable problem type and title; the privacy metadata is not reused (§5.4.3).
-- `onyx_billshield` login joining the `onyx_billshield_worker` group role created empty in Slice 2; the operation-level grants of §5.4.6 and the keyhole functions; any operational outbox columns or constraints whose closed domain authorities arrive only now (§9.1).
-- `GRANT USAGE ON SCHEMA identity` and `GRANT EXECUTE ON FUNCTION identity.account_deletion_state(uuid)` to the worker role, and no identity-table privilege (§5.4.7).
-- `GRANT USAGE ON SCHEMA ref` to the worker role — name resolution only, which is sufficient for `ref.current_app_user()`. No `EXECUTE` grant and no `PUBLIC` revocation for that function.
-- `worker-billshield` declared with `db_secret = "billshield"`, so the API database secret is never injected into that task (§5.4.10).
-- Import-boundary test splitting worker modules from `app.database.session.unit_of_work`, with BillShield API routes explicitly permitted.
-- Bounded presigned upload and opaque key.
-- `ObjectStorage.stat()` parity.
-- upload-completion endpoint.
-- transactional outbox claim/lease functions.
-- BillShield queue, task module **in `include`**, clean-process registration test, ECS service, secret, IAM role.
-- capacity profile entries in both profiles and the extended connection-ceiling arithmetic.
-- safe file validation and malware scanner port/adapter.
-- privacy-worker individual erasure and account-deletion integration.
+- `billshield_database_url` with a `None` default, and `billshield_enabled` defaulting to `false`; a production validator that refuses an absent DSN **when BillShield is enabled** (§5.4.2).
+- The `"billshield"` key in the engine factory's DSN mapping, not only the setting — an unregistered runtime name raises `KeyError` before the fail-closed check (§4.5(4)).
+- The fail-closed engine and both `billshield_claim_unit_of_work` and `billshield_unit_of_work`, each calling `get_worker_engine("billshield")` before reading the factory registry (§5.4.3, §5.4.4).
+- A **BillShield-specific** runtime-unavailable subtype; the privacy metadata is left untouched (§5.4.3, decision 21.1(13)).
+- The `onyx_billshield` login joining the `onyx_billshield_worker` group role created empty in the database foundation, declared in the database bootstrap script; and the equivalent login created by the local test harness, alongside the existing privileged test logins.
+- The operation-level grants of §5.4.6 for the group role.
+- `GRANT USAGE ON SCHEMA identity` and `GRANT EXECUTE ON FUNCTION identity.account_deletion_state(uuid)`, and no identity-table privilege (§5.4.7).
+- `GRANT USAGE ON SCHEMA ref` — name resolution only, which is sufficient for `ref.current_app_user()`. No `EXECUTE` grant and no `PUBLIC` revocation for that function.
+- **Separate `USAGE` statements naming only `billshield`, `ref` and `identity`.** The shared multi-schema grant in the roles file is never edited: adding the worker to that line would hand it name resolution across every tax schema (decision 21.1(15)).
+- Import-boundary test splitting worker and task modules from `app.database.session.unit_of_work`, with BillShield API routes explicitly permitted.
+
+**Exclusions:** no keyholes, no keyhole-owner role, no policy change, no outbox columns or audit table, no Celery task, queue or `include` entry, no Terraform, no API route, no object storage, no erasure, no scanner.
 
 Acceptance:
 
-- All sixteen tests of §5.4.11 pass, with the privilege ones asserted by becoming the role.
-- The worker's enumerated privileges equal the §5.4.6 allowlist exactly, and Tax Assurance privilege count is zero, catalogue-derived.
+- §5.4.11 rows 1–3, 4b, 5–10 and 12–15 pass, each run by the principal the caller matrix of §5.4.8 names: the behavioural rows — cross-tenant traffic, direct-access refusals, `ref.current_app_user()` resolution, the identity-function call and its refused table reads — **as the non-superuser `onyx_billshield` login**; the enumeration rows as catalogue introspection. Row 4's approved definer set for the worker at this sub-slice is exactly `{identity.account_deletion_state(uuid)}` — set equality, with no keyhole yet in existence — and the API's BillShield keyhole set is empty.
+- The worker's closure is proved as the three precise claims of §5.4.6: zero table and sequence privileges outside the approved allowlist, catalogue-derived; schema `USAGE` equal to exactly three schemas; definer executable set equal to exactly the approved set.
 - The worker can call `identity.account_deletion_state(uuid)` **and** is refused direct reads of `identity.account_lifecycle` and `identity.user_account`.
-- A queued BillShield task for a deleting account refuses and writes no row, non-vacuously.
-- Absent `billshield_database_url` refuses to run; the error's type, title, detail and log record leak no DSN, host, database, username or provider text, and do not say "Privacy".
-- No BillShield worker module can reach `app.database.session.unit_of_work`; BillShield API routes still can. Asserted as a structural import boundary, justified by the registry contract rather than by a claim about which principal the generic engine would use.
-- `worker-billshield` carries `db_secret = "billshield"`; the API database secret appears in no BillShield task definition.
-- Disposal covers the BillShield engine, proved as a property and by a five-call-in-one-process test.
-- **`terraform plan` succeeds with every reachable BillShield connection path counted.** This is a hard gate: the service is not enabled until it passes, and if the lean profile cannot hold it, decision 21.1(2) applies — `count = 0` and BillShield stays disabled.
-- Measured `pg_stat_activity` under representative load is reconciled against the arithmetic term, and the larger number is what the ceiling carries.
-- Real S3 contract test proves size bound and version-aware erasure.
-- No parser sees an unscanned artifact.
-- API cannot delete object versions; neither can the BillShield worker.
-- Queue and database connection cost model updated.
+- Absent `billshield_database_url` with BillShield enabled refuses to run; the error's type, title, detail and log record leak no DSN, host, database, username or provider text, and do not say "Privacy".
+- No BillShield worker or task module can reach `app.database.session.unit_of_work`; BillShield API routes still can — a structural import boundary justified by the registry contract, not by a claim about which principal the generic engine would use.
+- Disposal covers the BillShield engine, proved as a property over the registry and by repeated calls in one process.
+- Feature remains disabled; nothing runs as the new login.
+
+**Stop conditions:** any need to edit the shared multi-schema `USAGE` grant; any need to widen the closed `actor_type` set.
+
+---
+
+#### Slice 3B — Dormant deployment declaration, secret, capacity, and cost model
+
+**Goal:** declare `worker-billshield` dormant with its own credential and task role, and make the connection ceiling truthful under the heterogeneous model.
+
+**Prerequisites:** 3A merged — its import-boundary guard is what licenses counting the generic pool at zero (§5.4.10).
+
+Work:
+
+- `worker-billshield` in the compute module's worker map with `db_secret = "billshield"` and its queue name, so the API database secret is never injected into that task (§5.4.10).
+- The conditional injection of the BillShield DSN environment variable for that task alone.
+- A task role of its own carrying an explicit **`Deny s3:*`** and no S3 KMS-key permission — only the secrets-key decrypt path every task role already has, which is what lets it read its database credential (§5.4.10(8)).
+- The `billshield` database secret in the secrets module, added to the secret-ARN maps.
+- `worker_billshield_{cpu,memory,count,concurrency}` in **both** capacity profiles, with `count = 0`; plumbed through the capacity outputs and both environment roots.
+- The corrected `billshield_conn` term — restricted and generic pools as separate addends at their own capacities (§5.4.10).
+- The reachable-pool audit across `worker-app`, `worker-freshness`, `worker-privacy` and `worker-billshield`, and any resulting correction to the capacity guard, in this same sub-slice.
+- `docs/operations/cost-model.md`.
+
+**Exclusions:** no Python, no SQL, no migration, no task module, no queue routing or `include` entry, no S3 object-data permission, no second or competing PostgreSQL role declaration — the login belongs to 3A, and 3B owns only the generated production password and its injection.
+
+Acceptance:
+
+- `terraform validate` on both environment roots; `terraform plan` succeeding with the corrected term, or the recorded reason it could not run and exactly which checks were arithmetic-only.
+- `worker-billshield` carries `db_secret = "billshield"`; the API database secret appears in no BillShield task definition; a planted `"api"` fails the guard.
+- The BillShield task role holds no S3 object-data permission; a planted `s3:GetObject` fails a guard.
+- Both profiles carry every BillShield knob; a knob present in only one fails.
+- The reachable-pool audit is recorded, with each service's pools enumerated and each one's ability to check out connections determined. No existing term was silently removed or reduced.
+- The cost model shows the generic and restricted terms as separate addends.
+- The service is declared dormant at `count = 0` and is described nowhere as an operating consumer.
+
+**Stop conditions:** `terraform plan` refusing at `count = 0`; the pool audit proving an omission or double-count that cannot be corrected within this sub-slice's fence.
+
+---
+
+#### Slice 3C — Outbox keyhole boundary, outbox audit, relay, and registration
+
+**Goal:** claim, complete and fail BillShield work through the only interface that may do so, from a registered task that refuses work for a deleting account.
+
+**Prerequisites:** 3A (login, grants, both units of work); 3B (dormant consumer declared).
+
+Work:
+
+- `onyx_billshield_outbox_keyhole` — `NOLOGIN`, non-`SUPERUSER`, no `BYPASSRLS`, zero members after bootstrap — owning the claim/complete/fail functions and holding only the verbs those functions execute (§5.4.6, §9.1).
+- **One additional permissive policy per keyhole-touched table, targeted `TO` that role.** The committed tenant policy is not edited, dropped or re-expressed. A `NULL`-context branch is forbidden (§9.1).
+- The outbox transition/audit table; the committed runtime failure-code authority with an equal SQL constraint; an immutability trigger protecting `user_id`, `bill_id`, `task_code` and `dedupe_key`.
+- The claim/complete/fail functions: `SECURITY DEFINER`, `search_path` pinned including `pg_catalog`, `EXECUTE` revoked from `PUBLIC` and granted only to the worker group, accepting no table name or SQL fragment, returning identifiers and a lease token only.
+- The task module reaching its body through the shared worker runtime; the module in Celery's clean-process include and the route; bounded oldest-first claims with a deterministic tiebreak; audited stale-lease recovery; bounded attempts; claim-token ownership required for complete and fail; the deletion cutoff before any user data is produced; the admission wrapper.
+
+**Exclusions:** no upload, presign, storage, `stat()`, validation, scanner, API route, erasure, Terraform, or S3 permission change. The erasure keyhole role belongs to 3E and is not created here.
+
+Acceptance:
+
+- §5.4.11 rows 17–24 pass, together with rows 3, 4, 10 and 11, **each run by the principal the caller matrix of §5.4.8 names**: claim/complete/fail behaviour and direct-outbox refusal as the **BillShield worker login**; the no-tenant-context read and the forged foreign-tenant insert as the **API login**; `SET ROLE` refusals as each runtime login in turn; ownership, role attributes, member sets, ACLs, policy inventory and executable sets by **catalogue introspection**. No privileged or owner connection stands in for a successful runtime behaviour.
+- Row 4 is evaluated **per principal**: the worker's definer executable set now equals exactly the three outbox keyholes plus `identity.account_deletion_state(uuid)`; the API's BillShield keyhole set is still empty; the privacy worker's set is unchanged from its discovered baseline, since no erasure keyhole exists yet; and `onyx_billshield_outbox_keyhole` owns exactly its three functions and no other.
+- A counterfactual definer owned by the table owner claims zero rows on the same reset state the real keyhole drains; the real keyhole's claimed count is asserted as a positive number, never as `>= 0`.
+- The API with no `app.user_id` reads zero outbox rows and is refused a forged foreign-tenant insert; it holds no keyhole `EXECUTE`; `SET ROLE` to the keyhole owner is refused from every runtime role.
+- The committed tenant policy's expression and role targeting are unchanged; the policy inventory equals exactly the tenant policy plus the one keyhole policy.
+- The API can enqueue and can never claim, complete, fail, recover, or rewrite intent identity.
+- A clean subprocess sees the task without a test importing the module first; the task runs repeatedly in one process; disposal is asserted as a property over the registry.
+- A queued task for a deleting account refuses and writes no row, where the identical task with no lifecycle row succeeds.
+- Feature remains disabled; the relay drains an empty queue.
+
+**Stop conditions:** any design requiring the worker to hold a direct outbox privilege; any design requiring the committed tenant policy to be modified.
+
+---
+
+#### Slice 3D — Upload, storage verification, validation, Ontario enrolment, and the scanner port
+
+**Goal:** a bill row, an opaque key, a bounded permit, and a completion path that verifies what actually landed — with extraction refused unless the artifact passed every check.
+
+**Prerequisites:** 3A, 3B, 3C.
+
+Work:
+
+- `ObjectStorage.stat()` on the port and in both adapters, with behavioural parity tested — a shared-platform change (§7.4). The API needs no new object-storage permission for it unless implementation evidence proves otherwise.
+- Bill creation with a bounded presigned permit and the server-generated opaque key matching the committed generated column; the upload-completion endpoint verifying existence and actual length against the signed bound and distinguishing a missing object from an empty one.
+- Media type established from bytes; archive, executable, encrypted-PDF, page-count and decompression-bomb refusals.
+- A bill-artifact **scanner port** whose default adapter refuses everything, so no parser can see an unscanned artifact before the approved adapter exists (§9.5).
+- Idempotent completion; the atomic bill write and column-scoped enqueue in one transaction.
+- **The Ontario service-enrolment attestation and eligibility refusal** (§21.1(18)). It introduces **new customer data**, so its privacy obligations are work items here, not a later tidy-up:
+  - a BillShield-owned service-enrolment table — not a column borrowed from any tax table;
+  - a closed launch-region vocabulary of exactly `{CA-ON}`, as a committed Python authority mirrored by an **equal SQL constraint** — an exact value list, never a character-class regex;
+  - user identity; attestation provenance; the accepted legal-copy version; and an acceptance timestamp;
+  - **immutable historical-fact semantics** — the recorded attestation is evidence of what was attested and when, and no runtime may rewrite it;
+  - tenant RLS: `ENABLE` **and** `FORCE`, with a `FOR ALL` policy carrying matching `USING` and `WITH CHECK` resolving through `ref.current_app_user()`;
+  - a privacy classification entry and a retention class;
+  - account-delete registry and cascade-universe registration, with the lifecycle inventory extended to cover it;
+  - eligibility refusal at bill creation, before any database write, object operation or enqueue.
+- If — and only if — validation reads object bytes in the worker, replace that task role's `Deny s3:*` with a narrowly scoped prefix read plus the one S3-key decrypt operation; never version listing or deletion.
+
+**Fence scope.** Because the attestation is new customer data, this sub-slice's file fence must include the privacy surfaces it touches, not only the API and storage ones: the classification registry, the account-delete registry and its counts, the cascade-universe document, the BillShield data-lifecycle document, the schema-drift policy, and the migration-check schema/table assertions. The remaining privacy and drift guards the new table touches are catalogue-derived — **discover the exact affected set at the implementation SHA** rather than naming it here.
+
+**Exclusions:** no approved scanner adapter, no extraction provider, no review/confirm/retry/delete endpoints, no erasure, no frontend, no customer enablement. **No proprietary BillShield capability and no schema, storage or infrastructure for one** (§21.1(19)). No Canada-wide region catalogue, no address inference, no province verification, and no reading of the tax profile as an eligibility source.
+
+Acceptance:
+
+- Missing versus empty objects are distinguishable through `stat()` on both adapters; an oversized actual upload is refused by the store, not by the declaration; a magic/MIME mismatch is refused while a matching pair is accepted.
+- The scanner port's default adapter is proved to refuse, and proved to be reached before any parser — a planted parser-first path fails the test.
+- A planted, syntactically valid storage key carrying another tenant's UUID is refused by the database.
+- The enrolment attestation's obligations are each proved, **fail-first**, before the control exists:
+  - an **out-of-region value** is refused by the database, and an **unknown uppercase region token** is refused too — a character-class regex would accept both, so both cases are required; the in-region control is accepted;
+  - cross-tenant read, insert, update and ownership reassignment against another tenant's attestation are refused, and a session with no `app.user_id` sees none;
+  - account deletion removes the attestation, proved through the cascade walk rather than asserted, and the table appears in the privacy inventory and the cascade universe — each shown to fail before its registry entry exists;
+  - the attestation is immutable once recorded: an attempt to rewrite the region, provenance, legal-copy version or timestamp is refused;
+  - **neither `profile.tax_profile.province_code` nor any bill content can establish eligibility** — asserted structurally, since the BillShield worker holds no privilege outside its approved allowlist and no code path reads either as an eligibility source.
+- Migration numbers, registry counts and test counts are **discovered at the implementation SHA**; none appears in this plan.
+- Nothing here authorizes Canada-wide support, address inference, province verification, proprietary-feature infrastructure, or customer enablement.
+- No filename appears in any column, object key, log, metric label or identifier; no refusal carries document contents.
+- The API holds no object-version deletion.
 - Feature remains disabled for customers.
+
+**Stop conditions:** `stat()` unable to reach behavioural parity between the adapters; any bound requiring an unvetted dependency.
+
+---
+
+#### Slice 3E — Physical erasure and account-deletion integration
+
+**Goal:** a logically deleted bill becomes provably physically erased, and account deletion converges independently for Tax and for BillShield.
+
+**Prerequisites:** 3A, 3D — there must be objects to erase.
+
+Work:
+
+- `onyx_billshield_erasure_keyhole` — a **second, separate** `NOLOGIN` definer-owner role with the same containment properties, so neither it nor the outbox role inherits the other's authority (§5.4.6).
+- BillShield list/finalize/count erasure functions owned by that role, admitted by role-targeted policies on only the tables they touch; `EXECUTE` granted to `onyx_privacy_worker`, which receives **no direct privilege on any `billshield` table** (§7.4).
+- Extension of the existing `DOCUMENTS` privacy phase — not a BillShield-specific phase — preserving the tax-document ordering, with **independent remaining counts for Tax and for BillShield** (decision 21.1(5)).
+- The customer delete path returning `202`, stopping service at `deletion_pending`, and stamping physical erasure only after storage erasure is proven.
+
+**Exclusions:** no retention scheduler; no erasure authority for the BillShield worker; no new S3 permission for any role — the privacy worker already holds the version-delete set.
+
+Acceptance:
+
+- The erasure keyhole role's containment is proved to the same standard as the outbox role (§5.4.11 rows 20–24) — **not by becoming it**, which is impossible and is the property under test: it is `NOLOGIN` with zero members, `SET ROLE` to it is refused for the BillShield worker, the API and the privacy worker alike, and its ownership, attributes, membership, ACL and owned-function set are read from the catalogue.
+- Erasure list/finalize/count **runtime behaviour** is invoked as the repository's non-superuser **privacy-worker test login** — the only principal holding `EXECUTE` on those keyholes. The **BillShield worker login** is proved to be refused them.
+- Row 4 for the privacy worker: its definer executable set equals its **discovered baseline** plus exactly the BillShield erasure keyholes — the baseline is measured at the implementation SHA, never transcribed into this plan.
+- `onyx_privacy_worker` holds `EXECUTE` on the erasure keyholes and zero direct BillShield table privileges, catalogue-derived.
+- Every object version and delete marker is gone for the exact key only; a retryable storage failure leaves the physical-erasure timestamp absent and the phase incomplete, with the timestamp-first ordering planted and seen to fail.
+- Logical and physical deletion timestamps stay distinguishable; `rejected` and `failed` bills reach `deletion_pending`.
+- Tax and BillShield remaining counts are separately readable; a single collapsed count fails the test.
+- Neither the API nor the BillShield worker can delete an object version; retained tombstones carry no customer content.
+
+**Stop conditions:** the count split not expressible without breaking a certified phase contract; a retention-versus-replay conflict; **any finding that a direct column-scoped grant to the privacy worker is unavoidable** — that requires plan review, and is not pre-authorized (§7.4).
+
+---
+
+#### Slice 3F — Approved malware-scanning adapter
+
+**Goal:** replace the fail-closed default with an approved scanner, so real uploads become permissible.
+
+**Prerequisites — all four, conjunctively:** 3D (the port this replaces); **3E** (physical erasure and account-deletion integration certified); **§9.6 complete**; **an approved scanner vendor**.
+
+3E is a hard prerequisite, not an ordering preference. This sub-slice is what makes real uploads technically permissible, and a product that can accept a customer's bill before it can provably erase one has the two obligations in the wrong order. No sub-slice may begin 3F on the strength of 3D alone.
+
+Work: one adapter behind 3D's port; its dependency or sidecar; ECS wiring if a sidecar is required; supply-chain review; a closed quarantine outcome.
+
+**Exclusions:** everything else, including the extraction provider, which is Slice 4.
+
+Acceptance:
+
+- An infected test artifact is rejected and never reaches extraction; a clean artifact of the same size is accepted.
+- The adapter fails closed when its provider, region, retention policy or secret is unconfigured; no provider exception text escapes.
+- Dependency lock, clean-install and supply-chain gates pass.
+
+**Stop conditions:** no approved scanner; any scanner requiring the artifact to leave Onyx-controlled infrastructure without §9.6 approval.
+
+---
+
+**Across all six sub-slices:** BillShield stays disabled by default with zero running workers; no extraction provider is selected; no frontend is built; no real bill is accepted; and every proprietary BillShield capability stays deferred to its own approved slice (§21.1(19)).
 
 ### Slice 4 — First-provider upload-to-confirm vertical slice
 
 **Goal:** One supported provider works end to end behind a private flag.
+
+**Prerequisites:** all six Slice 3 sub-slices, 3F included. This slice processes real documents, so the approved scanner must already stand in front of the parsers.
 
 Work:
 
@@ -1825,11 +2125,23 @@ Never improve these metrics by weakening evidence, relabeling potential as verif
 | Risk | Why it matters | Required mitigation / gate |
 |---|---|---|
 | Schema guard misses new domain | ENABLE-without-FORCE could weaken tenant protection, and the §4.1 trace shows the current suite would not catch it | Slice 0A catalogue-derived FORCE-RLS test with the non-vacuity fixture that reproduces the exact hole |
-| BillShield worker inherits the application identity | A compromised extraction path would read every tax table; this is PD-16's shape | Dedicated `onyx_billshield` login, no-fallback DSN, role-separation tests asserted by becoming the role (§5.4) |
+| BillShield worker inherits the application identity | A compromised extraction path would read every tax table; this is PD-16's shape | Dedicated `onyx_billshield` login, no-fallback DSN, role-separation tests run **as that login** and refused (§5.4) |
 | Worker granted blanket CRUD "so it works" | The component handling untrusted files could delete a tenant's confirmed observations | Operation-level allowlist (§5.4.6): enumerated verbs on enumerated tables, no `DELETE`/`TRUNCATE` without a proved case, dynamic rejection of anything outside it |
 | Worker given direct identity-table access for the deletion cutoff | Widens the worker to account data it has no reason to read | Schema `USAGE` plus `EXECUTE identity.account_deletion_state(uuid)` only; direct lifecycle reads proved refused (§5.4.7) |
 | Reverse firewall overclaimed as a grant | A trust-centre or report statement that the database blocks tax→BillShield would be false, and would stop anyone maintaining the code-level control that actually does it | §13.4 states the asymmetry explicitly; the reverse direction is an import/service-layer test and is labelled as one |
 | FORCE RLS credited with confining the worker | A test written on that belief proves nothing about `onyx_billshield` | ENABLE + policy confines ordinary roles; FORCE closes the owner path; no `BYPASSRLS`/superuser asserted separately (§5.4.8) |
+| Claim keyhole owned by the table owner | Under FORCE RLS it claims **zero rows and raises nothing**, so the relay drains nothing while logging success and a single-tenant test passes over it | Dedicated `NOLOGIN` definer-owner role plus one role-targeted policy; owner-owned counterfactual proved to claim zero on the same state (§9.1, §5.4.11 rows 17–18) |
+| NULL-context branch added to the tenant policy | It makes the keyhole work and simultaneously lets any grantee with no `app.user_id` read and forge cross-tenant rows — and the ordinary unit of work leaves that GUC unset for an anonymous request | Forbidden. Recorded as a rejected alternative in §9.1; the API no-GUC read and forged-insert denials are permanent tests (§5.4.11 row 19) |
+| A privileged or owner connection standing in for a successful runtime behaviour | The local harness's owner is a cluster superuser, which bypasses RLS unconditionally, so the test passes whether the design works or not | Every *success* claim is made by the non-superuser principal that will make it in production; a privileged connection may only set up state and read the catalogue (§5.4.8 caller matrix, §16.2) |
+| "Become the worker" applied to every keyhole assertion | It makes the API probes untestable, hides the privacy worker's erasure path behind the wrong principal, and is self-contradictory for a `NOLOGIN` definer-owner role whose whole property is that nothing can become it | A per-claim caller matrix: worker login for claim behaviour and direct-access refusal, API login for the no-tenant-context probes, privacy-worker test login for erasure behaviour, catalogue introspection for ownership, attributes, membership, ACLs, policies and executable sets (§5.4.8) |
+| 3F begun on 3D alone | An approved scanner makes real uploads technically permissible; reaching that state before erasure and account-deletion integration are certified puts the two obligations in the wrong order | 3F requires 3D **and** 3E **and** §9.6 **and** an approved vendor, conjunctively (§17) |
+| Ontario attestation shipped without its privacy obligations | It is new customer data; a table with no classification, retention class, cascade registration or deletion proof is exactly the omission the privacy review triggers exist to catch | 3D's work and acceptance carry the classification, retention class, registry and cascade registration, immutability, tenant RLS, and the fail-first out-of-region and unknown-uppercase-token refusals (§17 Slice 3D, §21.1(18)) |
+| One definer-owner role for both outbox and erasure | A defect in a claim function would inherit physical-erasure authority, and a defect in an erasure function would inherit queue-claim authority | Two separate `NOLOGIN` roles with independently reviewable ACL allowlists (§5.4.6, §7.4) |
+| Privacy worker given direct BillShield table grants | Widens the one role that can destroy data to a schema it can reach through keyholes instead | `EXECUTE` on narrow erasure keyholes only; a direct grant is a stop condition requiring plan review (§7.4) |
+| Homogeneous BillShield pool arithmetic | Valuing the restricted engine at the profile's generic pool size, or multiplying one pool by an engine-object count, misstates the ceiling in both directions | Restricted engine is 4 by the engine factory's own literals; restricted and generic modelled as separate addends at their own capacities (§5.4.10) |
+| Dormant service described as an operating consumer | A `count = 0` declaration in a report, runbook or cost model reads as a draining queue that does not exist | Disabled-and-unreachable permits zero; enabled-or-producer-reachable forbids it; the distinction is asserted, not narrated (§21.1(14)) |
+| BillShield task role given S3 read before a reader exists | Object-data reach for a process containing no code that opens an object | Explicit `Deny s3:*` at declaration; the prefix read arrives with the code that reads bytes (§5.4.10(8)) |
+| Tax-profile province used as BillShield eligibility | It is tax-domain data, user-entered and unverified, mutable with no eligibility history, deleted at account purge, coupled to a tax-engine fallback that treats absence as Ontario, and unreadable by the restricted worker | A BillShield-owned enrolment attestation over a closed one-member launch region, recorded at enrolment with provenance (§21.1(18)) |
 | `worker-billshield` given `db_secret = "api"` | The container's generic engine authenticates as `onyx_app_rw`, so a fully privileged connection sits beside the restricted one and the boundary depends on which import a developer reaches for | `db_secret = "billshield"` required and asserted; the API secret is never injected into that task (§5.4.10) |
 | Worker task uses the API unit of work | It routes around the no-fallback `billshield_database_url` contract, makes the registry non-load-bearing, and can open a second pool. **Not** necessarily an `onyx_app_rw` session — that is a different, placement-level failure | Import-boundary test splitting background processing from request handling (§5.4.4, §5.4.11 row 15) |
 | Silent DSN fallback to `database_url` | The boundary would collapse invisibly on any host where the setting was forgotten | `billshield_database_url` defaults to `None`; absent means refuse to run; production validator |
@@ -1863,7 +2175,7 @@ Recommended defaults are shown first.
 |---|---|---|
 | Platform branding | Keep Onyx Ledger as platform; Tax Assurance and BillShield as services | Public design work |
 | First provider | Provider with the deepest valid evaluation coverage | Slice 4 |
-| Source-bill retention | 30 days after confirmation; structured observations retained | Slice 3 production activation |
+| Source-bill retention | 30 days after confirmation; structured observations retained | BillShield activation, not any Slice 3 sub-slice |
 | Extraction provider | Provider-neutral port; select only after DPA/region/cost evaluation | Real-user beta |
 | Free quota | Three confirmed bills | Entitlement slice |
 | Plus pricing | CAD $12.99/month as plan data | Paid beta |
@@ -1871,7 +2183,8 @@ Recommended defaults are shown first.
 | Catalogue approval | Curator + second admin review | Slice 6 publish flow |
 | Verified savings | Post-action bill or equally strong evidence only | Slice 7 |
 | Tax/BillShield data sharing | None in MVP | Any cross-service feature |
-| Capacity profile for BillShield | Measure first; move to `high_availability` only if the lean ceiling cannot hold the worker. If neither is approved, decision 21.1(2) applies: `count = 0`, BillShield disabled — **never** folded into `worker-app` | Slice 3 `terraform plan` |
+| Capacity profile for BillShield | **No HA purchase is approved now**, and none is being asked for: BillShield ships disabled at `count = 0`, which contributes zero to the ceiling. What needs approval is the *envelope for the day it is enabled* — within the configurations §5.4.10 actually evaluated, lean holds the worker at `count = 1` and `concurrency` 1–2 with only the restricted pool reachable. A wider sizing, or a move to `high_availability`, is its own measured and reviewed change | BillShield **enablement**, not 3B |
+| Launch region | **Decided, not open: `CA-ON` — Ontario only.** Recorded here so it is not re-litigated; the mechanism is decision 21.1(18) | — |
 
 ### 21.1 Architecture decisions already made
 
@@ -1886,18 +2199,27 @@ These were carried as open questions in an earlier draft. They are **decided** �
 | 5 | **The existing `DOCUMENTS` privacy phase is extended**, not replaced by a BillShield-specific phase — with **independent remaining-count evidence for Tax and for BillShield**, so each domain's convergence is provable on its own | Either duplicated ordering logic, or a single count that cannot say which domain is incomplete |
 | 6 | **Slice 0B is its own platform-hardening entry, immediately after Slice 0A and before Slice 1** (§17) | A live defect in shipped tax functionality stays open for the length of the BillShield integration |
 | 7 | **The database foundation is seven tables** (§7.2): `provider` and `provider_category` global; `bill`, `extraction_run`, `charge_candidate`, `promotion_candidate`, `job_outbox` tenant-derived. A provider's service categories are rows in `provider_category`, never a single column — Canadian providers span categories | Either a lossy single-category provider record, or promotion candidates with no relational home and an unrecomputable response hash |
-| 8 | **Slice 2 creates `onyx_billshield_worker` empty (`NOLOGIN`, zero privileges); Slice 3 creates the `onyx_billshield` login and every worker grant** | Grants targeting a role that does not exist, or worker behavioral tests scheduled before their principal can log in |
+| 8 | **Slice 2 creates `onyx_billshield_worker` empty (`NOLOGIN`, zero privileges); Slice 3A creates the `onyx_billshield` login and every worker grant** | Grants targeting a role that does not exist, or worker behavioral tests scheduled before their principal can log in |
 | 9 | **The API's outbox authority is column-scoped enqueue only** — server defaults own operational state; the keyholes remain the only claim/complete/fail interface (§9.1) | The request path can mint claimed or terminal work: PD-16's shape reached through the data instead of the role |
 | 10 | **`deleted_at` is logical deletion; `erased_at` is proven physical erasure** (§7.3), and `rejected`/`failed` bills also reach `deletion_pending` so §7.5's erasure recommendations are executable | A "deleted" bill whose bytes still exist, or terminal states retention policy cannot erase |
 | 11 | **Extraction candidates are immutable extracted facts**; user corrections become structurally distinct confirmed-observation records in a later slice | Corrections overwrite evidence-backed extractions and the response hash stops recomputing |
+| 12 | **Slice 3 is six separately governed sub-slices** — 3A identity · 3B dormant deployment and capacity · 3C outbox keyhole boundary and relay · 3D upload, validation, Ontario enrolment and scanner port · 3E erasure · 3F approved scanner — in that order, each certifying on its own exact tree and stopping for review (§17) | One certification boundary spanning a tenant boundary, a certified deletion path, a shared storage port and a vendor-blocked scanner, where a revert of any part takes the rest |
+| 13 | **The runtime-unavailable metadata is a BillShield subtype**, leaving the privacy problem type and title untouched (§5.4.3) | A shared-platform error-taxonomy change smuggled into a BillShield slice |
+| 14 | **`billshield_enabled` defaults to `false` and `worker_billshield_count` to `0` in both profiles.** While disabled, no customer bill-creation path and no enqueue producer is reachable, and the dormant task definition is not an operating consumer. **Disabled and producer-unreachable permits count zero; enabled or producer-reachable requires count ≥ 1.** Before enablement: production DSN, scanner, erasure, retention, Ontario eligibility, infrastructure and capacity gates must all pass. The implementation preserves deterministic API and OpenAPI behaviour and refuses **before any database write, object operation or enqueue** — conditional route registration is not mandated. A later pool or profile increase is its own measured and reviewed change | A privileged queue with no consumer, or a feature silently reachable before its gates pass |
+| 15 | **The BillShield worker's schema `USAGE` is granted in its own statements** naming exactly `billshield`, `ref` and `identity`; the shared multi-schema grant in the roles file is never edited (§5.4.6) | One edited line hands the extraction worker name resolution across every tax schema |
+| 16 | **Cross-tenant claiming uses a dedicated `NOLOGIN`, zero-member definer-owner role and one additional role-targeted permissive policy**; the committed tenant policy is not modified. A keyhole owned by the table owner is filtered by FORCE RLS and fails silently; a `NULL`-context policy branch is forbidden (§9.1, §5.4.8) | A relay that drains nothing while logging success, or a policy branch that lets any grantee read and forge cross-tenant rows whenever the tenant GUC is unset |
+| 17 | **There are two definer-owner roles, not one** — `onyx_billshield_outbox_keyhole` (3C) and `onyx_billshield_erasure_keyhole` (3E) — and `onyx_privacy_worker` reaches BillShield erasure through `EXECUTE` on the second, holding **no direct BillShield table privilege** (§5.4.6, §7.4) | A defect in a claim function inherits physical-erasure authority, or a defect in an erasure function inherits queue-claim authority |
+| 18 | **The launch region is `CA-ON` — Ontario only — and the authority is a BillShield-owned service-enrolment attestation introduced in 3D**, carrying a closed one-member launch-region vocabulary with an equal SQL constraint, user identity, attestation provenance, accepted legal-copy version, acceptance timestamp, immutable historical-fact semantics, RLS, privacy classification, retention class and account-deletion behaviour. `profile.tax_profile.province_code` is **not** the authority: it is tax-domain data, user-entered and unverified, mutable with no eligibility history, deleted at account purge, coupled to a tax-engine fallback that treats absence as Ontario, and unreadable by the restricted worker. The attestation never infers province from bill contents, never implies support elsewhere in Canada, and does not create a Canada-wide region catalogue. It is **new customer data collection** and carries the full privacy-registry consequences — classification, retention class, account-delete registry and cascade-universe registration, lifecycle-inventory coverage, tenant RLS, and fail-first proof that an out-of-region value **and** an unknown uppercase region token are both refused. §17 Slice 3D carries the executable list | Eligibility that cannot be proved after a profile edit or an account change, or a schema that claims nationwide coverage the product does not have |
+| 19 | **Every proprietary BillShield capability is deferred to its own approved slice** — price-creep intelligence, recurring-charge intelligence, forgotten-subscription detection, plan-alternative matching, negotiation guidance, personalized savings recommendations, provider pricing-history intelligence. **No 3A–3F sub-slice creates their tables, services, dependencies, queues, storage or infrastructure.** They follow once secure ingestion, extraction, erasure and Ontario eligibility are certified | Speculative schema and infrastructure shipped inside a security foundation, and certified as if it were one |
 
 ### 21.2 Deferred — evidence and sign-off still owed
 
-Only three things remain genuinely undetermined, and none is an architecture question. Each is waiting on a measurement or on an authority outside this repository.
+Each of these waits on a measurement or on an authority outside this repository. None is an architecture question.
 
-1. **Capacity and profile outcome.** The ceiling arithmetic is specified (§5.4.10) and the accounting rule is decided — count the reachable paths, take the larger of measured and arithmetic. What is not known is the **number**: it depends on the chosen concurrency and count, on whether the container's generic `app.database.session` pool — which under `db_secret = "billshield"` authenticates as `onyx_billshield`, not `onyx_app_rw`, but is still a second pool — is actually reached in that process, and on measured engine use. **Resolve in Slice 3 by running `terraform plan` and reading `pg_stat_activity`, never by estimating.** If the lean profile cannot hold it, decision 21.1(2) applies.
+1. **Capacity measurement, and the enablement envelope.** The accounting rule is decided (§5.4.10): separate addends at each pool's own capacity, the conservative process multiplier until measured, and the larger defensible number where arithmetic and measurement disagree. The configurations §5.4.10 lists were evaluated; **nothing wider was**. What remains open is measurement, not method: whether the restricted pool needs the parent-inclusive multiplier, whether the generic pool is ever checked out in that container, and the outcome of 3B's reachable-pool audit across all four worker services. **Resolve by running `terraform plan` and reading `pg_stat_activity`, never by estimating.** Approval is needed for the *enablement* envelope, not for 3B, which ships at `count = 0`.
 2. **Legally approved retention periods.** Every value in §7.5 is a recommendation. `RetentionClass` deliberately names policies rather than durations for exactly this reason, so the engineering can be built now and the numbers set once.
-3. **The product and founder choices already listed in §21** — first provider, free quota, pricing, catalogue approval, verified-savings evidence standard, cross-service sharing. Those are commercial decisions and are not re-listed here.
+3. **An approved malware scanner** and the §9.6 approval items behind it. 3F is blocked on this, and 3F is what unblocks real uploads.
+4. **The product and founder choices already listed in §21** — first provider, free quota, pricing, catalogue approval, verified-savings evidence standard, cross-service sharing. Those are commercial decisions and are not re-listed here. **The launch region is not among them: it is decided (§21.1(18)).**
 
 ---
 
@@ -2070,14 +2392,16 @@ BillShield is integrated—not merely demoed—when:
 - one account and legal gate serve both services;
 - current Tax Assurance behavior and certified outputs remain unchanged;
 - BillShield owns its schema, routes, services, task namespace, queue, **background-processing PostgreSQL login, and engine-registry entry** — while sharing the API principal `onyx_app_rw` with Tax Assurance, deliberately and on the record;
-- the BillShield **worker** cannot reach Tax Assurance tables, proved by becoming the role; and tax engine, IOE, finance, reco and tax-document code cannot reach BillShield, proved by import and service-layer tests — **the two directions carry different mechanisms and the difference is stated wherever the boundary is claimed** (§13.4);
-- the worker holds enumerated verbs on enumerated tables matching the §5.4.6 allowlist exactly, with no blanket CRUD, no unproved `DELETE`, no outbox-table privilege, and no identity-table privilege — and the API's outbox authority is column-scoped enqueue only, proved unable to claim, complete, or fail work (§9.1);
+- the BillShield **worker** cannot reach Tax Assurance tables, proved by connecting as `onyx_billshield` and being refused; and tax engine, IOE, finance, reco and tax-document code cannot reach BillShield, proved by import and service-layer tests — **the two directions carry different mechanisms and the difference is stated wherever the boundary is claimed** (§13.4);
+- the worker holds enumerated verbs on enumerated tables matching the §5.4.6 allowlist exactly, with no blanket CRUD, no unproved `DELETE`, no outbox-table privilege, and no identity-table privilege — stated as the three precise claims of §5.4.6, not as "zero privileges outside `billshield`" — and the API's outbox authority is column-scoped enqueue only, proved unable to claim, complete, or fail work (§9.1);
+- claim and erasure keyholes are owned by **two separate `NOLOGIN`, zero-member roles** admitted by role-targeted policies, the committed tenant policies are unmodified, and each keyhole claim was proved by the principal the caller matrix names — worker login for claim behaviour, API login for the no-tenant-context probes, privacy-worker login for erasure behaviour, catalogue introspection for ownership, membership, ACLs, policies and per-principal executable sets — with no privileged or owner connection standing in for a successful runtime behaviour (§9.1, §7.4, §5.4.8);
 - queued BillShield work rechecks the deletion cutoff through `identity.account_deletion_state(uuid)` and produces nothing for a deleting account;
 - absent BillShield database configuration refuses to run rather than falling back to the application identity, and says so without naming a host, database, role, or provider;
 - `worker-billshield` is declared with `db_secret = "billshield"`, so no API database credential reaches that container, and BillShield worker code cannot reach the shared API unit of work — the contract it would bypass being the named, no-fallback registry, not merely a different principal;
 - every engine the process opens is disposed through the shared registry;
-- the database connection ceiling accounts for every reachable BillShield connection path and `terraform plan` succeeds with it counted;
-- real bills are bounded, scanned, privately processed, reviewable, and truthfully erasable;
+- the database connection ceiling accounts for every reachable BillShield connection path **as a separate addend at that pool's own capacity** and `terraform plan` succeeds with it counted;
+- real bills are bounded, scanned, privately processed, reviewable, and truthfully erasable — "scanned" is satisfied only once the approved scanner adapter has landed, and no earlier sub-slice may be described as delivering it;
+- BillShield service eligibility is established by its own enrolment attestation over the closed `CA-ON` launch region, never inferred from a tax profile or from bill contents (§21.1(18));
 - extraction quality is measured against the private Canadian bill corpus;
 - every material value is user-confirmed or catalogue-backed before analysis;
 - price-change and alternative claims carry reproducible evidence and versioning;
