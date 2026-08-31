@@ -54,7 +54,7 @@ resource "aws_iam_role_policy" "execution_secrets" {
 
 # ------------------------------------------------------------- task roles ----
 locals {
-  task_roles = ["api", "worker-app", "worker-freshness", "worker-privacy", "beat", "migration"]
+  task_roles = ["api", "worker-app", "worker-freshness", "worker-privacy", "worker-billshield", "beat", "migration"]
 }
 
 resource "aws_iam_role" "task" {
@@ -200,6 +200,32 @@ resource "aws_iam_role_policy" "worker_privacy" {
         Resource = [var.s3_kms_key_arn]
       },
     ]
+  })
+}
+
+# --- billshield (DORMANT, Slice 3B) ----------------------------------------
+# The restricted BillShield worker. It holds NO object-data authority on
+# purpose: this sub-slice ships no code that reads an object, and a role whose
+# process contains no such code has no such permission — the freshness, beat
+# and migration precedent. The narrowly scoped object read that the approved
+# scanner/extraction slice will need must REPLACE this deny in its own
+# reviewed diff, never join it; version listing and version deletion are never
+# granted to it at all (plan §7.4).
+#
+# No KMS statement either, and the absence is deliberate on both sides: the S3
+# data key is not this role's to use, and its database credential is decrypted
+# by the EXECUTION role's existing Secrets Manager path at injection time — a
+# task role plays no part in that.
+resource "aws_iam_role_policy" "worker_billshield" {
+  name = "worker-billshield"
+  role = aws_iam_role.task["worker-billshield"].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Deny"
+      Action   = ["s3:*", "ses:*"]
+      Resource = ["*"]
+    }]
   })
 }
 

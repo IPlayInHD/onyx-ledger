@@ -1,5 +1,5 @@
 # =============================================================================
-# SERVICES — one image, five commands
+# SERVICES — one image, six commands (one of them dormant)
 # =============================================================================
 
 locals {
@@ -31,6 +31,25 @@ locals {
       memory      = var.worker_privacy_memory
       count       = var.worker_privacy_count
       concurrency = var.worker_privacy_concurrency # deletion is serialised on purpose
+    }
+    # DORMANT (Slice 3B). Declared so the deployment, its secret path and its
+    # capacity accounting exist and are reviewable BEFORE any code can run —
+    # and dormant because none can: no Celery route names this queue, no
+    # producer enqueues to it, and both capacity profiles pin the count at 0.
+    # The queue name follows the existing one-lowercase-name-per-family
+    # convention; the route that will drain it belongs to a later slice.
+    #
+    # `db_secret` is "billshield", NEVER "api". This one field decides what the
+    # container's generic engine authenticates as (integration plan §5.4.10):
+    # with "billshield", every DSN in this task resolves to the restricted
+    # credential and the API database secret is never injected here at all.
+    "worker-billshield" = {
+      queues      = "billshield"
+      db_secret   = "billshield"
+      cpu         = var.worker_billshield_cpu
+      memory      = var.worker_billshield_memory
+      count       = var.worker_billshield_count
+      concurrency = var.worker_billshield_concurrency
     }
   }
 
@@ -250,6 +269,8 @@ resource "aws_ecs_task_definition" "worker" {
       { name = "ONYX_PRIVACY_DATABASE_URL", valueFrom = var.db_secret_arns["privacy"] },
       ] : [], each.key == "worker-freshness" ? [
       { name = "ONYX_FRESHNESS_DATABASE_URL", valueFrom = var.db_secret_arns["freshness"] },
+      ] : [], each.key == "worker-billshield" ? [
+      { name = "ONYX_BILLSHIELD_DATABASE_URL", valueFrom = var.db_secret_arns["billshield"] },
     ] : [])
 
     logConfiguration = {

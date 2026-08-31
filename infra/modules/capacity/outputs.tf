@@ -34,6 +34,11 @@ output "worker_privacy_memory" { value = local.p.worker_privacy_memory }
 output "worker_privacy_count" { value = local.p.worker_privacy_count }
 output "worker_privacy_concurrency" { value = local.p.worker_privacy_concurrency }
 
+output "worker_billshield_cpu" { value = local.p.worker_billshield_cpu }
+output "worker_billshield_memory" { value = local.p.worker_billshield_memory }
+output "worker_billshield_count" { value = local.p.worker_billshield_count }
+output "worker_billshield_concurrency" { value = local.p.worker_billshield_concurrency }
+
 output "worker_pool_size" { value = local.p.worker_pool_size }
 output "worker_pool_overflow" { value = local.p.worker_pool_overflow }
 

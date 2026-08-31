@@ -90,6 +90,20 @@ locals {
       worker_privacy_count       = 1
       worker_privacy_concurrency = 1
 
+      # worker-billshield is DECLARED DORMANT (Slice 3B): count 0 in every
+      # profile, no Celery route, no producer. The sizes are the
+      # background-worker precedent above — 0.25 vCPU because nothing waits on
+      # a dormant queue, 1 GiB because the 0.5 GB hypothesis is refuted for
+      # every worker — and concurrency 1 is worker-privacy's serialised
+      # precedent and the smallest value the activation envelope evaluated.
+      # Raising the count is an ACTIVATION, not a tune: it needs its own
+      # reviewed entry, and the ceiling below prices it at the restricted
+      # pool's own fixed capacity.
+      worker_billshield_cpu         = 256
+      worker_billshield_memory      = 1024
+      worker_billshield_count       = 0
+      worker_billshield_concurrency = 1
+
       worker_pool_size     = 5
       worker_pool_overflow = 5
 
@@ -149,6 +163,14 @@ locals {
       worker_privacy_count       = 2
       worker_privacy_concurrency = 1
 
+      # Dormant here too, at this profile's own background-worker sizing. The
+      # values are what the worker WOULD run at if activated under HA — they
+      # buy nothing at count 0, and count 0 is the point.
+      worker_billshield_cpu         = 1024
+      worker_billshield_memory      = 2048
+      worker_billshield_count       = 0
+      worker_billshield_concurrency = 1
+
       worker_pool_size     = 8
       worker_pool_overflow = 8
 
@@ -179,18 +201,59 @@ locals {
   # in Terraform or in the application would have said so; the database would
   # simply have started refusing connections under load, which reads as an
   # application outage rather than as a sizing mistake.
-  api_conn      = (local.p.api_pool_size + local.p.api_pool_overflow) * local.p.api_uvicorn_workers * local.p.api_max_count
-  worker_conn   = (local.p.worker_pool_size + local.p.worker_pool_overflow)
-  app_conn      = local.worker_conn * (local.p.worker_app_concurrency + 1) * local.p.worker_app_count
-  fresh_conn    = local.worker_conn * (local.p.worker_freshness_concurrency + 1) * local.p.worker_freshness_count
-  privacy_conn  = local.worker_conn * (local.p.worker_privacy_concurrency + 1) * local.p.worker_privacy_count
+  #
+  # TWO KINDS OF POOL, COUNTED SEPARATELY AT THEIR OWN CAPACITIES (the Slice 3B
+  # reachable-pool audit; docs/operations/cost-model.md §12). The GENERIC
+  # engine (app.database.session) is profile-sized: worker_pool_size +
+  # worker_pool_overflow. The RESTRICTED worker engines are built by
+  # app/database/privacy_session.py::get_worker_engine with pool_size = 2 and
+  # max_overflow = 2 as LITERALS in the factory, so their capacity is 4 in
+  # every profile and is reachable from no knob in this module, no environment
+  # variable, and no Terraform value. A ceiling that valued a restricted
+  # engine at the generic pool size — the shape this block had before the
+  # audit — misstates it in both directions at once.
+  #
+  # WHICH SERVICE REACHES WHICH POOL — traced by import, not by env var:
+  #   api                generic only (nothing under app/api imports privacy_session)
+  #   worker-app         generic only (none of its task modules reaches a
+  #                      restricted unit of work)
+  #   worker-freshness   BOTH (freshness_relay.py holds unit_of_work AND
+  #                      freshness_unit_of_work; replay/scheduler.py the latter)
+  #   worker-privacy     restricted only (workers/tasks/privacy.py imports only
+  #                      privacy_unit_of_work, and app/services/privacy contains
+  #                      no app.database.session import). The generic term this
+  #                      block used to carry for it priced an unreachable pool;
+  #                      the 15% connection headroom is the reserve, not that term.
+  #   worker-billshield  restricted only, STRUCTURALLY: the committed
+  #                      import-boundary guard (test_billshield_import_boundary)
+  #                      forbids its background code the generic session, which
+  #                      is what licenses the zero generic term (plan §5.4.10).
+  restricted_pool_capacity = 4
+
+  api_conn    = (local.p.api_pool_size + local.p.api_pool_overflow) * local.p.api_uvicorn_workers * local.p.api_max_count
+  worker_conn = (local.p.worker_pool_size + local.p.worker_pool_overflow)
+  app_conn    = local.worker_conn * (local.p.worker_app_concurrency + 1) * local.p.worker_app_count
+
+  # worker-freshness opens both pools, so its term is two addends — never one
+  # product of a pool size and a count of heterogeneous engine objects.
+  fresh_generic_conn    = local.worker_conn * (local.p.worker_freshness_concurrency + 1) * local.p.worker_freshness_count
+  fresh_restricted_conn = local.restricted_pool_capacity * (local.p.worker_freshness_concurrency + 1) * local.p.worker_freshness_count
+  fresh_conn            = local.fresh_generic_conn + local.fresh_restricted_conn
+
+  privacy_conn = local.restricted_pool_capacity * (local.p.worker_privacy_concurrency + 1) * local.p.worker_privacy_count
+
+  # Zero while dormant (count 0), and priced at the factory's own capacity the
+  # moment an activation entry raises the count.
+  billshield_conn = local.restricted_pool_capacity * (local.p.worker_billshield_concurrency + 1) * local.p.worker_billshield_count
+
   beat_conn     = 4
   migrate_conn  = local.worker_conn
   reserved_conn = 3 # rds_superuser reserved connections
 
   connection_ceiling = (
     local.api_conn + local.app_conn + local.fresh_conn +
-    local.privacy_conn + local.beat_conn + local.migrate_conn + local.reserved_conn
+    local.privacy_conn + local.billshield_conn +
+    local.beat_conn + local.migrate_conn + local.reserved_conn
   )
 
   db_max_conn     = local.db_max_connections[local.p.db_instance_class]

@@ -67,6 +67,11 @@ variable "worker_privacy_memory" { type = number }
 variable "worker_privacy_count" { type = number }
 variable "worker_privacy_concurrency" { type = number }
 
+variable "worker_billshield_cpu" { type = number }
+variable "worker_billshield_memory" { type = number }
+variable "worker_billshield_count" { type = number }
+variable "worker_billshield_concurrency" { type = number }
+
 variable "worker_pool_size" { type = number }
 variable "worker_pool_overflow" { type = number }
 

@@ -75,7 +75,7 @@ resource "aws_secretsmanager_secret_version" "admission" {
 # than one document so that a task role can be granted the one it needs: the API
 # has no business being able to read the privacy worker's credentials.
 resource "random_password" "db" {
-  for_each = toset(["migrator", "api", "privacy", "freshness", "reporting"])
+  for_each = toset(["migrator", "api", "privacy", "freshness", "reporting", "billshield"])
   length   = 48
   special  = false
 }
@@ -99,6 +99,13 @@ locals {
     privacy   = { user = "onyx_privacy", driver = "postgresql+asyncpg" }
     freshness = { user = "onyx_freshness", driver = "postgresql+asyncpg" }
     reporting = { user = "onyx_reporting", driver = "postgresql+asyncpg" }
+    # The RESTRICTED BillShield runtime (Slice 3B). Generated here, consumed in
+    # exactly two places: the connection-string secret is injected into
+    # worker-billshield and no other task, and the raw-password twin below is
+    # what an operator passes to bootstrap_runtime_logins.sql as
+    # `-v billshield_password=...` to create the login whose guarded
+    # declaration Slice 3A shipped. No other identity's credential is reused.
+    billshield = { user = "onyx_billshield", driver = "postgresql+asyncpg" }
   }
 }
 

@@ -227,6 +227,11 @@ module "compute" {
   worker_privacy_count       = module.capacity.worker_privacy_count
   worker_privacy_concurrency = module.capacity.worker_privacy_concurrency
 
+  worker_billshield_cpu         = module.capacity.worker_billshield_cpu
+  worker_billshield_memory      = module.capacity.worker_billshield_memory
+  worker_billshield_count       = module.capacity.worker_billshield_count
+  worker_billshield_concurrency = module.capacity.worker_billshield_concurrency
+
   worker_pool_size     = module.capacity.worker_pool_size
   worker_pool_overflow = module.capacity.worker_pool_overflow
 

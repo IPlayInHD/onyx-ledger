@@ -51,7 +51,13 @@ it and refuses to plan when it exceeds the class limit.
 | Profile | Ceiling | Class allows (85% of max) |
 |---|---:|---:|
 | `lean_launch` | 177 | 191 (`db.t4g.small`, 225 max) |
-| `high_availability` | 703 | 765 (`db.m7g.large`, 901 max) |
+| `high_availability` | 679 | 765 (`db.m7g.large`, 901 max) |
+
+These are the CORRECTED heterogeneous figures (Slice 3B reachable-pool audit,
+§12): worker-freshness's previously uncounted restricted engine adds +12 lean /
++24 HA, and worker-privacy's term moves from the generic pool it cannot reach
+to the restricted pool it actually opens (−12 lean / −48 HA, at two privacy
+tasks in HA). Lean nets to exactly the old figure; HA drops from 703 to 679.
 
 **A defect observed while measuring. FIXED SEPARATELY — see below.** Firing
 three `purge_admission_history` tasks back to back, the first succeeded and the
@@ -125,9 +131,9 @@ compute line and was already taken.
 | ElastiCache Valkey `cache.t4g.micro` ×1 | 10.51 |
 | WAF — one CloudFront ACL and four rules | 9.00 |
 | KMS customer-managed keys ×5 | 5.00 |
-| Secrets Manager ×13 | 5.20 |
+| Secrets Manager ×15 | 6.00 |
 | CloudWatch alarms ×9 | 0.90 |
-| **Standing total** | **178.89** |
+| **Standing total** | **179.69** |
 
 Plus usage. The per-user assumptions are stated so they can be argued with:
 **500 API requests, 40 MB of documents added, 300 MB of CloudFront egress and
@@ -136,12 +142,12 @@ Plus usage. The per-user assumptions are stated so they can be argued with:
 
 | Users | Variable | **Total** |
 |---:|---:|---:|
-| 0 | 2.46 | **181.35** |
-| 10 | 3.03 | **181.92** |
-| 100 | 8.17 | **187.06** |
-| 1 000 | 61.55 | **240.44** |
+| 0 | 2.46 | **182.15** |
+| 10 | 3.03 | **182.72** |
+| 100 | 8.17 | **187.86** |
+| 1 000 | 61.55 | **241.24** |
 
-**Against the $180/month target this is 0.7% over at zero users and 4% over at
+**Against the $180/month target this is 1.2% over at zero users and 4% over at
 one hundred.** The gap is structural rather than a tuning miss: NAT ($36.50),
 the load balancer ($18.07), the database ($25.55) and the cache ($10.51) come to
 $90.63 of managed-service floor before a single container runs, and none of the
@@ -158,7 +164,7 @@ precision.
 
 ### Top five cost drivers, lean, at launch volume
 
-1. **Fargate, all five tasks — $58.32 (32%).** Already ARM, already at the
+1. **Fargate, all five running tasks — $58.32 (32%).** The sixth declared task, `worker-billshield`, is dormant at count 0 and runs nothing. Already ARM, already at the
    measured minimum that does not risk an OOM kill.
 2. **NAT gateway — $36.50 (20%).** See §6: replacing it with interface
    endpoints costs more.
@@ -202,15 +208,15 @@ the guard to notice.
 
 | Staging lifetime | $/run |
 |---|---:|
-| 2 days | 11.76 |
-| 5 days | 29.41 |
-| 10 days | 58.81 |
-| 24/7 for a month | 178.89 |
+| 2 days | 11.82 |
+| 5 days | 29.54 |
+| 10 days | 59.08 |
+| 24/7 for a month | 179.69 |
 
 **The ≤ $100/month target for a 24/7 staging environment is NOT met, and cannot
 be met by this architecture.** A staging environment that is worth having is one
 shaped like production — same worker split, same private subnets, same encrypted
-database, same edge — and that shape has a $179 floor. What meets the target,
+database, same edge — and that shape has a $180 floor. What meets the target,
 comfortably, is not running it 24/7: a proving run of up to ten days a month
 costs **$12–$59**, which is 67–93% below the target and 70–94% below what the
 same estate cost standing idle before this entry.
@@ -225,8 +231,8 @@ each rather than the measured split, and carried a second WAF web ACL.
 
 | | `lean_launch` | `high_availability` |
 |---|---:|---:|
-| Standing total | 178.89 | 725.21 |
-| At 100 users | 187.06 | 733.38 |
+| Standing total | 179.69 | 726.01 |
+| At 100 users | 187.86 | 734.18 |
 | Database | `db.t4g.small`, single-AZ | `db.m7g.large`, Multi-AZ |
 | NAT gateways | 1 | 2 (one per AZ) |
 | Cache | 1 × `cache.t4g.micro` | 2 × `cache.t4g.small` |
@@ -566,3 +572,89 @@ That matters for the staging apply: a real proving run will exercise the
 estate's networking, identity, storage and erasure paths, and will exercise its
 tax behaviour **only to the extent the local regression already did.** Anyone
 reading a green staging run should not conclude more than that.
+
+---
+
+## 12. BillShield — dormant declaration (Slice 3B)
+
+One internal worker of the one OnyxLedger platform, declared and deliberately
+not running. Region: **ca-central-1**, the deployment's existing region — no
+multi-region resource and no replication is added. Rollout assumption:
+**Ontario-only**, per the integration plan; nothing here depends on volume
+because nothing here processes volume.
+
+### What the dormant declaration actually costs
+
+`worker-billshield` is declared with **desired count 0** in both capacity
+profiles, and nothing can scale it: it has no autoscaling target, no scheduled
+action, and activation is a Terraform-refusing change that needs its own
+reviewed entry. The standing cost is therefore **not** the worker — it is the
+persistent resources the declaration creates:
+
+| Item | Quantity | $/month |
+|---|---|---:|
+| Fargate compute at count 0 | 0 running tasks | 0.00 |
+| Secrets Manager — `db/billshield` (connection string) | 1 | 0.40 |
+| Secrets Manager — `db-password/billshield` (bootstrap psql variable) | 1 | 0.40 |
+| KMS — encryption of those secrets | existing customer key | 0.00 additional |
+| ECS task definition, service at 0, IAM role, log-group reach | — | 0.00 |
+| **Dormant total** | | **0.80** |
+
+The dormant declaration does **not** cost exactly zero: the two managed
+secrets are a real $0.80/month, and they are why §3's standing total moved
+from $178.89 to $179.69. Secret-retrieval API calls at count 0 are zero.
+No S3 object-data cost is attributed to this slice — the task role carries an
+explicit `Deny s3:*` and no object-storage KMS grant, so there is no path that
+could incur one.
+
+Unit prices: AWS published pricing for ca-central-1, USD, as recorded in the
+§2 rate card (observation date 2026-08-24); Secrets Manager $0.40/secret-month
+and Fargate ARM $0.03565/vCPU-hr + $0.00389/GB-hr re-checked against the same
+source on 2026-08-30. Update the rate card, not this section's formulas, when
+prices move.
+
+### Projected cost at count 1 — a future scenario, not approved spend
+
+If a later, separately governed activation entry raised the count to 1 at the
+lean profile's sizing (0.25 vCPU / 1 GiB, ARM):
+
+```
+fargate(count) = count × (vCPU × $0.03565 + GiB × $0.00389) × 730 h
+fargate(1)     = 1 × (0.25 × 0.03565 + 1 × 0.00389) × 730  ≈ $9.35/month
+```
+
+Marked plainly: **this is a projection, not approved spend.** No HA purchase
+is approved, no desired count is changed by this entry, and `billshield_enabled`
+remains `false` everywhere.
+
+### Database connections — the two terms, separately
+
+The BillShield worker contributes two connection terms and they are different
+pools at different sizes (the audit in `infra/modules/capacity/main.tf`):
+
+```
+generic_term    = 0
+                  -- structural: the committed import-boundary guard forbids
+                  -- BillShield background code the generic session, so no
+                  -- reachable path can check a generic connection out
+restricted_term = 4 × (worker_billshield_concurrency + 1) × worker_billshield_count
+                  -- 4 = pool_size(2) + max_overflow(2), LITERALS in
+                  -- get_worker_engine; not a profile value
+```
+
+Substituted at the committed profile constants:
+
+| Scenario | Restricted term | Ceiling | Room (85%) | Verdict |
+|---|---:|---:|---:|---|
+| lean, count 0 (this entry) | 0 | 177 | 191 | plans unchanged |
+| HA, count 0 (this entry) | 0 | 679 | 765 | plans unchanged |
+| lean, count 1, concurrency 1 | 8 | 185 | 191 | fits — future entry |
+| lean, count 1, concurrency 2 | 12 | 189 | 191 | fits — future entry |
+| HA, count 1, concurrency 1 | 8 | 687 | 765 | fits — context only, no HA purchase approved |
+| HA, count 1, concurrency 2 | 12 | 691 | 765 | fits — context only, no HA purchase approved |
+
+The same audit corrected two existing terms — worker-freshness now counts both
+the generic pool it opens and the restricted engine it also opens, and
+worker-privacy is counted at the restricted pool it actually reaches instead
+of the generic pool it cannot. The 15% connection headroom is the
+conservatism; a term priced against an unreachable pool is not.
